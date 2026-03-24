@@ -6,7 +6,9 @@ from apps.accounts.models import Role, UserProfile
 
 
 @receiver(post_save, sender=User)
-def create_user_profile(sender, instance, created, **kwargs):
+def create_user_profile(
+    sender: type[User], instance: User, created: bool, **kwargs: object
+) -> None:
     """Auto-create a UserProfile with default role when a new User is created."""
     if created:
         UserProfile.objects.get_or_create(

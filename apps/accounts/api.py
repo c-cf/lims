@@ -3,11 +3,12 @@
 from django.contrib.auth import authenticate
 from django.contrib.auth import login as django_login
 from django.contrib.auth import logout as django_logout
-from django.contrib.auth.models import User
-from ninja import Router, Schema
+from django.http import HttpRequest
+from ninja import Router
 from ninja.security import django_auth
 
 from apps.accounts.models import UserProfile
+from apps.accounts.schemas import ErrorOut, LoginIn, UserOut
 
 router = Router(tags=["Auth"])
 
@@ -16,40 +17,8 @@ router = Router(tags=["Auth"])
 _INVALID_CREDENTIALS = "Invalid credentials"
 
 
-class LoginIn(Schema):
-    """Input schema for the login endpoint."""
-
-    username: str
-    password: str
-
-
-class UserOut(Schema):
-    """Output schema representing an authenticated user with role information."""
-
-    id: int
-    username: str
-    role: str
-    department: str
-
-
-class ErrorOut(Schema):
-    """Output schema for generic detail messages (errors and confirmations)."""
-
-    detail: str
-
-
-def _build_user_out(user: "User", profile: UserProfile) -> dict:
-    """Return a dict matching UserOut fields from a User and its UserProfile."""
-    return {
-        "id": user.pk,
-        "username": user.username,
-        "role": profile.role,
-        "department": profile.department,
-    }
-
-
 @router.post("/login", response={200: UserOut, 401: ErrorOut}, auth=None)
-def login_view(request, payload: LoginIn):
+def login_view(request: HttpRequest, payload: LoginIn):
     """Authenticate a user and create a session.
 
     Returns user information on success, or 401 on invalid credentials.
@@ -64,18 +33,18 @@ def login_view(request, payload: LoginIn):
     except UserProfile.DoesNotExist:
         return 401, {"detail": _INVALID_CREDENTIALS}
     django_login(request, user)
-    return 200, _build_user_out(user, profile)
+    return 200, UserOut.to_dict(user, profile)
 
 
 @router.post("/logout", response={200: ErrorOut, 401: ErrorOut}, auth=django_auth)
-def logout_view(request):
+def logout_view(request: HttpRequest):
     """End the current user session. Requires authentication."""
     django_logout(request)
     return 200, {"detail": "Logged out"}
 
 
 @router.get("/me", response={200: UserOut, 401: ErrorOut}, auth=django_auth)
-def me_view(request):
+def me_view(request: HttpRequest):
     """Return the currently authenticated user's information.
 
     Unauthenticated requests are rejected by django_auth before reaching
@@ -85,4 +54,4 @@ def me_view(request):
         profile = request.user.profile
     except UserProfile.DoesNotExist:
         return 401, {"detail": _INVALID_CREDENTIALS}
-    return 200, _build_user_out(request.user, profile)
+    return 200, UserOut.to_dict(request.user, profile)

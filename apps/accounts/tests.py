@@ -5,14 +5,13 @@ from django.contrib.auth.models import User
 from django.db import IntegrityError
 
 from apps.accounts.factories import FabUserFactory, LabStaffFactory, UserProfileFactory
+from apps.accounts.models import Role, UserProfile
 
 
 @pytest.mark.django_db
 class TestUserProfile:
     def test_create_user_profile(self):
         """UserProfile is auto-created by signal; fields can be updated."""
-        from apps.accounts.models import Role, UserProfile
-
         user = User.objects.create_user(username="fab01", password="pass")
         profile, _ = UserProfile.objects.update_or_create(
             user=user,
@@ -27,8 +26,6 @@ class TestUserProfile:
 
     def test_one_to_one_relationship(self):
         """UserProfile has a OneToOne relation with User; duplicates are rejected."""
-        from apps.accounts.models import Role, UserProfile
-
         user = User.objects.create_user(username="lab01", password="pass")
         # Signal already creates a profile; a second explicit create must fail.
         with pytest.raises(IntegrityError):
@@ -36,8 +33,6 @@ class TestUserProfile:
 
     def test_access_profile_from_user(self):
         """UserProfile is accessible via the reverse relation user.profile."""
-        from apps.accounts.models import Role
-
         user = User.objects.create_user(username="mgr01", password="pass")
         user.profile.role = Role.LAB_MANAGER
         user.profile.save()
@@ -52,9 +47,13 @@ class TestUserProfile:
 
     def test_db_table_name(self):
         """Database table name is user_profile."""
-        from apps.accounts.models import UserProfile
-
         assert UserProfile._meta.db_table == "user_profile"
+
+    def test_role_default_value(self):
+        """role field defaults to FAB_USER at the model level."""
+        user = User.objects.create_user(username="default_role", password="pass")
+
+        assert user.profile.role == Role.FAB_USER
 
 
 @pytest.mark.django_db
@@ -63,8 +62,6 @@ class TestUserProfileSignal:
 
     def test_profile_auto_created_on_user_creation(self):
         """UserProfile is automatically created when a User is created."""
-        from apps.accounts.models import Role
-
         user = User.objects.create_user(username="signaluser", password="pass")
 
         assert hasattr(user, "profile")
@@ -74,14 +71,10 @@ class TestUserProfileSignal:
         """Signal uses get_or_create; no duplicate profile is created."""
         user = User.objects.create_user(username="signaldup", password="pass")
 
-        from apps.accounts.models import UserProfile
-
         assert UserProfile.objects.filter(user=user).count() == 1
 
     def test_signal_not_fired_on_user_update(self):
         """Saving an existing User does not create or overwrite the profile."""
-        from apps.accounts.models import Role
-
         user = User.objects.create_user(username="signalupdate", password="pass")
         user.profile.role = Role.LAB_MANAGER
         user.profile.save()
@@ -97,16 +90,12 @@ class TestUserProfileSignal:
 class TestRoleChoices:
     def test_role_values(self):
         """Role contains the three expected values."""
-        from apps.accounts.models import Role
-
         assert Role.FAB_USER == "fab_user"
         assert Role.LAB_STAFF == "lab_staff"
         assert Role.LAB_MANAGER == "lab_manager"
 
     def test_all_roles_are_valid_choices(self):
         """All Role values are valid choices on the UserProfile model."""
-        from apps.accounts.models import UserProfile
-
         valid_values = {choice[0] for choice in UserProfile.role.field.choices}
         assert "fab_user" in valid_values
         assert "lab_staff" in valid_values

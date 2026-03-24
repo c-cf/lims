@@ -21,5 +21,5 @@ class ExperimentType(models.Model):
     class Meta:
         db_table = "experiment_type"
 
-    def __str__(self):
+    def __str__(self) -> str:
         return self.name

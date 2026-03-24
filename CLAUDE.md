@@ -77,9 +77,20 @@ WIP 狀態（WIP.status）：
 ### Django Ninja API 約定
 
 新增 API 端點時：
-1. 在對應 app 建立 `api.py`（定義 Schema 和 endpoint 函式）
+1. 在對應 app 建立 `schemas.py`（定義 Schema）和 `api.py`（定義 endpoint 函式）
 2. 在 `api/router.py` 的 `NinjaAPI` 實例上用 `api.add_router()` 掛載
 3. Schema 命名：輸入用 `XxxIn`，輸出用 `XxxOut`，更新用 `XxxUpdate`
+
+**禁止使用 `ninja.responses.Status` 作為回傳值。** `Status()` 會跳過 Django Ninja 的 Schema（Pydantic）驗證，等於繞過了型別安全保障。正確做法是回傳 `(status_code, dict)` tuple，讓 Ninja 自動通過 response schema 驗證資料。
+
+### Commit 前必須執行的檢查（強制）
+
+每次 commit 前 **必須** 依序通過以下檢查，任一失敗不得 commit：
+```bash
+uv run ruff check .          # lint 檢查
+uv run ruff format --check . # 格式檢查
+uv run pytest                # 測試
+```
 
 ### TDD 工作流（強制）
 

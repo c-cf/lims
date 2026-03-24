@@ -62,7 +62,7 @@ class WIP(models.Model):
             models.Index(fields=["dispatched_at"]),
         ]
 
-    def __str__(self):
+    def __str__(self) -> str:
         return f"WIP #{self.pk} ({self.status})"
 
 
@@ -78,7 +78,7 @@ class WIPSample(models.Model):
         db_table = "wip_sample"
         unique_together = ("wip", "sample")
 
-    def __str__(self):
+    def __str__(self) -> str:
         return f"WIP #{self.wip_id} ↔ Sample #{self.sample_id}"
 
 
@@ -115,5 +115,5 @@ class ExperimentResult(models.Model):
     class Meta:
         db_table = "experiment_result"
 
-    def __str__(self):
+    def __str__(self) -> str:
         return f"Result for WIP #{self.wip_id}: {self.verdict}"

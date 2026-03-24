@@ -65,7 +65,7 @@ class Request(models.Model):
             models.Index(fields=["created_at"]),
         ]
 
-    def __str__(self):
+    def __str__(self) -> str:
         return f"{self.title} ({self.status})"
 
 
@@ -110,7 +110,7 @@ class Sample(models.Model):
             models.Index(fields=["status"]),
         ]
 
-    def __str__(self):
+    def __str__(self) -> str:
         return f"{self.wafer_id} ({self.status})"
 
 
@@ -134,5 +134,5 @@ class ApprovalLog(models.Model):
         db_table = "approval_log"
         ordering = ["-created_at", "-pk"]
 
-    def __str__(self):
+    def __str__(self) -> str:
         return f"{self.request} - {self.action} by {self.reviewer}"

@@ -30,7 +30,7 @@ class Equipment(models.Model):
     class Meta:
         db_table = "equipment"
 
-    def __str__(self):
+    def __str__(self) -> str:
         return f"{self.name} ({self.model_name})"
 
 
@@ -46,7 +46,7 @@ class EquipmentCapability(models.Model):
         db_table = "equipment_capability"
         unique_together = ("equipment", "experiment_type")
 
-    def __str__(self):
+    def __str__(self) -> str:
         return f"{self.equipment.name} → {self.experiment_type.name}"
 
 
@@ -71,5 +71,5 @@ class Recipe(models.Model):
     class Meta:
         db_table = "recipe"
 
-    def __str__(self):
+    def __str__(self) -> str:
         return self.name

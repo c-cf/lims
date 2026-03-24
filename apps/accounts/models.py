@@ -12,7 +12,7 @@ class UserProfile(models.Model):
     """Extends Django User with role and department fields."""
 
     user = models.OneToOneField(User, on_delete=models.CASCADE, related_name="profile")
-    role = models.CharField(max_length=20, choices=Role.choices)
+    role = models.CharField(max_length=20, choices=Role.choices, default=Role.FAB_USER)
     department = models.CharField(max_length=100, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -20,5 +20,5 @@ class UserProfile(models.Model):
     class Meta:
         db_table = "user_profile"
 
-    def __str__(self):
+    def __str__(self) -> str:
         return f"{self.user.username} ({self.role})"
