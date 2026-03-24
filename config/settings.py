@@ -45,6 +45,15 @@ INSTALLED_APPS = [
     "django.contrib.sessions",
     "django.contrib.messages",
     "django.contrib.staticfiles",
+    # Third-party
+    "ninja",
+    # Local apps
+    "apps.accounts",
+    "apps.experiments",
+    "apps.equipment",
+    "apps.commissions",
+    "apps.wip",
+    "apps.reports",
 ]
 
 MIDDLEWARE = [
