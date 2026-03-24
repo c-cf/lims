@@ -37,6 +37,20 @@ ALLOWED_HOSTS = (
     else []
 )
 
+RAILWAY_PUBLIC_DOMAIN = os.environ.get("RAILWAY_PUBLIC_DOMAIN")
+RAILWAY_STATIC_URL = os.environ.get("RAILWAY_STATIC_URL")
+
+CSRF_TRUSTED_ORIGINS = [
+    "http://localhost:8000",
+    "http://127.0.0.1:8000",
+]
+
+if RAILWAY_PUBLIC_DOMAIN:
+    CSRF_TRUSTED_ORIGINS.append(f"https://{RAILWAY_PUBLIC_DOMAIN}")
+
+if RAILWAY_STATIC_URL:
+    CSRF_TRUSTED_ORIGINS.append(f"https://{RAILWAY_STATIC_URL}")
+
 
 # Application definition
 
