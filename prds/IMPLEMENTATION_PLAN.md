@@ -1,0 +1,395 @@
+# 實作計畫 (Implementation Plan)
+
+> 基於 DESIGN.md，按 TDD 流程與依賴順序規劃。
+> 每個任務狀態：`[ ]` 待開始 / `[~]` 進行中 / `[x]` 已完成 / `[-]` 跳過
+
+---
+
+## Phase 0：專案基礎建設
+
+### 0.1 測試環境設定
+- [ ] 安裝 pytest、pytest-django、factory-boy
+- [ ] 建立 `pytest.ini` / `conftest.py`
+- [ ] 確認 `uv run pytest` 可正常執行
+
+### 0.2 Django Apps 建立
+- [ ] 建立 `apps/accounts`
+- [ ] 建立 `apps/experiments`
+- [ ] 建立 `apps/equipment`
+- [ ] 建立 `apps/commissions`
+- [ ] 建立 `apps/wip`
+- [ ] 建立 `apps/reports`
+- [ ] 在 `settings.py` 註冊所有 apps
+- [ ] 確認 `uv run python manage.py check` 通過
+
+### 0.3 API Router 骨架
+- [ ] 重構 `api/router.py`，預註冊所有 sub-routers
+- [ ] 各 app 建立空的 `api.py` + `router`
+- [ ] 確認 `/api/docs` 可正常開啟
+
+**依賴：無**
+
+---
+
+## Phase 1：accounts（使用者與角色）
+
+> 依賴：無
+
+### 1.1 Model
+- [ ] 定義 `UserProfile` model（role, department）
+- [ ] 定義 `Role` enum（fab_user, lab_staff, lab_manager）
+- [ ] 執行 migration
+
+### 1.2 Model Tests
+- [ ] 測試 UserProfile 建立與 OneToOne 關聯
+- [ ] 測試 Role choices 正確性
+
+### 1.3 Schema
+- [ ] `UserOut` schema
+- [ ] `LoginIn` schema
+
+### 1.4 API Tests
+- [ ] `POST /api/auth/login` — 登入成功/失敗
+- [ ] `POST /api/auth/logout` — 登出
+- [ ] `GET /api/auth/me` — 取得當前使用者與角色
+
+### 1.5 API 實作
+- [ ] 實作 auth router endpoints
+- [ ] 所有測試 green
+
+### 1.6 測試輔助工具
+- [ ] 建立 `UserFactory`（含各角色的 factory）
+- [ ] 建立認證用的 test helper（模擬各角色登入）
+
+---
+
+## Phase 2：experiments（實驗項目）
+
+> 依賴：Phase 1（需要角色權限驗證）
+
+### 2.1 Model
+- [ ] 定義 `ExperimentType` model
+- [ ] 定義 `LabCategory` enum（RA, MA, FA, TM）
+- [ ] 執行 migration
+
+### 2.2 Model Tests
+- [ ] 測試建立 ExperimentType
+- [ ] 測試 name unique 約束
+- [ ] 測試軟刪除（is_active = False）
+
+### 2.3 Schema
+- [ ] `ExperimentTypeIn` schema（POST/PATCH input）
+- [ ] `ExperimentTypeOut` schema（response）
+
+### 2.4 API Tests
+- [ ] `GET /api/experiment-types/` — 列表、搜尋、篩選
+- [ ] `POST /api/experiment-types/` — 新增（Lab Staff 可，Fab User 不可）
+- [ ] `GET /api/experiment-types/{id}` — 詳情
+- [ ] `PATCH /api/experiment-types/{id}` — 修改
+- [ ] `DELETE /api/experiment-types/{id}` — 軟刪除
+- [ ] 權限驗證：Fab User 只能 GET，不能 CUD
+
+### 2.5 API 實作
+- [ ] 實作 experiment-types router
+- [ ] 所有測試 green
+
+### 2.6 Factory
+- [ ] 建立 `ExperimentTypeFactory`
+
+---
+
+## Phase 3：equipment（機台與 Recipe）
+
+> 依賴：Phase 2（Recipe 關聯 ExperimentType；EquipmentCapability 關聯 ExperimentType）
+
+### 3.1 Equipment Model
+- [ ] 定義 `Equipment` model（name, model_name, capacity, status）
+- [ ] 定義 `EquipmentStatus` enum
+- [ ] 定義 `EquipmentCapability` through model
+- [ ] 執行 migration
+
+### 3.2 Equipment Model Tests
+- [ ] 測試建立 Equipment
+- [ ] 測試 capacity 正整數約束
+- [ ] 測試 EquipmentCapability 多對多關聯
+- [ ] 測試 EquipmentCapability unique_together 約束
+
+### 3.3 Recipe Model
+- [ ] 定義 `Recipe` model（name, parameters JSONField, equipment FK, experiment_type FK）
+- [ ] 執行 migration
+
+### 3.4 Recipe Model Tests
+- [ ] 測試建立 Recipe
+- [ ] 測試 Recipe 與 Equipment、ExperimentType 的 FK 關聯
+- [ ] 測試軟刪除（is_active = False）
+- [ ] 測試 parameters JSONField 讀寫
+
+### 3.5 Schema
+- [ ] `EquipmentIn` / `EquipmentOut` schema
+- [ ] `RecipeIn` / `RecipeOut` schema
+
+### 3.6 Equipment API Tests
+- [ ] `GET /api/equipment/` — 列表
+- [ ] `POST /api/equipment/` — 新增（含 capability_ids）
+- [ ] `GET /api/equipment/{id}` — 詳情（含 capabilities, recipes）
+- [ ] `PATCH /api/equipment/{id}` — 修改
+- [ ] `POST /api/equipment/{id}/capabilities` — 設定機台能力
+- [ ] 權限驗證：Fab User 無存取權
+
+### 3.7 Recipe API Tests
+- [ ] `GET /api/recipes/` — 列表（按 equipment_id, experiment_type_id 篩選）
+- [ ] `POST /api/recipes/` — 新增（驗證 equipment + experiment_type 有效組合）
+- [ ] `GET /api/recipes/{id}` — 詳情
+- [ ] `PATCH /api/recipes/{id}` — 修改
+- [ ] `DELETE /api/recipes/{id}` — 軟刪除
+- [ ] 權限驗證：Fab User 無存取權
+
+### 3.8 API 實作
+- [ ] 實作 equipment router
+- [ ] 實作 recipe router
+- [ ] 所有測試 green
+
+### 3.9 Factory
+- [ ] 建立 `EquipmentFactory`（含 capability 設定）
+- [ ] 建立 `RecipeFactory`
+
+---
+
+## Phase 4：commissions（委託單與樣品）
+
+> 依賴：Phase 1（requester FK）、Phase 2（experiment_types M2M）
+
+### 4.1 Request Model
+- [ ] 定義 `RequestStatus` enum（11 個狀態）
+- [ ] 定義 `Request` model
+- [ ] 定義 `RequestExperiment` through model
+- [ ] 執行 migration
+
+### 4.2 Request Model Tests
+- [ ] 測試建立 Request（草稿）
+- [ ] 測試 RequestExperiment M2M with parameters
+- [ ] 測試 status 預設為 draft
+
+### 4.3 Sample Model
+- [ ] 定義 `SampleStatus` enum（9 個狀態）
+- [ ] 定義 `WaferSize` enum
+- [ ] 定義 `Sample` model
+- [ ] 定義 `ApprovalLog` model
+- [ ] 執行 migration
+
+### 4.4 Sample Model Tests
+- [ ] 測試建立 Sample
+- [ ] 測試 wafer_id + request unique_together 約束
+- [ ] 測試 WaferSize choices
+- [ ] 測試 ApprovalLog 建立與排序
+
+### 4.5 狀態機邏輯
+- [ ] 實作 Request 狀態轉移驗證方法
+- [ ] 實作 Sample 狀態轉移驗證方法
+
+### 4.6 狀態機 Tests
+- [ ] 測試 Request 合法狀態轉移（draft → pending_approval → approved → ...）
+- [ ] 測試 Request 非法狀態轉移（e.g. draft → in_progress 應拒絕）
+- [ ] 測試 Sample 合法狀態轉移
+- [ ] 測試 Sample 非法狀態轉移
+- [ ] 測試 submit 時自動建立 Sample entity
+- [ ] 測試所有樣品接收後 Request 自動轉 in_progress
+
+### 4.7 Schema
+- [ ] `RequestIn` / `RequestOut` schema（含巢狀 samples, experiment_types）
+- [ ] `RequestUpdateIn` schema（草稿/退回狀態修改用）
+- [ ] `SampleOut` schema
+- [ ] `ApprovalIn` / `ApprovalOut` schema
+
+### 4.8 Request API Tests
+- [ ] `GET /api/requests/` — 列表（Fab User 只看自己的）
+- [ ] `POST /api/requests/` — 建立草稿
+- [ ] `GET /api/requests/{id}` — 詳情（含 samples, approval_logs）
+- [ ] `PATCH /api/requests/{id}` — 修改（僅 draft/returned）
+- [ ] `POST /api/requests/{id}/submit` — 送出
+- [ ] `POST /api/requests/{id}/approve` — 核准
+- [ ] `POST /api/requests/{id}/return` — 退回（需 comment）
+- [ ] `POST /api/requests/{id}/reject` — 拒絕（需 comment）
+- [ ] `POST /api/requests/{id}/ship` — 送樣
+- [ ] `POST /api/requests/{id}/cancel` — 取消（需 reason）
+- [ ] `POST /api/requests/{id}/close` — 結單
+- [ ] 權限驗證：各操作的角色限制
+
+### 4.9 Sample API Tests
+- [ ] `GET /api/samples/` — 列表（按 request_id, status 篩選）
+- [ ] `GET /api/samples/{id}` — 詳情（含 WIP 資訊）
+- [ ] `POST /api/samples/{id}/receive` — 確認接樣
+- [ ] `POST /api/samples/{id}/reject-receiving` — 料不符
+- [ ] `POST /api/samples/{id}/void` — 作廢
+- [ ] `POST /api/samples/{id}/return` — 退回
+
+### 4.10 API 實作
+- [ ] 實作 requests router（含所有 action endpoints）
+- [ ] 實作 samples router
+- [ ] 所有測試 green
+
+### 4.11 Factory
+- [ ] 建立 `RequestFactory`（含 samples 和 experiment_types）
+- [ ] 建立 `SampleFactory`
+- [ ] 建立 `ApprovalLogFactory`
+
+---
+
+## Phase 5：wip（WIP、派貨與實驗結果）
+
+> 依賴：Phase 3（equipment, recipe FK）、Phase 4（sample M2M）
+
+### 5.1 WIP Model
+- [ ] 定義 `WIPStatus` enum（10 個狀態）
+- [ ] 定義 `WIP` model
+- [ ] 定義 `WIPSample` through model
+- [ ] 執行 migration
+
+### 5.2 WIP Model Tests
+- [ ] 測試建立 WIP
+- [ ] 測試 WIPSample M2M 關聯
+- [ ] 測試 WIPSample unique_together 約束
+- [ ] 測試 equipment/recipe nullable（派貨前為 null）
+
+### 5.3 ExperimentResult Model
+- [ ] 定義 `ExperimentResult` model
+- [ ] 定義 `DataSource` / `Verdict` enum
+- [ ] 執行 migration
+
+### 5.4 ExperimentResult Model Tests
+- [ ] 測試建立 ExperimentResult
+- [ ] 測試 OneToOne with WIP
+- [ ] 測試 data JSONField 讀寫
+
+### 5.5 WIP 狀態機邏輯
+- [ ] 實作 WIP 狀態轉移驗證方法
+- [ ] 實作派貨驗證（機台能力、capacity 檢查）
+- [ ] 實作狀態聯動邏輯（WIP 完成 → Sample 完成 → Request 完成）
+
+### 5.6 WIP 狀態機 Tests
+- [ ] 測試 WIP 合法狀態轉移
+- [ ] 測試 WIP 非法狀態轉移
+- [ ] 測試派貨驗證：機台不支援該實驗項目 → 拒絕
+- [ ] 測試派貨驗證：WIP 樣品數 > 機台 capacity → 拒絕
+- [ ] 測試狀態聯動：所有 WIP 完成 → Sample 自動完成
+- [ ] 測試狀態聯動：所有 Sample 完成 → Request 自動完成
+- [ ] 測試狀態聯動：所有 WIP 中止 → Sample 標記處理異常
+- [ ] 測試異常 → 重派流程
+- [ ] 測試異常 → 中止流程
+
+### 5.7 Schema
+- [ ] `WIPIn` / `WIPOut` schema
+- [ ] `DispatchIn` schema
+- [ ] `ExperimentResultIn` / `ExperimentResultOut` schema
+- [ ] `ExceptionReportIn` schema
+- [ ] `AutomationResultIn` schema
+
+### 5.8 WIP API Tests
+- [ ] `GET /api/wips/` — 列表（按 status, equipment 篩選）
+- [ ] `POST /api/wips/` — 建立 WIP（分貨）
+- [ ] `GET /api/wips/{id}` — 詳情
+- [ ] `POST /api/wips/{id}/dispatch` — 派貨
+- [ ] `POST /api/wips/{id}/unload` — 下貨
+- [ ] `POST /api/wips/{id}/record-result` — 手動登錄結果
+- [ ] `POST /api/wips/{id}/complete` — 完成
+- [ ] `POST /api/wips/{id}/report-exception` — 回報異常
+- [ ] `POST /api/wips/{id}/redispatch` — 重派
+- [ ] `POST /api/wips/{id}/abort` — 中止
+- [ ] 權限驗證：Fab User 無存取權
+
+### 5.9 Automation API Tests
+- [ ] `POST /api/automation/equipment-result` — 自動結單
+- [ ] 測試自動化狀態聯動（WIP → Sample → Request）
+- [ ] 測試 data_source 記錄為 automated
+
+### 5.10 API 實作
+- [ ] 實作 wips router
+- [ ] 實作 automation router
+- [ ] 所有測試 green
+
+### 5.11 Factory
+- [ ] 建立 `WIPFactory`（含 samples 關聯）
+- [ ] 建立 `ExperimentResultFactory`
+
+---
+
+## Phase 6：reports（統計報表）
+
+> 依賴：Phase 4、Phase 5（查詢 Request、WIP 數據）
+
+### 6.1 查詢邏輯
+- [ ] 實作機台利用率查詢（按時間區間、機台分組統計 WIP 數量）
+- [ ] 實作委託單統計查詢（狀態分佈、平均 TAT）
+
+### 6.2 Schema
+- [ ] `EquipmentUtilizationOut` schema
+- [ ] `RequestStatisticsOut` schema
+
+### 6.3 API Tests
+- [ ] `GET /api/reports/equipment-utilization` — 機台利用率
+- [ ] `GET /api/reports/request-statistics` — 委託單統計
+- [ ] 測試時間範圍篩選
+- [ ] 測試空數據回應
+- [ ] 權限驗證：僅 Lab Manager
+
+### 6.4 API 實作
+- [ ] 實作 reports router
+- [ ] 所有測試 green
+
+---
+
+## Phase 7：整合測試與收尾
+
+> 依賴：Phase 0–6 全部完成
+
+### 7.1 E2E 流程測試
+- [ ] 完整流程：開單 → 簽核 → 送樣 → 接樣 → 分貨 → 派貨 → 下貨 → 登錄結果 → 完成 → 結單
+- [ ] 異常流程：派貨 → 異常 → 重派 → 完成
+- [ ] 取消流程：開單 → 簽核 → 取消（驗證連帶中止）
+- [ ] 自動化流程：派貨 → 機台自動回傳 → 自動結單
+
+### 7.2 覆蓋率驗收
+- [ ] 執行 `pytest --cov` 確認覆蓋率 ≥ 80%
+- [ ] 補充不足的測試
+
+### 7.3 文件更新
+- [ ] 確認 `/api/docs` OpenAPI 文件完整
+- [ ] 更新 README 使用說明
+
+---
+
+## 依賴關係圖
+
+```
+Phase 0 (基礎建設)
+  │
+  ├──→ Phase 1 (accounts)
+  │      │
+  │      ├──→ Phase 2 (experiments)
+  │      │      │
+  │      │      ├──→ Phase 3 (equipment + recipe)
+  │      │      │      │
+  │      │      │      └──→ Phase 5 (wip + 實驗結果)
+  │      │      │             │
+  │      │      │             └──→ Phase 6 (reports)
+  │      │      │                    │
+  │      ├──→ Phase 4 (commissions)──┘
+  │      │      │
+  │      │      └──→ Phase 5
+  │      │
+  └──────┴─────────────────────────→ Phase 7 (整合測試)
+```
+
+## 預估工作量
+
+| Phase | 估計任務數 | 核心複雜度 |
+|-------|-----------|-----------|
+| 0 基礎建設 | 10 | 低 |
+| 1 accounts | 10 | 低 |
+| 2 experiments | 12 | 低 |
+| 3 equipment | 18 | 中 |
+| 4 commissions | 28 | 高（狀態機最複雜） |
+| 5 wip | 26 | 高（狀態聯動最複雜） |
+| 6 reports | 8 | 中 |
+| 7 整合測試 | 6 | 中 |
+| **合計** | **~118** | |
