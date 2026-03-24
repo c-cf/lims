@@ -8,24 +8,24 @@
 ## Phase 0：專案基礎建設
 
 ### 0.1 測試環境設定
-- [ ] 安裝 pytest、pytest-django、factory-boy
-- [ ] 建立 `pytest.ini` / `conftest.py`
-- [ ] 確認 `uv run pytest` 可正常執行
+- [x] 安裝 pytest、pytest-django、factory-boy
+- [x] 建立 `pytest.ini` / `conftest.py`
+- [x] 確認 `uv run pytest` 可正常執行
 
 ### 0.2 Django Apps 建立
-- [ ] 建立 `apps/accounts`
-- [ ] 建立 `apps/experiments`
-- [ ] 建立 `apps/equipment`
-- [ ] 建立 `apps/commissions`
-- [ ] 建立 `apps/wip`
-- [ ] 建立 `apps/reports`
-- [ ] 在 `settings.py` 註冊所有 apps
-- [ ] 確認 `uv run python manage.py check` 通過
+- [x] 建立 `apps/accounts`
+- [x] 建立 `apps/experiments`
+- [x] 建立 `apps/equipment`
+- [x] 建立 `apps/commissions`
+- [x] 建立 `apps/wip`
+- [x] 建立 `apps/reports`
+- [x] 在 `settings.py` 註冊所有 apps
+- [x] 確認 `uv run python manage.py check` 通過
 
 ### 0.3 API Router 骨架
-- [ ] 重構 `api/router.py`，預註冊所有 sub-routers
-- [ ] 各 app 建立空的 `api.py` + `router`
-- [ ] 確認 `/api/docs` 可正常開啟
+- [x] 重構 `api/router.py`，預註冊所有 sub-routers
+- [-] 各 app 建立空的 `api.py` + `router`（隨各 Phase 逐步建立）
+- [x] 確認 `/api/docs` 可正常開啟
 
 **依賴：無**
 
@@ -36,30 +36,30 @@
 > 依賴：無
 
 ### 1.1 Model
-- [ ] 定義 `UserProfile` model（role, department）
-- [ ] 定義 `Role` enum（fab_user, lab_staff, lab_manager）
-- [ ] 執行 migration
+- [x] 定義 `UserProfile` model（role, department）
+- [x] 定義 `Role` enum（fab_user, lab_staff, lab_manager）
+- [x] 執行 migration
 
 ### 1.2 Model Tests
-- [ ] 測試 UserProfile 建立與 OneToOne 關聯
-- [ ] 測試 Role choices 正確性
+- [x] 測試 UserProfile 建立與 OneToOne 關聯
+- [x] 測試 Role choices 正確性
 
 ### 1.3 Schema
-- [ ] `UserOut` schema
-- [ ] `LoginIn` schema
+- [x] `UserOut` schema
+- [x] `LoginIn` schema
 
 ### 1.4 API Tests
-- [ ] `POST /api/auth/login` — 登入成功/失敗
-- [ ] `POST /api/auth/logout` — 登出
-- [ ] `GET /api/auth/me` — 取得當前使用者與角色
+- [x] `POST /api/auth/login` — 登入成功/失敗
+- [x] `POST /api/auth/logout` — 登出
+- [x] `GET /api/auth/me` — 取得當前使用者與角色
 
 ### 1.5 API 實作
-- [ ] 實作 auth router endpoints
-- [ ] 所有測試 green
+- [x] 實作 auth router endpoints
+- [x] 所有測試 green
 
 ### 1.6 測試輔助工具
-- [ ] 建立 `UserFactory`（含各角色的 factory）
-- [ ] 建立認證用的 test helper（模擬各角色登入）
+- [x] 建立 `UserFactory`（含各角色的 factory）
+- [-] 建立認證用的 test helper（模擬各角色登入）（各 Phase 用 `client.force_login()` 即可）
 
 ---
 
