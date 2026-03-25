@@ -78,7 +78,7 @@ MIDDLEWARE = [
     "whitenoise.middleware.WhiteNoiseMiddleware",
     "django.contrib.sessions.middleware.SessionMiddleware",
     "django.middleware.common.CommonMiddleware",
-    "django.middleware.csrf.CsrfViewMiddleware",
+    "config.middleware.CsrfExemptApiMiddleware",
     "django.contrib.auth.middleware.AuthenticationMiddleware",
     "django.contrib.messages.middleware.MessageMiddleware",
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
@@ -155,6 +155,18 @@ USE_TZ = True
 
 STATIC_URL = "static/"
 STATIC_ROOT = BASE_DIR / "staticfiles"
+
+# JWT Configuration
+JWT = {
+    "SIGNING_KEY": os.environ.get("JWT_SIGNING_KEY", SECRET_KEY),
+    "ALGORITHM": "HS256",
+    "ACCESS_TOKEN_LIFETIME_MINUTES": int(
+        os.environ.get("JWT_ACCESS_TOKEN_LIFETIME_MINUTES", "30")
+    ),
+    "REFRESH_TOKEN_LIFETIME_DAYS": int(
+        os.environ.get("JWT_REFRESH_TOKEN_LIFETIME_DAYS", "7")
+    ),
+}
 
 STORAGES = {
     "default": {

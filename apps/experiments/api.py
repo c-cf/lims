@@ -3,8 +3,8 @@
 from django.db import IntegrityError
 from django.http import HttpRequest
 from ninja import Query, Router
-from ninja.security import django_auth
 
+from apps.accounts.auth import JWTAuth
 from apps.accounts.models import Role, UserProfile
 from apps.experiments.models import ExperimentType
 from apps.experiments.schemas import (
@@ -14,13 +14,13 @@ from apps.experiments.schemas import (
     ExperimentTypeUpdate,
 )
 
-router = Router(tags=["Experiment Types"], auth=django_auth)
+router = Router(tags=["Experiment Types"], auth=JWTAuth())
 
 
 def _has_lab_role(request: HttpRequest) -> bool:
     """Return True if the user is lab_staff or lab_manager."""
     try:
-        role = request.user.profile.role
+        role = request.auth.profile.role
     except UserProfile.DoesNotExist:
         return False
     return role in (Role.LAB_STAFF, Role.LAB_MANAGER)

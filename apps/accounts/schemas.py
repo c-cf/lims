@@ -39,6 +39,47 @@ class UserOut(Schema):
         }
 
 
+class TokenOut(Schema):
+    """Output schema for login response with JWT tokens and user data."""
+
+    access_token: str
+    refresh_token: str
+    id: int
+    username: str
+    role: str
+    department: str
+
+    @staticmethod
+    def to_dict(
+        user: User,
+        profile: UserProfile,
+        access_token: str,
+        refresh_token: str,
+    ) -> dict[str, Any]:
+        """Build a dict matching TokenOut fields."""
+        return {
+            "access_token": access_token,
+            "refresh_token": refresh_token,
+            "id": user.pk,
+            "username": user.username,
+            "role": profile.role,
+            "department": profile.department,
+        }
+
+
+class RefreshIn(Schema):
+    """Input schema for the token refresh endpoint."""
+
+    refresh_token: str
+
+
+class RefreshOut(Schema):
+    """Output schema for the token refresh response."""
+
+    access_token: str
+    refresh_token: str
+
+
 class ErrorOut(Schema):
     """Output schema for generic detail messages (errors and confirmations)."""
 

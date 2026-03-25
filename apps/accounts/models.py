@@ -1,5 +1,6 @@
 from django.contrib.auth.models import User
 from django.db import models
+from django.utils import timezone
 
 
 class Role(models.TextChoices):
@@ -22,3 +23,33 @@ class UserProfile(models.Model):
 
     def __str__(self) -> str:
         return f"{self.user.username} ({self.role})"
+
+
+class RefreshToken(models.Model):
+    """Stores refresh tokens for JWT authentication.
+
+    Each row represents one active session. Deleting a row revokes that session.
+    """
+
+    user = models.ForeignKey(
+        User, on_delete=models.CASCADE, related_name="refresh_tokens"
+    )
+    token = models.CharField(max_length=255, unique=True)
+    expires_at = models.DateTimeField()
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = "refresh_token"
+        indexes = [
+            models.Index(
+                fields=["user", "expires_at"], name="idx_refresh_user_expires"
+            ),
+        ]
+
+    def __str__(self) -> str:
+        return f"RefreshToken(user={self.user.username}, expires={self.expires_at})"
+
+    @property
+    def is_expired(self) -> bool:
+        """Return True if this token has passed its expiry time."""
+        return timezone.now() >= self.expires_at

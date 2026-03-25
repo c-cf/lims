@@ -108,14 +108,13 @@ class TestExperimentTypeFactory:
 class TestListExperimentTypes:
     """Tests for GET /api/experiment-types/ endpoint."""
 
-    def test_list_returns_200_for_authenticated_user(self, client):
+    def test_list_returns_200_for_authenticated_user(self, client, auth_headers):
         """Any authenticated user can list experiment types."""
         profile = FabUserFactory()
-        client.force_login(profile.user)
         ExperimentTypeFactory(name="Test A")
         ExperimentTypeFactory(name="Test B")
 
-        response = client.get("/api/experiment-types/")
+        response = client.get("/api/experiment-types/", **auth_headers(profile.user))
 
         assert response.status_code == 200
         data = response.json()
@@ -126,56 +125,58 @@ class TestListExperimentTypes:
         response = client.get("/api/experiment-types/")
         assert response.status_code == 401
 
-    def test_list_filters_by_lab_category(self, client):
+    def test_list_filters_by_lab_category(self, client, auth_headers):
         """Filtering by lab_category returns only matching items."""
         profile = LabStaffFactory()
-        client.force_login(profile.user)
         ExperimentTypeFactory(name="RA Test", lab_category="RA")
         ExperimentTypeFactory(name="MA Test", lab_category="MA")
 
-        response = client.get("/api/experiment-types/?lab_category=RA")
+        response = client.get(
+            "/api/experiment-types/?lab_category=RA", **auth_headers(profile.user)
+        )
 
         assert response.status_code == 200
         data = response.json()
         assert len(data) == 1
         assert data[0]["lab_category"] == "RA"
 
-    def test_list_filters_by_is_active(self, client):
+    def test_list_filters_by_is_active(self, client, auth_headers):
         """Filtering by is_active returns only matching items."""
         profile = LabStaffFactory()
-        client.force_login(profile.user)
         ExperimentTypeFactory(name="Active", is_active=True)
         ExperimentTypeFactory(name="Inactive", is_active=False)
 
-        response = client.get("/api/experiment-types/?is_active=true")
+        response = client.get(
+            "/api/experiment-types/?is_active=true", **auth_headers(profile.user)
+        )
 
         assert response.status_code == 200
         data = response.json()
         assert len(data) == 1
         assert data[0]["name"] == "Active"
 
-    def test_list_search_by_name(self, client):
+    def test_list_search_by_name(self, client, auth_headers):
         """Search parameter filters by name (case-insensitive contains)."""
         profile = LabStaffFactory()
-        client.force_login(profile.user)
         ExperimentTypeFactory(name="高溫烘烤測試")
         ExperimentTypeFactory(name="材料分析")
 
-        response = client.get("/api/experiment-types/?search=烘烤")
+        response = client.get(
+            "/api/experiment-types/?search=烘烤", **auth_headers(profile.user)
+        )
 
         assert response.status_code == 200
         data = response.json()
         assert len(data) == 1
         assert "烘烤" in data[0]["name"]
 
-    def test_list_only_active_by_default(self, client):
+    def test_list_only_active_by_default(self, client, auth_headers):
         """Without is_active filter, returns only active items."""
         profile = FabUserFactory()
-        client.force_login(profile.user)
         ExperimentTypeFactory(name="Active", is_active=True)
         ExperimentTypeFactory(name="Inactive", is_active=False)
 
-        response = client.get("/api/experiment-types/")
+        response = client.get("/api/experiment-types/", **auth_headers(profile.user))
 
         assert response.status_code == 200
         data = response.json()
@@ -192,10 +193,9 @@ class TestListExperimentTypes:
 class TestCreateExperimentType:
     """Tests for POST /api/experiment-types/ endpoint."""
 
-    def test_lab_staff_can_create(self, client):
+    def test_lab_staff_can_create(self, client, auth_headers):
         """Lab staff can create a new experiment type."""
         profile = LabStaffFactory()
-        client.force_login(profile.user)
 
         response = client.post(
             "/api/experiment-types/",
@@ -207,6 +207,7 @@ class TestCreateExperimentType:
                 }
             ),
             content_type="application/json",
+            **auth_headers(profile.user),
         )
 
         assert response.status_code == 201
@@ -215,10 +216,9 @@ class TestCreateExperimentType:
         assert data["lab_category"] == "RA"
         assert data["is_active"] is True
 
-    def test_lab_manager_can_create(self, client):
+    def test_lab_manager_can_create(self, client, auth_headers):
         """Lab manager can create a new experiment type."""
         profile = LabManagerFactory()
-        client.force_login(profile.user)
 
         response = client.post(
             "/api/experiment-types/",
@@ -230,14 +230,14 @@ class TestCreateExperimentType:
                 }
             ),
             content_type="application/json",
+            **auth_headers(profile.user),
         )
 
         assert response.status_code == 201
 
-    def test_fab_user_cannot_create(self, client):
+    def test_fab_user_cannot_create(self, client, auth_headers):
         """Fab user cannot create experiment types (403)."""
         profile = FabUserFactory()
-        client.force_login(profile.user)
 
         response = client.post(
             "/api/experiment-types/",
@@ -249,14 +249,14 @@ class TestCreateExperimentType:
                 }
             ),
             content_type="application/json",
+            **auth_headers(profile.user),
         )
 
         assert response.status_code == 403
 
-    def test_create_duplicate_name_returns_409(self, client):
+    def test_create_duplicate_name_returns_409(self, client, auth_headers):
         """Creating with a duplicate name returns 409."""
         profile = LabStaffFactory()
-        client.force_login(profile.user)
         ExperimentTypeFactory(name="已存在")
 
         response = client.post(
@@ -269,6 +269,7 @@ class TestCreateExperimentType:
                 }
             ),
             content_type="application/json",
+            **auth_headers(profile.user),
         )
 
         assert response.status_code == 409
@@ -292,25 +293,27 @@ class TestCreateExperimentType:
 class TestGetExperimentType:
     """Tests for GET /api/experiment-types/{id} endpoint."""
 
-    def test_get_detail_returns_200(self, client):
+    def test_get_detail_returns_200(self, client, auth_headers):
         """Any authenticated user can get experiment type detail."""
         profile = FabUserFactory()
-        client.force_login(profile.user)
         exp = ExperimentTypeFactory(name="詳情測試")
 
-        response = client.get(f"/api/experiment-types/{exp.pk}")
+        response = client.get(
+            f"/api/experiment-types/{exp.pk}", **auth_headers(profile.user)
+        )
 
         assert response.status_code == 200
         data = response.json()
         assert data["id"] == exp.pk
         assert data["name"] == "詳情測試"
 
-    def test_get_nonexistent_returns_404(self, client):
+    def test_get_nonexistent_returns_404(self, client, auth_headers):
         """Requesting a non-existent ID returns 404."""
         profile = FabUserFactory()
-        client.force_login(profile.user)
 
-        response = client.get("/api/experiment-types/99999")
+        response = client.get(
+            "/api/experiment-types/99999", **auth_headers(profile.user)
+        )
 
         assert response.status_code == 404
 
@@ -330,26 +333,25 @@ class TestGetExperimentType:
 class TestUpdateExperimentType:
     """Tests for PATCH /api/experiment-types/{id} endpoint."""
 
-    def test_lab_staff_can_update(self, client):
+    def test_lab_staff_can_update(self, client, auth_headers):
         """Lab staff can update an experiment type."""
         profile = LabStaffFactory()
-        client.force_login(profile.user)
         exp = ExperimentTypeFactory(name="原名稱")
 
         response = client.patch(
             f"/api/experiment-types/{exp.pk}",
             data=json.dumps({"name": "新名稱"}),
             content_type="application/json",
+            **auth_headers(profile.user),
         )
 
         assert response.status_code == 200
         data = response.json()
         assert data["name"] == "新名稱"
 
-    def test_partial_update_only_changes_provided_fields(self, client):
+    def test_partial_update_only_changes_provided_fields(self, client, auth_headers):
         """PATCH only updates provided fields, leaving others unchanged."""
         profile = LabStaffFactory()
-        client.force_login(profile.user)
         exp = ExperimentTypeFactory(
             name="不變", description="原描述", lab_category="RA"
         )
@@ -358,6 +360,7 @@ class TestUpdateExperimentType:
             f"/api/experiment-types/{exp.pk}",
             data=json.dumps({"description": "新描述"}),
             content_type="application/json",
+            **auth_headers(profile.user),
         )
 
         assert response.status_code == 200
@@ -366,37 +369,36 @@ class TestUpdateExperimentType:
         assert data["description"] == "新描述"
         assert data["lab_category"] == "RA"
 
-    def test_fab_user_cannot_update(self, client):
+    def test_fab_user_cannot_update(self, client, auth_headers):
         """Fab user cannot update experiment types (403)."""
         profile = FabUserFactory()
-        client.force_login(profile.user)
         exp = ExperimentTypeFactory()
 
         response = client.patch(
             f"/api/experiment-types/{exp.pk}",
             data=json.dumps({"name": "禁止修改"}),
             content_type="application/json",
+            **auth_headers(profile.user),
         )
 
         assert response.status_code == 403
 
-    def test_update_nonexistent_returns_404(self, client):
+    def test_update_nonexistent_returns_404(self, client, auth_headers):
         """Updating a non-existent ID returns 404."""
         profile = LabStaffFactory()
-        client.force_login(profile.user)
 
         response = client.patch(
             "/api/experiment-types/99999",
             data=json.dumps({"name": "ghost"}),
             content_type="application/json",
+            **auth_headers(profile.user),
         )
 
         assert response.status_code == 404
 
-    def test_update_duplicate_name_returns_409(self, client):
+    def test_update_duplicate_name_returns_409(self, client, auth_headers):
         """Renaming to an existing name returns 409."""
         profile = LabStaffFactory()
-        client.force_login(profile.user)
         ExperimentTypeFactory(name="已存在名稱")
         exp = ExperimentTypeFactory(name="待改名")
 
@@ -404,6 +406,7 @@ class TestUpdateExperimentType:
             f"/api/experiment-types/{exp.pk}",
             data=json.dumps({"name": "已存在名稱"}),
             content_type="application/json",
+            **auth_headers(profile.user),
         )
 
         assert response.status_code == 409
@@ -418,45 +421,47 @@ class TestUpdateExperimentType:
 class TestDeleteExperimentType:
     """Tests for DELETE /api/experiment-types/{id} endpoint (soft delete)."""
 
-    def test_lab_staff_can_soft_delete(self, client):
+    def test_lab_staff_can_soft_delete(self, client, auth_headers):
         """Lab staff can soft-delete an experiment type."""
         profile = LabStaffFactory()
-        client.force_login(profile.user)
         exp = ExperimentTypeFactory(name="待停用")
 
-        response = client.delete(f"/api/experiment-types/{exp.pk}")
+        response = client.delete(
+            f"/api/experiment-types/{exp.pk}", **auth_headers(profile.user)
+        )
 
         assert response.status_code == 200
         exp.refresh_from_db()
         assert exp.is_active is False
 
-    def test_fab_user_cannot_delete(self, client):
+    def test_fab_user_cannot_delete(self, client, auth_headers):
         """Fab user cannot delete experiment types (403)."""
         profile = FabUserFactory()
-        client.force_login(profile.user)
         exp = ExperimentTypeFactory()
 
-        response = client.delete(f"/api/experiment-types/{exp.pk}")
+        response = client.delete(
+            f"/api/experiment-types/{exp.pk}", **auth_headers(profile.user)
+        )
 
         assert response.status_code == 403
 
-    def test_delete_nonexistent_returns_404(self, client):
+    def test_delete_nonexistent_returns_404(self, client, auth_headers):
         """Deleting a non-existent ID returns 404."""
         profile = LabStaffFactory()
-        client.force_login(profile.user)
 
-        response = client.delete("/api/experiment-types/99999")
+        response = client.delete(
+            "/api/experiment-types/99999", **auth_headers(profile.user)
+        )
 
         assert response.status_code == 404
 
-    def test_soft_deleted_not_in_default_list(self, client):
+    def test_soft_deleted_not_in_default_list(self, client, auth_headers):
         """Soft-deleted items do not appear in the default list."""
         profile = LabStaffFactory()
-        client.force_login(profile.user)
         ExperimentTypeFactory(name="已停用", is_active=False)
         ExperimentTypeFactory(name="仍啟用", is_active=True)
 
-        response = client.get("/api/experiment-types/")
+        response = client.get("/api/experiment-types/", **auth_headers(profile.user))
 
         assert response.status_code == 200
         names = [item["name"] for item in response.json()]
@@ -473,16 +478,16 @@ class TestDeleteExperimentType:
 class TestExperimentTypeEdgeCases:
     """Edge case tests for experiment type endpoints."""
 
-    def test_user_without_profile_gets_403_on_create(self, client):
+    def test_user_without_profile_gets_403_on_create(self, client, auth_headers):
         """A user without a UserProfile gets 403 instead of 500."""
         user = User.objects.create_user(username="noprofile", password="pass")
         user.profile.delete()
-        client.force_login(user)
 
         response = client.post(
             "/api/experiment-types/",
             data=json.dumps({"name": "test", "description": "", "lab_category": "RA"}),
             content_type="application/json",
+            **auth_headers(user),
         )
 
         assert response.status_code == 403
