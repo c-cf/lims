@@ -1,11 +1,12 @@
 from django.contrib import admin
 from django.contrib.auth.admin import UserAdmin as BaseUserAdmin
 from django.contrib.auth.models import User
+from unfold.admin import ModelAdmin, StackedInline
 
 from apps.accounts.models import UserProfile
 
 
-class UserProfileInline(admin.StackedInline):
+class UserProfileInline(StackedInline):
     model = UserProfile
     can_delete = False
     verbose_name = "使用者資料"
@@ -13,7 +14,7 @@ class UserProfileInline(admin.StackedInline):
     fields = ("role", "department")
 
 
-class UserAdmin(BaseUserAdmin):
+class UserAdmin(ModelAdmin, BaseUserAdmin):
     inlines = (UserProfileInline,)
     list_display = ("username", "email", "get_role", "get_department", "is_staff")
     list_select_related = ("profile",)

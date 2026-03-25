@@ -68,33 +68,37 @@
 > 依賴：Phase 1（需要角色權限驗證）
 
 ### 2.1 Model
-- [ ] 定義 `ExperimentType` model
-- [ ] 定義 `LabCategory` enum（RA, MA, FA, TM）
-- [ ] 執行 migration
+- [x] 定義 `ExperimentType` model
+- [x] 定義 `LabCategory` enum（RA, MA, FA, TM）
+- [x] 執行 migration
 
 ### 2.2 Model Tests
-- [ ] 測試建立 ExperimentType
-- [ ] 測試 name unique 約束
-- [ ] 測試軟刪除（is_active = False）
+- [x] 測試建立 ExperimentType
+- [x] 測試 name unique 約束
+- [x] 測試軟刪除（is_active = False）
 
 ### 2.3 Schema
-- [ ] `ExperimentTypeIn` schema（POST/PATCH input）
-- [ ] `ExperimentTypeOut` schema（response）
+- [x] `ExperimentTypeIn` schema（POST/PATCH input）
+- [x] `ExperimentTypeOut` schema（response）
 
 ### 2.4 API Tests
-- [ ] `GET /api/experiment-types/` — 列表、搜尋、篩選
-- [ ] `POST /api/experiment-types/` — 新增（Lab Staff 可，Fab User 不可）
-- [ ] `GET /api/experiment-types/{id}` — 詳情
-- [ ] `PATCH /api/experiment-types/{id}` — 修改
-- [ ] `DELETE /api/experiment-types/{id}` — 軟刪除
-- [ ] 權限驗證：Fab User 只能 GET，不能 CUD
+- [x] `GET /api/experiment-types/` — 列表、搜尋、篩選
+- [x] `POST /api/experiment-types/` — 新增（Lab Staff 可，Fab User 不可）
+- [x] `GET /api/experiment-types/{id}` — 詳情
+- [x] `PATCH /api/experiment-types/{id}` — 修改
+- [x] `DELETE /api/experiment-types/{id}` — 軟刪除
+- [x] 權限驗證：Fab User 只能 GET，不能 CUD
 
 ### 2.5 API 實作
-- [ ] 實作 experiment-types router
-- [ ] 所有測試 green
+- [x] 實作 experiment-types router
+- [x] 所有測試 green
 
 ### 2.6 Factory
-- [ ] 建立 `ExperimentTypeFactory`
+- [x] 建立 `ExperimentTypeFactory`
+
+### 2.7 Admin（django-unfold UI）
+- [x] 設定 `ExperimentTypeAdmin`（支援搜尋、篩選、列表顯示）
+- [x] 修正 `UserAdmin` 與 Unfold 的相容性（新增 User 按鈕）
 
 ---
 
