@@ -4,6 +4,7 @@ from django.db import transaction
 from django.http import HttpRequest
 from ninja import Query, Router
 
+from api.schemas import ErrorOut
 from apps.accounts.auth import JWTAuth
 from apps.accounts.permissions import has_lab_role
 from apps.equipment.models import Equipment, EquipmentCapability, Recipe
@@ -13,7 +14,6 @@ from apps.equipment.schemas import (
     EquipmentOut,
     EquipmentStatusLiteral,
     EquipmentUpdate,
-    ErrorOut,
     RecipeIn,
     RecipeOut,
     RecipeUpdate,
@@ -131,11 +131,12 @@ def update_equipment(
     except Equipment.DoesNotExist:
         return 404, {"detail": "Not found"}
 
-    updates = payload.model_dump(exclude_unset=True)
+    updates = payload.model_dump(exclude_unset=True, exclude_none=True)
     for field, value in updates.items():
         setattr(equip, field, value)
 
-    equip.save(update_fields=list(updates.keys()))
+    if updates:
+        equip.save(update_fields=list(updates.keys()))
 
     return 200, EquipmentOut.from_equipment(equip)
 
@@ -276,11 +277,12 @@ def update_recipe(
     except Recipe.DoesNotExist:
         return 404, {"detail": "Not found"}
 
-    updates = payload.non_null_updates()
+    updates = payload.model_dump(exclude_unset=True, exclude_none=True)
     for field, value in updates.items():
         setattr(recipe, field, value)
 
-    recipe.save(update_fields=list(updates.keys()) if updates else None)
+    if updates:
+        recipe.save(update_fields=list(updates.keys()))
 
     return 200, RecipeOut.from_recipe(recipe)
 

@@ -11,12 +11,6 @@ if TYPE_CHECKING:
     from apps.equipment.models import Equipment, Recipe
 
 
-class ErrorOut(Schema):
-    """Output schema for error responses."""
-
-    detail: str
-
-
 # ---------------------------------------------------------------------------
 # Equipment schemas
 # ---------------------------------------------------------------------------
@@ -122,15 +116,6 @@ class RecipeUpdate(Schema):
     name: str | None = Field(None, min_length=1, max_length=200)
     description: str | None = None
     parameters: dict[str, Any] | None = None
-
-    def non_null_updates(self) -> dict[str, Any]:
-        """Return only explicitly set fields, excluding None for non-nullable DB columns."""
-        updates = self.model_dump(exclude_unset=True)
-        # Remove null values for non-nullable DB columns to prevent IntegrityError
-        for field in ("description", "parameters"):
-            if field in updates and updates[field] is None:
-                del updates[field]
-        return updates
 
 
 class RecipeOut(Schema):

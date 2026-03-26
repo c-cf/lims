@@ -33,9 +33,3 @@ class ExperimentTypeOut(Schema):
     is_active: bool
     created_at: datetime
     updated_at: datetime
-
-
-class ErrorOut(Schema):
-    """Output schema for error responses."""
-
-    detail: str

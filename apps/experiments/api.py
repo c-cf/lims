@@ -4,11 +4,11 @@ from django.db import IntegrityError
 from django.http import HttpRequest
 from ninja import Query, Router
 
+from api.schemas import ErrorOut
 from apps.accounts.auth import JWTAuth
 from apps.accounts.permissions import has_lab_role
 from apps.experiments.models import ExperimentType
 from apps.experiments.schemas import (
-    ErrorOut,
     ExperimentTypeIn,
     ExperimentTypeOut,
     ExperimentTypeUpdate,
