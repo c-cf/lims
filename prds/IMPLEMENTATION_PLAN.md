@@ -224,6 +224,7 @@
 - [ ] `GET /api/samples/{id}` — 詳情（含 WIP 資訊）
 - [ ] `POST /api/samples/{id}/receive` — 確認接樣
 - [ ] `POST /api/samples/{id}/reject-receiving` — 料不符
+- [ ] `POST /api/samples/{id}/report-lost` — 送樣遺失
 - [ ] `POST /api/samples/{id}/void` — 作廢
 - [ ] `POST /api/samples/{id}/return` — 退回
 
@@ -241,78 +242,100 @@
 
 ## Phase 5：wip（WIP、派貨與實驗結果）
 
-> 依賴：Phase 3（equipment, recipe FK）、Phase 4（sample M2M）
+> 依賴：Phase 3（equipment, recipe FK）、Phase 4（sample OneToOne）
 
 ### 5.1 WIP Model
-- [ ] 定義 `WIPStatus` enum（10 個狀態）
-- [ ] 定義 `WIP` model
-- [ ] 定義 `WIPSample` through model
+- [ ] 定義 `WIPStatus` enum（4 個狀態：created, in_progress, completed, aborted）
+- [ ] 定義 `WIP` model（sample OneToOneField）
 - [ ] 執行 migration
 
 ### 5.2 WIP Model Tests
 - [ ] 測試建立 WIP
-- [ ] 測試 WIPSample M2M 關聯
-- [ ] 測試 WIPSample unique_together 約束
-- [ ] 測試 equipment/recipe nullable（派貨前為 null）
+- [ ] 測試 WIP 與 Sample 的 OneToOne 關聯
+- [ ] 測試同一 Sample 不可建立多個 WIP（unique 約束）
 
-### 5.3 ExperimentResult Model
+### 5.3 Dispatch Model
+- [ ] 定義 `DispatchStatus` enum（9 個狀態）
+- [ ] 定義 `Dispatch` model（wip FK, experiment_type FK, equipment FK, recipe FK）
+- [ ] 執行 migration
+
+### 5.4 Dispatch Model Tests
+- [ ] 測試建立 Dispatch
+- [ ] 測試 Dispatch 與 WIP、ExperimentType、Equipment、Recipe 的 FK 關聯
+- [ ] 測試同一 WIP 可建立多個 Dispatch（不同實驗項目）
+
+### 5.5 ExperimentResult Model
 - [ ] 定義 `ExperimentResult` model
 - [ ] 定義 `DataSource` / `Verdict` enum
 - [ ] 執行 migration
 
-### 5.4 ExperimentResult Model Tests
+### 5.6 ExperimentResult Model Tests
 - [ ] 測試建立 ExperimentResult
-- [ ] 測試 OneToOne with WIP
+- [ ] 測試 OneToOne with Dispatch
 - [ ] 測試 data JSONField 讀寫
 
-### 5.5 WIP 狀態機邏輯
+### 5.7 狀態機邏輯
 - [ ] 實作 WIP 狀態轉移驗證方法
+- [ ] 實作 Dispatch 狀態轉移驗證方法
 - [ ] 實作派貨驗證（機台能力、capacity 檢查）
-- [ ] 實作狀態聯動邏輯（WIP 完成 → Sample 完成 → Request 完成）
+- [ ] 實作狀態聯動邏輯（Dispatch 完成 → WIP 完成 → Sample 完成 → Request 完成）
 
-### 5.6 WIP 狀態機 Tests
-- [ ] 測試 WIP 合法狀態轉移
+### 5.8 狀態機 Tests
+- [ ] 測試 WIP 合法狀態轉移（created → in_progress → completed）
 - [ ] 測試 WIP 非法狀態轉移
+- [ ] 測試 Dispatch 合法狀態轉移（pending → dispatched → running → unloaded → result_recorded → completed）
+- [ ] 測試 Dispatch 非法狀態轉移
 - [ ] 測試派貨驗證：機台不支援該實驗項目 → 拒絕
-- [ ] 測試派貨驗證：WIP 樣品數 > 機台 capacity → 拒絕
-- [ ] 測試狀態聯動：所有 WIP 完成 → Sample 自動完成
+- [ ] 測試派貨驗證：recipe 不屬於指定機台 → 拒絕
+- [ ] 測試狀態聯動：WIP 所有 Dispatch 完成 → WIP 可標記完成
+- [ ] 測試狀態聯動：WIP 完成 → Sample 自動完成
 - [ ] 測試狀態聯動：所有 Sample 完成 → Request 自動完成
-- [ ] 測試狀態聯動：所有 WIP 中止 → Sample 標記處理異常
+- [ ] 測試狀態聯動：WIP 中止 → Sample 標記處理異常
 - [ ] 測試異常 → 重派流程
 - [ ] 測試異常 → 中止流程
 
-### 5.7 Schema
-- [ ] `WIPIn` / `WIPOut` schema
-- [ ] `DispatchIn` schema
+### 5.9 Schema
+- [ ] `WIPIn` / `WIPOut` schema（含巢狀 dispatches）
+- [ ] `DispatchIn` / `DispatchOut` schema
 - [ ] `ExperimentResultIn` / `ExperimentResultOut` schema
 - [ ] `ExceptionReportIn` schema
 - [ ] `AutomationResultIn` schema
 
-### 5.8 WIP API Tests
-- [ ] `GET /api/wips/` — 列表（按 status, equipment 篩選）
-- [ ] `POST /api/wips/` — 建立 WIP（分貨）
-- [ ] `GET /api/wips/{id}` — 詳情
-- [ ] `POST /api/wips/{id}/dispatch` — 派貨
-- [ ] `POST /api/wips/{id}/unload` — 下貨
-- [ ] `POST /api/wips/{id}/record-result` — 手動登錄結果
+### 5.10 WIP API Tests
+- [ ] `GET /api/wips/` — 列表（按 status 篩選）
+- [ ] `POST /api/wips/` — 建立 WIP（分貨，sample_id）
+- [ ] `GET /api/wips/{id}` — 詳情（含 dispatches 列表）
+- [ ] `POST /api/wips/{id}/dispatches` — 建立派貨
 - [ ] `POST /api/wips/{id}/complete` — 完成
-- [ ] `POST /api/wips/{id}/report-exception` — 回報異常
-- [ ] `POST /api/wips/{id}/redispatch` — 重派
 - [ ] `POST /api/wips/{id}/abort` — 中止
 - [ ] 權限驗證：Fab User 無存取權
 
-### 5.9 Automation API Tests
-- [ ] `POST /api/automation/equipment-result` — 自動結單
-- [ ] 測試自動化狀態聯動（WIP → Sample → Request）
+### 5.11 Dispatch API Tests
+- [ ] `GET /api/dispatches/` — 列表（按 status, equipment_id, wip_id 篩選）
+- [ ] `GET /api/dispatches/{id}` — 詳情
+- [ ] `POST /api/dispatches/{id}/start` — 開始執行
+- [ ] `POST /api/dispatches/{id}/unload` — 下貨
+- [ ] `POST /api/dispatches/{id}/record-result` — 手動登錄結果
+- [ ] `POST /api/dispatches/{id}/complete` — 完成
+- [ ] `POST /api/dispatches/{id}/report-exception` — 回報異常
+- [ ] `POST /api/dispatches/{id}/redispatch` — 重派
+- [ ] `POST /api/dispatches/{id}/abort` — 中止
+- [ ] 權限驗證：Fab User 無存取權
+
+### 5.12 Automation API Tests
+- [ ] `POST /api/automation/equipment-result` — 自動結單（以 dispatch_id 為單位）
+- [ ] 測試自動化狀態聯動（Dispatch → WIP → Sample → Request）
 - [ ] 測試 data_source 記錄為 automated
 
-### 5.10 API 實作
+### 5.13 API 實作
 - [ ] 實作 wips router
+- [ ] 實作 dispatches router
 - [ ] 實作 automation router
 - [ ] 所有測試 green
 
-### 5.11 Factory
-- [ ] 建立 `WIPFactory`（含 samples 關聯）
+### 5.14 Factory
+- [ ] 建立 `WIPFactory`
+- [ ] 建立 `DispatchFactory`
 - [ ] 建立 `ExperimentResultFactory`
 
 ---
@@ -322,7 +345,7 @@
 > 依賴：Phase 4、Phase 5（查詢 Request、WIP 數據）
 
 ### 6.1 查詢邏輯
-- [ ] 實作機台利用率查詢（按時間區間、機台分組統計 WIP 數量）
+- [ ] 實作機台利用率查詢（按時間區間、機台分組統計 Dispatch 數量）
 - [ ] 實作委託單統計查詢（狀態分佈、平均 TAT）
 
 ### 6.2 Schema
@@ -347,10 +370,12 @@
 > 依賴：Phase 0–6 全部完成
 
 ### 7.1 E2E 流程測試
-- [ ] 完整流程：開單 → 簽核 → 送樣 → 接樣 → 分貨 → 派貨 → 下貨 → 登錄結果 → 完成 → 結單
-- [ ] 異常流程：派貨 → 異常 → 重派 → 完成
+- [ ] 完整流程：開單 → 簽核 → 送樣 → 接樣 → 建立 WIP → 建立 Dispatch → 派貨 → 執行 → 下貨 → 登錄結果 → 完成 Dispatch → 完成 WIP → 完成 Sample → 完成 Request → 結單
+- [ ] 多實驗流程：一個 WIP 建立多個 Dispatch（不同實驗項目），全部完成後 WIP 完成
+- [ ] 異常流程：Dispatch 執行 → 異常 → 重派 → 完成
+- [ ] 送樣遺失流程：送樣 → 標記遺失 → 作廢
 - [ ] 取消流程：開單 → 簽核 → 取消（驗證連帶中止）
-- [ ] 自動化流程：派貨 → 機台自動回傳 → 自動結單
+- [ ] 自動化流程：Dispatch 派貨 → 機台自動回傳 → 自動結單
 
 ### 7.2 覆蓋率驗收
 - [ ] 執行 `pytest --cov` 確認覆蓋率 ≥ 80%
@@ -373,7 +398,7 @@ Phase 0 (基礎建設)
   │      │      │
   │      │      ├──→ Phase 3 (equipment + recipe)
   │      │      │      │
-  │      │      │      └──→ Phase 5 (wip + 實驗結果)
+  │      │      │      └──→ Phase 5 (wip + dispatch + 實驗結果)
   │      │      │             │
   │      │      │             └──→ Phase 6 (reports)
   │      │      │                    │
@@ -392,8 +417,8 @@ Phase 0 (基礎建設)
 | 1 accounts | 10 | 低 |
 | 2 experiments | 12 | 低 |
 | 3 equipment | 18 | 中 |
-| 4 commissions | 28 | 高（狀態機最複雜） |
-| 5 wip | 26 | 高（狀態聯動最複雜） |
+| 4 commissions | 29 | 高（狀態機最複雜） |
+| 5 wip | 34 | 高（WIP + Dispatch 雙層狀態聯動） |
 | 6 reports | 8 | 中 |
-| 7 整合測試 | 6 | 中 |
-| **合計** | **~118** | |
+| 7 整合測試 | 8 | 中 |
+| **合計** | **~129** | |

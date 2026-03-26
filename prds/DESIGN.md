@@ -29,7 +29,9 @@ User (Django Auth)
   │
   ├──1:N──→ Request (委託單)
   │            ├──1:N──→ Sample (樣品)
-  │            │            └──M:N──→ WIP (透過 WIPSample)
+  │            │            └──1:1──→ WIP
+  │            │                       └──1:N──→ Dispatch (派貨)
+  │            │                                   └──1:1──→ ExperimentResult
   │            ├──M:N──→ ExperimentType (透過 RequestExperiment)
   │            └──1:N──→ ApprovalLog (簽核紀錄)
   │
@@ -42,12 +44,7 @@ User (Django Auth)
   │
   Recipe ──→ (Equipment + ExperimentType)
   │
-  WIP
-  │  ├──M:N──→ Sample (透過 WIPSample)
-  │  ├──N:1──→ Equipment
-  │  ├──N:1──→ Recipe
-  │  ├──N:1──→ ExperimentType
-  │  └──1:1──→ ExperimentResult
+  Dispatch ──→ (WIP + ExperimentType + Equipment + Recipe)
 ```
 
 ### 2.2 Model 定義
@@ -179,6 +176,7 @@ class SampleStatus(models.TextChoices):
     SPLIT = "split", "已分貨"
     PROCESSING_EXCEPTION = "processing_exception", "處理異常"
     COMPLETED = "completed", "已完成"
+    LOST = "lost", "送樣遺失"
     RETURNED = "returned", "已退回"
     VOIDED = "voided", "已作廢"
 
@@ -253,37 +251,28 @@ class ApprovalLog(models.Model):
 
 class WIPStatus(models.TextChoices):
     CREATED = "created", "已建立"
-    PENDING_DISPATCH = "pending_dispatch", "待派貨"
+    IN_PROGRESS = "in_progress", "處理中"          # 有進行中的派貨
+    COMPLETED = "completed", "已完成"               # 所有派貨皆完成
+    ABORTED = "aborted", "已中止"
+
+class DispatchStatus(models.TextChoices):
+    PENDING = "pending", "待派貨"
     DISPATCHED = "dispatched", "已派貨"
     RUNNING = "running", "執行中"
     EXECUTION_EXCEPTION = "execution_exception", "執行異常"
     UNLOADED = "unloaded", "已下貨"
     RESULT_RECORDED = "result_recorded", "結果已登錄"
     COMPLETED = "completed", "已完成"
-    ABORTED = "aborted", "已中止"
     PENDING_REDISPATCH = "pending_redispatch", "待重派"
+    ABORTED = "aborted", "已中止"
 
 class WIP(models.Model):
-    """Work In Progress：虛擬帳務單位"""
-    experiment_type = models.ForeignKey(                         # 對應的實驗項目
-        "experiments.ExperimentType", on_delete=models.PROTECT, related_name="wips"
-    )
-    samples = models.ManyToManyField(                           # 包含的樣品（1~N）
-        "commissions.Sample",
-        through="WIPSample",
-        related_name="wips",
-    )
-    equipment = models.ForeignKey(                              # 派貨指定的機台（派貨後才有值）
-        "equipment.Equipment", on_delete=models.PROTECT,
-        null=True, blank=True, related_name="wips",
-    )
-    recipe = models.ForeignKey(                                 # 派貨指定的 recipe（派貨後才有值）
-        "equipment.Recipe", on_delete=models.PROTECT,
-        null=True, blank=True, related_name="wips",
+    """Work In Progress：每個樣品在實驗室內的追蹤單位（1 Sample = 1 WIP）"""
+    sample = models.OneToOneField(                              # 對應的樣品（1:1）
+        "commissions.Sample", on_delete=models.CASCADE, related_name="wip"
     )
     status = models.CharField(max_length=30, choices=WIPStatus.choices, default=WIPStatus.CREATED)
     note = models.TextField(blank=True)
-    dispatched_at = models.DateTimeField(null=True, blank=True) # 派貨時間
     completed_at = models.DateTimeField(null=True, blank=True)  # 完成時間
     created_by = models.ForeignKey(                             # 建立者（實驗室人員）
         User, on_delete=models.PROTECT, related_name="created_wips"
@@ -294,17 +283,33 @@ class WIP(models.Model):
     class Meta:
         db_table = "wip"
 
-class WIPSample(models.Model):
-    """WIP 與 Sample 的多對多關聯"""
-    wip = models.ForeignKey(WIP, on_delete=models.CASCADE, related_name="wip_samples")
-    sample = models.ForeignKey("commissions.Sample", on_delete=models.CASCADE, related_name="wip_samples")
+class Dispatch(models.Model):
+    """派貨紀錄：將 WIP 指派到特定機台執行特定實驗"""
+    wip = models.ForeignKey(WIP, on_delete=models.CASCADE, related_name="dispatches")
+    experiment_type = models.ForeignKey(                         # 本次派貨的實驗項目
+        "experiments.ExperimentType", on_delete=models.PROTECT, related_name="dispatches"
+    )
+    equipment = models.ForeignKey(                               # 指定機台
+        "equipment.Equipment", on_delete=models.PROTECT, related_name="dispatches"
+    )
+    recipe = models.ForeignKey(                                  # 指定 recipe
+        "equipment.Recipe", on_delete=models.PROTECT, related_name="dispatches"
+    )
+    status = models.CharField(max_length=30, choices=DispatchStatus.choices, default=DispatchStatus.PENDING)
+    note = models.TextField(blank=True)
+    dispatched_at = models.DateTimeField(null=True, blank=True)  # 實際派貨時間
+    completed_at = models.DateTimeField(null=True, blank=True)   # 完成時間
+    created_by = models.ForeignKey(                              # 建立者（實驗室人員）
+        User, on_delete=models.PROTECT, related_name="created_dispatches"
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
-        db_table = "wip_sample"
-        unique_together = ("wip", "sample")
+        db_table = "dispatch"
 
 class ExperimentResult(models.Model):
-    """實驗結果"""
+    """實驗結果：對應一次派貨"""
     class DataSource(models.TextChoices):
         MANUAL = "manual", "手動登錄"
         AUTOMATED = "automated", "自動化"
@@ -313,7 +318,7 @@ class ExperimentResult(models.Model):
         PASS = "pass", "合格"
         FAIL = "fail", "不合格"
 
-    wip = models.OneToOneField(WIP, on_delete=models.CASCADE, related_name="result")
+    dispatch = models.OneToOneField(Dispatch, on_delete=models.CASCADE, related_name="result")
     summary = models.TextField()                                # 結果摘要
     verdict = models.CharField(max_length=10, choices=Verdict.choices)
     data = models.JSONField(default=dict, blank=True)           # 實驗數據（彈性結構）
@@ -348,7 +353,12 @@ indexes = [
     models.Index(fields=["status"]),
 ]
 
-# WIP: 按 status 篩選、按 equipment 查詢
+# WIP: 按 status 篩選
+indexes = [
+    models.Index(fields=["status"]),
+]
+
+# Dispatch: 按 status 篩選、按 equipment 查詢
 indexes = [
     models.Index(fields=["status"]),
     models.Index(fields=["equipment", "status"]),
@@ -592,6 +602,7 @@ indexes = [
 | GET | `/samples/{id}` | 取得樣品詳情（含所屬 WIP） | All |
 | POST | `/samples/{id}/receive` | 確認接樣 | Lab Staff |
 | POST | `/samples/{id}/reject-receiving` | 接樣異常（料不符） | Lab Staff |
+| POST | `/samples/{id}/report-lost` | 標記送樣遺失 | Lab Staff |
 | POST | `/samples/{id}/void` | 作廢樣品 | Lab Staff, Lab Manager |
 | POST | `/samples/{id}/return` | 退回樣品 | Lab Staff, Lab Manager |
 
@@ -614,9 +625,13 @@ indexes = [
   "wafer_size": "300mm",
   "status": "split",
   "request": {"id": 1, "title": "RA 高溫烘烤測試委託"},
-  "wips": [
-    {"id": 1, "status": "running", "equipment": {"id": 1, "name": "烤箱 A-01"}}
-  ],
+  "wip": {
+    "id": 1,
+    "status": "in_progress",
+    "dispatches": [
+      {"id": 1, "status": "running", "experiment_type": {"id": 1, "name": "高溫烘烤測試"}, "equipment": {"id": 1, "name": "烤箱 A-01"}}
+    ]
+  },
   "note": "",
   "created_at": "2026-03-24T10:30:00Z"
 }
@@ -626,32 +641,76 @@ indexes = [
 
 | Method | Path | 說明 | 角色 |
 |--------|------|------|------|
-| GET | `/wips/` | 列出 WIP（支援按狀態、機台篩選） | Lab Staff, Lab Manager |
-| POST | `/wips/` | 建立 WIP（分貨） | Lab Staff |
-| GET | `/wips/{id}` | 取得 WIP 詳情 | Lab Staff, Lab Manager |
-| POST | `/wips/{id}/dispatch` | 派貨（指定機台 + recipe） | Lab Staff |
-| POST | `/wips/{id}/unload` | 下貨 | Lab Staff |
-| POST | `/wips/{id}/record-result` | 手動登錄實驗結果 | Lab Staff |
-| POST | `/wips/{id}/complete` | 標記完成 | Lab Staff |
-| POST | `/wips/{id}/report-exception` | 回報異常 | Lab Staff |
-| POST | `/wips/{id}/redispatch` | 重派（異常後重新進入待派貨） | Lab Staff |
-| POST | `/wips/{id}/abort` | 中止 | Lab Staff, Lab Manager |
+| GET | `/wips/` | 列出 WIP（支援按狀態篩選） | Lab Staff, Lab Manager |
+| POST | `/wips/` | 建立 WIP（分貨，1 Sample = 1 WIP） | Lab Staff |
+| GET | `/wips/{id}` | 取得 WIP 詳情（含 dispatches） | Lab Staff, Lab Manager |
+| POST | `/wips/{id}/dispatches` | 建立派貨（指定實驗項目 + 機台 + recipe） | Lab Staff |
+| POST | `/wips/{id}/complete` | 標記 WIP 完成 | Lab Staff |
+| POST | `/wips/{id}/abort` | 中止 WIP | Lab Staff, Lab Manager |
 
 **Request Body (POST create):**
 ```json
 {
-  "experiment_type_id": 1,
-  "sample_ids": [1, 2, 3]
+  "sample_id": 1
 }
 ```
 
-**Request Body (POST dispatch):**
+**Request Body (POST dispatches):**
 ```json
 {
+  "experiment_type_id": 1,
   "equipment_id": 1,
   "recipe_id": 1
 }
 ```
+
+**Response (GET detail):**
+```json
+{
+  "id": 1,
+  "sample": {"id": 1, "wafer_id": "WF-2026-001", "wafer_size": "300mm"},
+  "status": "in_progress",
+  "dispatches": [
+    {
+      "id": 1,
+      "experiment_type": {"id": 1, "name": "高溫烘烤測試"},
+      "equipment": {"id": 1, "name": "烤箱 A-01"},
+      "recipe": {"id": 1, "name": "RA-OV3000-HTSL-300H"},
+      "status": "completed",
+      "result": {"verdict": "pass", "summary": "300hr 測試通過"}
+    },
+    {
+      "id": 2,
+      "experiment_type": {"id": 2, "name": "熱衝擊測試"},
+      "equipment": {"id": 2, "name": "熱衝擊機 B-01"},
+      "recipe": {"id": 3, "name": "RA-TS200-TC-500C"},
+      "status": "running",
+      "result": null
+    }
+  ],
+  "note": "",
+  "created_at": "2026-03-24T12:00:00Z"
+}
+```
+
+#### 3.2.8 派貨 — `/api/dispatches/`
+
+| Method | Path | 說明 | 角色 |
+|--------|------|------|------|
+| GET | `/dispatches/` | 列出派貨（支援按狀態、機台篩選） | Lab Staff, Lab Manager |
+| GET | `/dispatches/{id}` | 取得派貨詳情 | Lab Staff, Lab Manager |
+| POST | `/dispatches/{id}/start` | 開始執行 | Lab Staff |
+| POST | `/dispatches/{id}/unload` | 下貨 | Lab Staff |
+| POST | `/dispatches/{id}/record-result` | 手動登錄實驗結果 | Lab Staff |
+| POST | `/dispatches/{id}/complete` | 標記派貨完成 | Lab Staff |
+| POST | `/dispatches/{id}/report-exception` | 回報異常 | Lab Staff |
+| POST | `/dispatches/{id}/redispatch` | 重派（異常後重新進入待派貨） | Lab Staff |
+| POST | `/dispatches/{id}/abort` | 中止派貨 | Lab Staff, Lab Manager |
+
+**Query Parameters (GET list):**
+- `status`: 按狀態篩選
+- `equipment_id`: 按機台篩選
+- `wip_id`: 按 WIP 篩選
 
 **Request Body (POST record-result):**
 ```json
@@ -674,7 +733,7 @@ indexes = [
 }
 ```
 
-#### 3.2.8 自動化端點 — `/api/automation/`
+#### 3.2.9 自動化端點 — `/api/automation/`
 
 | Method | Path | 說明 | 角色 |
 |--------|------|------|------|
@@ -683,7 +742,7 @@ indexes = [
 **Request Body:**
 ```json
 {
-  "wip_id": 1,
+  "dispatch_id": 1,
   "equipment_id": 1,
   "summary": "自動化測試完成",
   "verdict": "pass",
@@ -695,11 +754,11 @@ indexes = [
 ```
 
 **行為：**
-1. 驗證 WIP 狀態為 `dispatched` 或 `running`
-2. 自動執行：下貨 → 登錄結果（data_source = automated）→ 完成
-3. 觸發樣品/委託單狀態聯動
+1. 驗證 Dispatch 狀態為 `dispatched` 或 `running`
+2. 自動執行：下貨 → 登錄結果（data_source = automated）→ 完成該 Dispatch
+3. 若 WIP 所有 Dispatch 皆完成，自動觸發 WIP → Sample → Request 狀態聯動
 
-#### 3.2.9 統計報表 — `/api/reports/`
+#### 3.2.10 統計報表 — `/api/reports/`
 
 | Method | Path | 說明 | 角色 |
 |--------|------|------|------|
@@ -772,25 +831,38 @@ indexes = [
 | → (自動) 送樣 | created | shipped |
 | receive | shipped | received |
 | reject-receiving | shipped | receiving_exception |
-| → (自動) 分貨加入 WIP | received | split |
-| → (自動) 所有 WIP 完成 | split | completed |
-| → (自動) 所有 WIP 中止 | split | processing_exception |
-| void | receiving_exception, processing_exception | voided |
+| report-lost | shipped | lost |
+| → (自動) 分貨建立 WIP | received | split |
+| → (自動) WIP 完成 | split | completed |
+| → (自動) WIP 中止 | split | processing_exception |
+| void | receiving_exception, processing_exception, lost | voided |
 | return | receiving_exception, processing_exception | returned |
 
 ### 4.3 WIP
 
 | Action | 允許的前置狀態 | 目標狀態 |
 |--------|---------------|---------|
-| create | — | pending_dispatch |
-| dispatch | pending_dispatch, pending_redispatch | dispatched |
-| → (手動/自動) 開始執行 | dispatched | running |
+| create | — | created |
+| → (自動) 首次派貨建立 | created | in_progress |
+| complete | in_progress | completed |
+| abort | created, in_progress | aborted |
+
+> WIP 狀態較簡化，詳細的派貨/執行追蹤由 Dispatch 負責。
+> WIP 完成前提：所有關聯的 Dispatch 皆已完成或中止。
+
+### 4.4 Dispatch（派貨）
+
+| Action | 允許的前置狀態 | 目標狀態 |
+|--------|---------------|---------|
+| create | — | pending |
+| dispatch（確認派出） | pending | dispatched |
+| start | dispatched | running |
 | unload | dispatched, running | unloaded |
 | record-result | unloaded | result_recorded |
 | complete | result_recorded | completed |
 | report-exception | dispatched, running | execution_exception |
-| redispatch | execution_exception | pending_redispatch |
-| abort | execution_exception | aborted |
+| redispatch | execution_exception | pending_redispatch → pending |
+| abort | execution_exception, pending | aborted |
 
 ---
 
@@ -822,7 +894,7 @@ indexes = [
 | 401 | 未認證 |
 | 403 | 無權限（角色不符） |
 | 404 | 資源不存在 |
-| 409 | 衝突（如 WIP 樣品數超過機台 capacity） |
+| 409 | 衝突（如機台 capacity 不足） |
 
 ---
 
@@ -842,6 +914,7 @@ api.add_router("/recipes/",           "apps.equipment.api.recipe_router")
 api.add_router("/requests/",          "apps.commissions.api.router")
 api.add_router("/samples/",           "apps.commissions.api.sample_router")
 api.add_router("/wips/",              "apps.wip.api.router")
+api.add_router("/dispatches/",        "apps.wip.api.dispatch_router")
 api.add_router("/automation/",        "apps.wip.api.automation_router")
 api.add_router("/reports/",           "apps.reports.api.router")
 ```

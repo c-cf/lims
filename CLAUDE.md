@@ -58,7 +58,7 @@ apps/
   experiments/          # ExperimentType + LabCategory enum（RA / MA / FA / TM）
   equipment/            # Equipment、EquipmentCapability（M2M through）、Recipe
   commissions/          # Request、Sample、RequestExperiment（through）、ApprovalLog — 核心業務
-  wip/                  # WIP、WIPSample（through）、ExperimentResult
+  wip/                  # WIP、Dispatch、ExperimentResult
   reports/              # 純查詢，無 Model
 prds/                   # 需求與設計文件
 ```
@@ -66,13 +66,16 @@ prds/                   # 需求與設計文件
 ### 核心業務流程
 
 委託單生命週期（Request.status）：
-`draft → pending_approval → approved → sample_sent → sample_received → in_progress → completed → pending_close → closed`（另有 `returned`、`cancelled`）
+`draft → pending_approval → approved → sample_shipped → in_progress → completed → closed`（另有 `returned`、`rejected`、`exception`、`cancelled`）
 
 樣品狀態（Sample.status）：
-`created → shipped → received → sorted → in_progress → completed / voided`
+`created → shipped → received → split → completed / voided`（另有 `receiving_exception`、`lost`、`processing_exception`、`returned`）
 
 WIP 狀態（WIP.status）：
-`created → pending_dispatch → dispatched → in_progress → abnormal → unloaded → result_recorded → completed / aborted / pending_redispatch`
+`created → in_progress → completed / aborted`
+
+Dispatch 狀態（Dispatch.status）：
+`pending → dispatched → running → unloaded → result_recorded → completed`（另有 `execution_exception → pending_redispatch / aborted`）
 
 ### Django Ninja API 約定
 
@@ -104,7 +107,8 @@ uv run pytest                # 測試
 ### 模型設計慣例
 
 - 狀態欄位使用 `TextChoices` enum（參考 `RequestStatus`、`SampleStatus`、`WIPStatus`）
-- 多對多需要額外欄位時使用 through model（`RequestExperiment`、`WIPSample`、`EquipmentCapability`）
+- 多對多需要額外欄位時使用 through model（`RequestExperiment`、`EquipmentCapability`）
+- 一對一關聯：`WIP ↔ Sample`（1 樣品 = 1 WIP）、`ExperimentResult ↔ Dispatch`
 - 彈性參數使用 `JSONField`（`Recipe.parameters`、`RequestExperiment.parameters`、`ExperimentResult.data`）
 - 軟刪除使用 `is_active = BooleanField(default=True)`
 - `Meta.db_table` 使用 snake_case 明確命名資料表
