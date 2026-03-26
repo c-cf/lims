@@ -1,5 +1,9 @@
+"""Model and factory tests for the equipment app."""
+
 import pytest
 from django.db import IntegrityError
+
+from apps.equipment.factories import EquipmentFactory, RecipeFactory
 
 
 @pytest.fixture
@@ -161,3 +165,41 @@ class TestRecipe:
         from apps.equipment.models import Recipe
 
         assert Recipe._meta.db_table == "recipe"
+
+
+# ---------------------------------------------------------------------------
+# Factory tests
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.django_db
+class TestEquipmentFactory:
+    def test_factory_creates_valid_instance(self):
+        """EquipmentFactory creates a valid Equipment."""
+        equip = EquipmentFactory()
+        assert equip.pk is not None
+        assert equip.status == "available"
+        assert equip.capacity == 25
+
+    def test_factory_creates_unique_names(self):
+        """Each factory call produces a unique name."""
+        e1 = EquipmentFactory()
+        e2 = EquipmentFactory()
+        assert e1.name != e2.name
+
+
+@pytest.mark.django_db
+class TestRecipeFactory:
+    def test_factory_creates_valid_instance(self):
+        """RecipeFactory creates a valid Recipe with related objects."""
+        recipe = RecipeFactory()
+        assert recipe.pk is not None
+        assert recipe.equipment is not None
+        assert recipe.experiment_type is not None
+        assert recipe.is_active is True
+
+    def test_factory_creates_unique_names(self):
+        """Each factory call produces a unique name."""
+        r1 = RecipeFactory()
+        r2 = RecipeFactory()
+        assert r1.name != r2.name

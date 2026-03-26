@@ -5,7 +5,7 @@ from django.http import HttpRequest
 from ninja import Query, Router
 
 from apps.accounts.auth import JWTAuth
-from apps.accounts.models import Role, UserProfile
+from apps.accounts.permissions import has_lab_role
 from apps.experiments.models import ExperimentType
 from apps.experiments.schemas import (
     ErrorOut,
@@ -15,15 +15,6 @@ from apps.experiments.schemas import (
 )
 
 router = Router(tags=["Experiment Types"], auth=JWTAuth())
-
-
-def _has_lab_role(request: HttpRequest) -> bool:
-    """Return True if the user is lab_staff or lab_manager."""
-    try:
-        role = request.auth.profile.role
-    except UserProfile.DoesNotExist:
-        return False
-    return role in (Role.LAB_STAFF, Role.LAB_MANAGER)
 
 
 @router.get("/", response=list[ExperimentTypeOut])
@@ -57,7 +48,7 @@ def list_experiment_types(
 @router.post("/", response={201: ExperimentTypeOut, 403: ErrorOut, 409: ErrorOut})
 def create_experiment_type(request: HttpRequest, payload: ExperimentTypeIn):
     """Create a new experiment type. Only lab staff and managers allowed."""
-    if not _has_lab_role(request):
+    if not has_lab_role(request):
         return 403, {"detail": "Permission denied"}
 
     try:
@@ -93,7 +84,7 @@ def update_experiment_type(
     payload: ExperimentTypeUpdate,
 ):
     """Partially update an experiment type. Only lab staff and managers allowed."""
-    if not _has_lab_role(request):
+    if not has_lab_role(request):
         return 403, {"detail": "Permission denied"}
 
     try:
@@ -118,7 +109,7 @@ def update_experiment_type(
 )
 def delete_experiment_type(request: HttpRequest, experiment_type_id: int):
     """Soft-delete an experiment type. Only lab staff and managers allowed."""
-    if not _has_lab_role(request):
+    if not has_lab_role(request):
         return 403, {"detail": "Permission denied"}
 
     try:

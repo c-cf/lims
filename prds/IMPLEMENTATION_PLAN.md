@@ -107,55 +107,55 @@
 > 依賴：Phase 2（Recipe 關聯 ExperimentType；EquipmentCapability 關聯 ExperimentType）
 
 ### 3.1 Equipment Model
-- [ ] 定義 `Equipment` model（name, model_name, capacity, status）
-- [ ] 定義 `EquipmentStatus` enum
-- [ ] 定義 `EquipmentCapability` through model
-- [ ] 執行 migration
+- [x] 定義 `Equipment` model（name, model_name, capacity, status）
+- [x] 定義 `EquipmentStatus` enum
+- [x] 定義 `EquipmentCapability` through model
+- [x] 執行 migration
 
 ### 3.2 Equipment Model Tests
-- [ ] 測試建立 Equipment
-- [ ] 測試 capacity 正整數約束
-- [ ] 測試 EquipmentCapability 多對多關聯
-- [ ] 測試 EquipmentCapability unique_together 約束
+- [x] 測試建立 Equipment
+- [x] 測試 capacity 正整數約束
+- [x] 測試 EquipmentCapability 多對多關聯
+- [x] 測試 EquipmentCapability unique_together 約束
 
 ### 3.3 Recipe Model
-- [ ] 定義 `Recipe` model（name, parameters JSONField, equipment FK, experiment_type FK）
-- [ ] 執行 migration
+- [x] 定義 `Recipe` model（name, parameters JSONField, equipment FK, experiment_type FK）
+- [x] 執行 migration
 
 ### 3.4 Recipe Model Tests
-- [ ] 測試建立 Recipe
-- [ ] 測試 Recipe 與 Equipment、ExperimentType 的 FK 關聯
-- [ ] 測試軟刪除（is_active = False）
-- [ ] 測試 parameters JSONField 讀寫
+- [x] 測試建立 Recipe
+- [x] 測試 Recipe 與 Equipment、ExperimentType 的 FK 關聯
+- [x] 測試軟刪除（is_active = False）
+- [x] 測試 parameters JSONField 讀寫
 
 ### 3.5 Schema
-- [ ] `EquipmentIn` / `EquipmentOut` schema
-- [ ] `RecipeIn` / `RecipeOut` schema
+- [x] `EquipmentIn` / `EquipmentOut` schema
+- [x] `RecipeIn` / `RecipeOut` schema
 
 ### 3.6 Equipment API Tests
-- [ ] `GET /api/equipment/` — 列表
-- [ ] `POST /api/equipment/` — 新增（含 capability_ids）
-- [ ] `GET /api/equipment/{id}` — 詳情（含 capabilities, recipes）
-- [ ] `PATCH /api/equipment/{id}` — 修改
-- [ ] `POST /api/equipment/{id}/capabilities` — 設定機台能力
-- [ ] 權限驗證：Fab User 無存取權
+- [x] `GET /api/equipment/` — 列表
+- [x] `POST /api/equipment/` — 新增（含 capability_ids）
+- [x] `GET /api/equipment/{id}` — 詳情（含 capabilities, recipes）
+- [x] `PATCH /api/equipment/{id}` — 修改
+- [x] `POST /api/equipment/{id}/capabilities` — 設定機台能力
+- [x] 權限驗證：Fab User 無存取權
 
 ### 3.7 Recipe API Tests
-- [ ] `GET /api/recipes/` — 列表（按 equipment_id, experiment_type_id 篩選）
-- [ ] `POST /api/recipes/` — 新增（驗證 equipment + experiment_type 有效組合）
-- [ ] `GET /api/recipes/{id}` — 詳情
-- [ ] `PATCH /api/recipes/{id}` — 修改
-- [ ] `DELETE /api/recipes/{id}` — 軟刪除
-- [ ] 權限驗證：Fab User 無存取權
+- [x] `GET /api/recipes/` — 列表（按 equipment_id, experiment_type_id 篩選）
+- [x] `POST /api/recipes/` — 新增（驗證 equipment + experiment_type 有效組合）
+- [x] `GET /api/recipes/{id}` — 詳情
+- [x] `PATCH /api/recipes/{id}` — 修改
+- [x] `DELETE /api/recipes/{id}` — 軟刪除
+- [x] 權限驗證：Fab User 無存取權
 
 ### 3.8 API 實作
-- [ ] 實作 equipment router
-- [ ] 實作 recipe router
-- [ ] 所有測試 green
+- [x] 實作 equipment router
+- [x] 實作 recipe router
+- [x] 所有測試 green
 
 ### 3.9 Factory
-- [ ] 建立 `EquipmentFactory`（含 capability 設定）
-- [ ] 建立 `RecipeFactory`
+- [x] 建立 `EquipmentFactory`（含 capability 設定）
+- [x] 建立 `RecipeFactory`
 
 ---
 
