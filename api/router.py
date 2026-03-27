@@ -3,6 +3,8 @@
 from ninja import NinjaAPI
 
 from apps.accounts.api import router as auth_router
+from apps.commissions.api import router as requests_router
+from apps.commissions.api import sample_router
 from apps.equipment.api import recipe_router
 from apps.equipment.api import router as equipment_router
 from apps.experiments.api import router as experiment_types_router
@@ -17,6 +19,8 @@ api.add_router("/auth/", auth_router)
 api.add_router("/experiment-types/", experiment_types_router)
 api.add_router("/equipment/", equipment_router)
 api.add_router("/recipes/", recipe_router)
+api.add_router("/requests/", requests_router)
+api.add_router("/samples/", sample_router)
 
 
 @api.get("/health", tags=["System"])
