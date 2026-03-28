@@ -157,6 +157,10 @@
 - [x] 建立 `EquipmentFactory`（含 capability 設定）
 - [x] 建立 `RecipeFactory`
 
+### 3.10 Admin（django-unfold UI）
+- [x] 設定 `EquipmentAdmin`（含 `EquipmentCapabilityInline`、支援搜尋與篩選）
+- [x] 設定 `RecipeAdmin`（支援搜尋、is_active 篩選）
+
 ---
 
 ## Phase 4：commissions（委託單與樣品）
@@ -237,6 +241,11 @@
 - [x] 建立 `RequestFactory`
 - [x] 建立 `SampleFactory`
 - [x] 建立 `ApprovalLogFactory`（含 `RequestExperimentFactory`）
+
+### 4.12 Admin（django-unfold UI）
+- [x] 設定 `RequestAdmin`（含 `RequestExperimentInline`、`SampleInline`、`ApprovalLogInline`）
+- [x] 設定 `SampleAdmin`（支援搜尋、status/wafer_size 篩選）
+- [x] 設定 `ApprovalLogAdmin`（唯讀，禁止新增/修改）
 
 ---
 
@@ -338,6 +347,11 @@
 - [x] 建立 `DispatchFactory`
 - [x] 建立 `ExperimentResultFactory`
 
+### 5.15 Admin（django-unfold UI）
+- [x] 設定 `WIPAdmin`（含 `DispatchInline`、支援搜尋與篩選）
+- [x] 設定 `DispatchAdmin`（含 `ExperimentResultInline`、支援多欄位搜尋）
+- [x] 設定 `ExperimentResultAdmin`（唯讀，禁止新增/修改）
+
 ---
 
 ## Phase 6：reports（統計報表）
@@ -345,23 +359,30 @@
 > 依賴：Phase 4、Phase 5（查詢 Request、WIP 數據）
 
 ### 6.1 查詢邏輯
-- [ ] 實作機台利用率查詢（按時間區間、機台分組統計 Dispatch 數量）
-- [ ] 實作委託單統計查詢（狀態分佈、平均 TAT）
+- [x] 實作機台利用率查詢（按時間區間、機台分組統計 Dispatch 數量）
+- [x] 實作委託單統計查詢（狀態分佈、平均 TAT）
 
 ### 6.2 Schema
-- [ ] `EquipmentUtilizationOut` schema
-- [ ] `RequestStatisticsOut` schema
+- [x] `EquipmentUtilizationOut` schema
+- [x] `RequestStatisticsOut` schema
 
 ### 6.3 API Tests
-- [ ] `GET /api/reports/equipment-utilization` — 機台利用率
-- [ ] `GET /api/reports/request-statistics` — 委託單統計
-- [ ] 測試時間範圍篩選
-- [ ] 測試空數據回應
-- [ ] 權限驗證：僅 Lab Manager
+- [x] `GET /api/reports/equipment-utilization` — 機台利用率
+- [x] `GET /api/reports/request-statistics` — 委託單統計
+- [x] 測試時間範圍篩選
+- [x] 測試空數據回應
+- [x] 權限驗證：僅 Lab Manager
 
 ### 6.4 API 實作
-- [ ] 實作 reports router
-- [ ] 所有測試 green
+- [x] 實作 reports router
+- [x] 所有測試 green
+
+### 6.5 Admin（django-unfold UI）
+- [x] 建立 `EquipmentUtilizationReport` proxy model（繼承 `Dispatch`）
+- [x] 建立 `RequestStatisticsReport` proxy model（繼承 `Request`）
+- [x] 設定 `EquipmentUtilizationAdmin`（自訂 changelist view，含日期範圍與機台篩選）
+- [x] 設定 `RequestStatisticsAdmin`（自訂 changelist view，含日期範圍、狀態分佈、平均 TAT）
+- [x] 兩個 Admin 頁面均唯讀（禁止新增/修改/刪除）
 
 ---
 
