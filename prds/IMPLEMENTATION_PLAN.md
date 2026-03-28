@@ -245,98 +245,98 @@
 > 依賴：Phase 3（equipment, recipe FK）、Phase 4（sample OneToOne）
 
 ### 5.1 WIP Model
-- [ ] 定義 `WIPStatus` enum（4 個狀態：created, in_progress, completed, aborted）
-- [ ] 定義 `WIP` model（sample OneToOneField）
-- [ ] 執行 migration
+- [x] 定義 `WIPStatus` enum（4 個狀態：created, in_progress, completed, aborted）
+- [x] 定義 `WIP` model（sample OneToOneField）
+- [x] 執行 migration
 
 ### 5.2 WIP Model Tests
-- [ ] 測試建立 WIP
-- [ ] 測試 WIP 與 Sample 的 OneToOne 關聯
-- [ ] 測試同一 Sample 不可建立多個 WIP（unique 約束）
+- [x] 測試建立 WIP
+- [x] 測試 WIP 與 Sample 的 OneToOne 關聯
+- [x] 測試同一 Sample 不可建立多個 WIP（unique 約束）
 
 ### 5.3 Dispatch Model
-- [ ] 定義 `DispatchStatus` enum（9 個狀態）
-- [ ] 定義 `Dispatch` model（wip FK, experiment_type FK, equipment FK, recipe FK）
-- [ ] 執行 migration
+- [x] 定義 `DispatchStatus` enum（9 個狀態）
+- [x] 定義 `Dispatch` model（wip FK, experiment_type FK, equipment FK, recipe FK）
+- [x] 執行 migration
 
 ### 5.4 Dispatch Model Tests
-- [ ] 測試建立 Dispatch
-- [ ] 測試 Dispatch 與 WIP、ExperimentType、Equipment、Recipe 的 FK 關聯
-- [ ] 測試同一 WIP 可建立多個 Dispatch（不同實驗項目）
+- [x] 測試建立 Dispatch
+- [x] 測試 Dispatch 與 WIP、ExperimentType、Equipment、Recipe 的 FK 關聯
+- [x] 測試同一 WIP 可建立多個 Dispatch（不同實驗項目）
 
 ### 5.5 ExperimentResult Model
-- [ ] 定義 `ExperimentResult` model
-- [ ] 定義 `DataSource` / `Verdict` enum
-- [ ] 執行 migration
+- [x] 定義 `ExperimentResult` model
+- [x] 定義 `DataSource` / `Verdict` enum
+- [x] 執行 migration
 
 ### 5.6 ExperimentResult Model Tests
-- [ ] 測試建立 ExperimentResult
-- [ ] 測試 OneToOne with Dispatch
-- [ ] 測試 data JSONField 讀寫
+- [x] 測試建立 ExperimentResult
+- [x] 測試 OneToOne with Dispatch
+- [x] 測試 data JSONField 讀寫
 
 ### 5.7 狀態機邏輯
-- [ ] 實作 WIP 狀態轉移驗證方法
-- [ ] 實作 Dispatch 狀態轉移驗證方法
-- [ ] 實作派貨驗證（機台能力、capacity 檢查）
-- [ ] 實作狀態聯動邏輯（Dispatch 完成 → WIP 完成 → Sample 完成 → Request 完成）
+- [x] 實作 WIP 狀態轉移驗證方法
+- [x] 實作 Dispatch 狀態轉移驗證方法
+- [x] 實作派貨驗證（機台能力、recipe 歸屬檢查）
+- [x] 實作狀態聯動邏輯（WIP 完成 → Sample 完成 → Request 完成；WIP 中止 → Sample 異常）
 
 ### 5.8 狀態機 Tests
-- [ ] 測試 WIP 合法狀態轉移（created → in_progress → completed）
-- [ ] 測試 WIP 非法狀態轉移
-- [ ] 測試 Dispatch 合法狀態轉移（pending → dispatched → running → unloaded → result_recorded → completed）
-- [ ] 測試 Dispatch 非法狀態轉移
-- [ ] 測試派貨驗證：機台不支援該實驗項目 → 拒絕
-- [ ] 測試派貨驗證：recipe 不屬於指定機台 → 拒絕
-- [ ] 測試狀態聯動：WIP 所有 Dispatch 完成 → WIP 可標記完成
-- [ ] 測試狀態聯動：WIP 完成 → Sample 自動完成
-- [ ] 測試狀態聯動：所有 Sample 完成 → Request 自動完成
-- [ ] 測試狀態聯動：WIP 中止 → Sample 標記處理異常
-- [ ] 測試異常 → 重派流程
-- [ ] 測試異常 → 中止流程
+- [x] 測試 WIP 合法狀態轉移（created → in_progress → completed）
+- [x] 測試 WIP 非法狀態轉移
+- [x] 測試 Dispatch 合法狀態轉移（pending → dispatched → running → unloaded → result_recorded → completed）
+- [x] 測試 Dispatch 非法狀態轉移
+- [x] 測試派貨驗證：機台不支援該實驗項目 → 拒絕
+- [x] 測試派貨驗證：recipe 不屬於指定機台 → 拒絕
+- [x] 測試狀態聯動：WIP 所有 Dispatch 完成 → WIP 可標記完成
+- [x] 測試狀態聯動：WIP 完成 → Sample 自動完成
+- [x] 測試狀態聯動：所有 Sample 完成 → Request 自動完成
+- [x] 測試狀態聯動：WIP 中止 → Sample 標記處理異常
+- [x] 測試異常 → 重派流程
+- [x] 測試異常 → 中止流程
 
 ### 5.9 Schema
-- [ ] `WIPIn` / `WIPOut` schema（含巢狀 dispatches）
-- [ ] `DispatchIn` / `DispatchOut` schema
-- [ ] `ExperimentResultIn` / `ExperimentResultOut` schema
-- [ ] `ExceptionReportIn` schema
-- [ ] `AutomationResultIn` schema
+- [x] `WIPIn` / `WIPOut` schema（含巢狀 dispatches）
+- [x] `DispatchIn` / `DispatchOut` schema
+- [x] `ExperimentResultIn` / `ExperimentResultOut` schema
+- [x] `ExceptionReportIn` schema
+- [x] `AutomationResultIn` schema
 
 ### 5.10 WIP API Tests
-- [ ] `GET /api/wips/` — 列表（按 status 篩選）
-- [ ] `POST /api/wips/` — 建立 WIP（分貨，sample_id）
-- [ ] `GET /api/wips/{id}` — 詳情（含 dispatches 列表）
-- [ ] `POST /api/wips/{id}/dispatches` — 建立派貨
-- [ ] `POST /api/wips/{id}/complete` — 完成
-- [ ] `POST /api/wips/{id}/abort` — 中止
-- [ ] 權限驗證：Fab User 無存取權
+- [x] `GET /api/wips/` — 列表（按 status 篩選）
+- [x] `POST /api/wips/` — 建立 WIP（分貨，sample_id）
+- [x] `GET /api/wips/{id}` — 詳情（含 dispatches 列表）
+- [x] `POST /api/wips/{id}/dispatches` — 建立派貨
+- [x] `POST /api/wips/{id}/complete` — 完成
+- [x] `POST /api/wips/{id}/abort` — 中止
+- [x] 權限驗證：Fab User 無存取權
 
 ### 5.11 Dispatch API Tests
-- [ ] `GET /api/dispatches/` — 列表（按 status, equipment_id, wip_id 篩選）
-- [ ] `GET /api/dispatches/{id}` — 詳情
-- [ ] `POST /api/dispatches/{id}/start` — 開始執行
-- [ ] `POST /api/dispatches/{id}/unload` — 下貨
-- [ ] `POST /api/dispatches/{id}/record-result` — 手動登錄結果
-- [ ] `POST /api/dispatches/{id}/complete` — 完成
-- [ ] `POST /api/dispatches/{id}/report-exception` — 回報異常
-- [ ] `POST /api/dispatches/{id}/redispatch` — 重派
-- [ ] `POST /api/dispatches/{id}/abort` — 中止
-- [ ] 權限驗證：Fab User 無存取權
+- [x] `GET /api/dispatches/` — 列表（按 status, equipment_id, wip_id 篩選）
+- [x] `GET /api/dispatches/{id}` — 詳情
+- [x] `POST /api/dispatches/{id}/start` — 開始執行
+- [x] `POST /api/dispatches/{id}/unload` — 下貨
+- [x] `POST /api/dispatches/{id}/record-result` — 手動登錄結果
+- [x] `POST /api/dispatches/{id}/complete` — 完成
+- [x] `POST /api/dispatches/{id}/report-exception` — 回報異常
+- [x] `POST /api/dispatches/{id}/redispatch` — 重派
+- [x] `POST /api/dispatches/{id}/abort` — 中止
+- [x] 權限驗證：Fab User 無存取權
 
 ### 5.12 Automation API Tests
-- [ ] `POST /api/automation/equipment-result` — 自動結單（以 dispatch_id 為單位）
-- [ ] 測試自動化狀態聯動（Dispatch → WIP → Sample → Request）
-- [ ] 測試 data_source 記錄為 automated
+- [x] `POST /api/automation/equipment-result` — 自動結單（以 dispatch_id 為單位）
+- [x] 測試自動化狀態聯動（Dispatch 完成）
+- [x] 測試 data_source 記錄為 automated
 
 ### 5.13 API 實作
-- [ ] 實作 wips router
-- [ ] 實作 dispatches router
-- [ ] 實作 automation router
-- [ ] 所有測試 green
+- [x] 實作 wips router
+- [x] 實作 dispatches router
+- [x] 實作 automation router
+- [x] 所有測試 green
 
 ### 5.14 Factory
-- [ ] 建立 `WIPFactory`
-- [ ] 建立 `DispatchFactory`
-- [ ] 建立 `ExperimentResultFactory`
+- [x] 建立 `WIPFactory`
+- [x] 建立 `DispatchFactory`
+- [x] 建立 `ExperimentResultFactory`
 
 ---
 

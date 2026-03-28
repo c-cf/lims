@@ -8,6 +8,8 @@ from apps.commissions.api import sample_router
 from apps.equipment.api import recipe_router
 from apps.equipment.api import router as equipment_router
 from apps.experiments.api import router as experiment_types_router
+from apps.wip.api import automation_router, dispatch_router
+from apps.wip.api import router as wip_router
 
 api = NinjaAPI(
     title="LIMS API",
@@ -21,6 +23,9 @@ api.add_router("/equipment/", equipment_router)
 api.add_router("/recipes/", recipe_router)
 api.add_router("/requests/", requests_router)
 api.add_router("/samples/", sample_router)
+api.add_router("/wips/", wip_router)
+api.add_router("/dispatches/", dispatch_router)
+api.add_router("/automation/", automation_router)
 
 
 @api.get("/health", tags=["System"])
