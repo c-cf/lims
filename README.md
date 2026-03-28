@@ -119,9 +119,9 @@ uv run pre-commit install
 | Phase 2 | experiments — 實驗項目 | 完成 ✓ |
 | Phase 3 | equipment — 機台與 Recipe | 完成 ✓ |
 | Phase 4 | commissions — 委託單與樣品 | 完成 ✓ |
-| Phase 5 | wip — WIP 派貨與結單 | 待開始 |
-| Phase 6 | reports — 統計報表 | 待開始 |
-| Phase 7 | 整合測試與收尾 | 待開始 |
+| Phase 5 | wip — WIP 派貨與結單 | 完成 ✓ |
+| Phase 6 | reports — 統計報表 | 完成 ✓ |
+| Phase 7 | 整合測試與收尾 | 完成 ✓ |
 
 ## 貢獻
 
