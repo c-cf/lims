@@ -71,7 +71,10 @@ INSTALLED_APPS = [
     "apps.commissions",
     "apps.wip",
     "apps.reports",
+    "apps.web",
 ]
+
+LOGIN_URL = "/login/"
 
 MIDDLEWARE = [
     "django.middleware.security.SecurityMiddleware",
