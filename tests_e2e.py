@@ -415,9 +415,9 @@ class TestSampleLostWorkflow:
         assert r.status_code == 200
         assert r.json()["status"] == SampleStatus.VOIDED
 
-        # Request is still sample_shipped (not auto-cancelled)
+        # All samples are terminal (voided), so request auto-completes.
         r = _get(client, f"/api/requests/{request_id}", lab_manager)
-        assert r.json()["status"] == RequestStatus.SAMPLE_SHIPPED
+        assert r.json()["status"] == RequestStatus.COMPLETED
 
 
 # =============================================================================

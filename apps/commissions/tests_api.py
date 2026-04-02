@@ -845,3 +845,89 @@ class TestSampleReturn:
             **auth_headers(lab_staff),
         )
         assert resp.status_code == 400
+
+
+@pytest.mark.django_db
+class TestVoidReturnRequestAutoTransition:
+    """Voiding or returning a sample should auto-transition the parent request."""
+
+    def test_void_last_sample_in_progress_completes_request(
+        self, client, auth_headers, lab_staff
+    ):
+        """Voiding the last non-terminal sample completes the request."""
+        req = RequestFactory(status=RequestStatus.IN_PROGRESS)
+        SampleFactory(request=req, wafer_id="WF-001", status=SampleStatus.COMPLETED)
+        s2 = SampleFactory(
+            request=req, wafer_id="WF-002", status=SampleStatus.PROCESSING_EXCEPTION
+        )
+
+        resp = client.post(
+            f"/api/samples/{s2.pk}/void",
+            content_type="application/json",
+            **auth_headers(lab_staff),
+        )
+        assert resp.status_code == 200
+
+        req.refresh_from_db()
+        assert req.status == RequestStatus.COMPLETED
+
+    def test_void_sample_in_shipped_request_transitions_to_in_progress(
+        self, client, auth_headers, lab_staff
+    ):
+        """Voiding a receiving-exception sample counts as accounted-for,
+        allowing the request to move to in_progress when all others are received."""
+        req = RequestFactory(status=RequestStatus.SAMPLE_SHIPPED)
+        SampleFactory(request=req, wafer_id="WF-001", status=SampleStatus.RECEIVED)
+        s2 = SampleFactory(
+            request=req, wafer_id="WF-002", status=SampleStatus.RECEIVING_EXCEPTION
+        )
+
+        resp = client.post(
+            f"/api/samples/{s2.pk}/void",
+            content_type="application/json",
+            **auth_headers(lab_staff),
+        )
+        assert resp.status_code == 200
+
+        req.refresh_from_db()
+        assert req.status == RequestStatus.IN_PROGRESS
+
+    def test_return_last_sample_in_progress_completes_request(
+        self, client, auth_headers, lab_staff
+    ):
+        """Returning the last non-terminal sample completes the request."""
+        req = RequestFactory(status=RequestStatus.IN_PROGRESS)
+        SampleFactory(request=req, wafer_id="WF-001", status=SampleStatus.COMPLETED)
+        s2 = SampleFactory(
+            request=req, wafer_id="WF-002", status=SampleStatus.PROCESSING_EXCEPTION
+        )
+
+        resp = client.post(
+            f"/api/samples/{s2.pk}/return",
+            content_type="application/json",
+            **auth_headers(lab_staff),
+        )
+        assert resp.status_code == 200
+
+        req.refresh_from_db()
+        assert req.status == RequestStatus.COMPLETED
+
+    def test_void_partial_samples_does_not_complete_request(
+        self, client, auth_headers, lab_staff
+    ):
+        """Request stays in_progress if some samples are still active."""
+        req = RequestFactory(status=RequestStatus.IN_PROGRESS)
+        SampleFactory(request=req, wafer_id="WF-001", status=SampleStatus.RECEIVED)
+        s2 = SampleFactory(
+            request=req, wafer_id="WF-002", status=SampleStatus.PROCESSING_EXCEPTION
+        )
+
+        resp = client.post(
+            f"/api/samples/{s2.pk}/void",
+            content_type="application/json",
+            **auth_headers(lab_staff),
+        )
+        assert resp.status_code == 200
+
+        req.refresh_from_db()
+        assert req.status == RequestStatus.IN_PROGRESS

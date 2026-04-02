@@ -108,27 +108,50 @@ def _get_sample_for_user(sample_id: int, request: HttpRequest) -> Sample | None:
 
 
 def _check_all_samples_received(req: Request) -> None:
-    """If all samples in a sample_shipped request are genuinely received,
+    """If all samples in a sample_shipped request are accounted for,
     auto-transition the request to in_progress.
 
-    Only counts samples in RECEIVED, SPLIT, or COMPLETED as "received".
-    Samples in exception/lost/voided/returned states do NOT count.
+    Counts RECEIVED, SPLIT, COMPLETED, VOIDED, and RETURNED — any state
+    that means the sample has been definitively dealt with.
 
     Caller must hold a lock on the request row (select_for_update).
     """
     if req.status != RequestStatus.SAMPLE_SHIPPED:
         return
 
-    received_statuses = {
+    accounted_statuses = {
         SampleStatus.RECEIVED,
         SampleStatus.SPLIT,
         SampleStatus.COMPLETED,
+        SampleStatus.VOIDED,
+        SampleStatus.RETURNED,
     }
     total = req.samples.count()
-    received_count = req.samples.filter(status__in=received_statuses).count()
+    accounted_count = req.samples.filter(status__in=accounted_statuses).count()
 
-    if total > 0 and received_count == total:
+    if total > 0 and accounted_count == total:
         req.status = RequestStatus.IN_PROGRESS
+        req.save()
+
+
+def _check_request_completed(req: Request) -> None:
+    """If all samples are in terminal states, auto-complete the request.
+
+    Caller must hold a lock on the request row (select_for_update).
+    """
+    if req.status != RequestStatus.IN_PROGRESS:
+        return
+
+    terminal_statuses = {
+        SampleStatus.COMPLETED,
+        SampleStatus.VOIDED,
+        SampleStatus.RETURNED,
+    }
+    total = req.samples.count()
+    terminal_count = req.samples.filter(status__in=terminal_statuses).count()
+
+    if total > 0 and terminal_count == total:
+        req.status = RequestStatus.COMPLETED
         req.save()
 
 
@@ -589,7 +612,16 @@ def report_lost_sample(request: HttpRequest, sample_id: int):
 )
 def void_sample(request: HttpRequest, sample_id: int):
     """Void a sample (from exception/lost states). Only lab staff/managers allowed."""
-    return _lab_sample_action(request, sample_id, "void")
+
+    def post_save_in_txn(sample: Sample) -> None:
+        req = Request.objects.select_for_update().get(pk=sample.request_id)
+        _check_all_samples_received(req)
+        req.refresh_from_db()
+        _check_request_completed(req)
+
+    return _lab_sample_action(
+        request, sample_id, "void", post_save_in_txn=post_save_in_txn
+    )
 
 
 @sample_router.post(
@@ -598,4 +630,13 @@ def void_sample(request: HttpRequest, sample_id: int):
 )
 def return_sample(request: HttpRequest, sample_id: int):
     """Return a sample (from exception states). Only lab staff/managers allowed."""
-    return _lab_sample_action(request, sample_id, "return")
+
+    def post_save_in_txn(sample: Sample) -> None:
+        req = Request.objects.select_for_update().get(pk=sample.request_id)
+        _check_all_samples_received(req)
+        req.refresh_from_db()
+        _check_request_completed(req)
+
+    return _lab_sample_action(
+        request, sample_id, "return", post_save_in_txn=post_save_in_txn
+    )
