@@ -1,7 +1,21 @@
 from django.contrib import admin
 from unfold.admin import ModelAdmin, TabularInline
 
-from apps.wip.models import WIP, Dispatch, ExperimentResult
+from apps.wip.models import (
+    WIP,
+    Dispatch,
+    ExperimentResult,
+    SampleExperimentStatus,
+    WIPSample,
+)
+
+
+class WIPSampleInline(TabularInline):
+    model = WIPSample
+    extra = 0
+    fields = ("sample", "added_at")
+    readonly_fields = ("added_at",)
+    raw_id_fields = ("sample",)
 
 
 class DispatchInline(TabularInline):
@@ -9,7 +23,6 @@ class DispatchInline(TabularInline):
     extra = 0
     fields = (
         "experiment_type",
-        "equipment",
         "recipe",
         "status",
         "dispatched_at",
@@ -37,18 +50,23 @@ class ExperimentResultInline(TabularInline):
 class WIPAdmin(ModelAdmin):
     list_display = (
         "id",
-        "sample",
+        "equipment",
+        "sample_count",
         "status",
         "created_by",
         "completed_at",
         "created_at",
     )
     list_filter = ("status",)
-    search_fields = ("sample__wafer_id", "created_by__username")
+    search_fields = ("samples__wafer_id", "equipment__name", "created_by__username")
     readonly_fields = ("completed_at", "created_at", "updated_at")
-    list_select_related = ("sample", "created_by")
+    list_select_related = ("equipment", "created_by")
     list_per_page = 25
-    inlines = (DispatchInline,)
+    inlines = (WIPSampleInline, DispatchInline)
+
+    @admin.display(description="Samples")
+    def sample_count(self, obj):
+        return obj.samples.count()
 
 
 @admin.register(Dispatch)
@@ -57,21 +75,18 @@ class DispatchAdmin(ModelAdmin):
         "id",
         "wip",
         "experiment_type",
-        "equipment",
         "status",
         "dispatched_at",
         "completed_at",
         "created_at",
     )
-    list_filter = ("status", "equipment", "experiment_type")
+    list_filter = ("status", "experiment_type")
     search_fields = (
-        "wip__sample__wafer_id",
-        "equipment__name",
         "experiment_type__name",
         "created_by__username",
     )
     readonly_fields = ("dispatched_at", "completed_at", "created_at", "updated_at")
-    list_select_related = ("wip", "experiment_type", "equipment", "recipe")
+    list_select_related = ("wip", "experiment_type", "recipe")
     list_per_page = 25
     inlines = (ExperimentResultInline,)
 
@@ -88,7 +103,6 @@ class ExperimentResultAdmin(ModelAdmin):
     )
     list_filter = ("verdict", "data_source")
     search_fields = (
-        "dispatch__wip__sample__wafer_id",
         "summary",
         "recorded_by__username",
     )
@@ -109,3 +123,19 @@ class ExperimentResultAdmin(ModelAdmin):
 
     def has_change_permission(self, request, obj=None):
         return False
+
+
+@admin.register(SampleExperimentStatus)
+class SampleExperimentStatusAdmin(ModelAdmin):
+    list_display = (
+        "id",
+        "sample",
+        "experiment_type",
+        "status",
+        "dispatch",
+        "updated_at",
+    )
+    list_filter = ("status",)
+    search_fields = ("sample__wafer_id", "experiment_type__name")
+    list_select_related = ("sample", "experiment_type", "dispatch")
+    list_per_page = 25

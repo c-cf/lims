@@ -1,6 +1,6 @@
 """Django Ninja routers for WIP, Dispatch, and Automation endpoints."""
 
-from django.db import IntegrityError, models, transaction
+from django.db import models, transaction
 from django.db.models import Prefetch
 from django.http import HttpRequest
 from django.utils import timezone
@@ -11,9 +11,23 @@ from apps.accounts.auth import JWTAuth
 from apps.accounts.permissions import has_lab_role
 from apps.commissions.models import Request, RequestStatus, Sample, SampleStatus
 from apps.commissions.state_machine import validate_sample_transition
-from apps.equipment.models import Equipment, EquipmentCapability, Recipe
+from apps.equipment.models import (
+    Equipment,
+    EquipmentCapability,
+    EquipmentStatus,
+    Recipe,
+)
 from apps.experiments.models import ExperimentType
-from apps.wip.models import WIP, Dispatch, DispatchStatus, ExperimentResult, WIPStatus
+from apps.wip.models import (
+    WIP,
+    Dispatch,
+    DispatchStatus,
+    ExperimentResult,
+    SampleExperimentProgress,
+    SampleExperimentStatus,
+    WIPSample,
+    WIPStatus,
+)
 from apps.wip.schemas import (
     AutomationResultIn,
     DispatchDetailOut,
@@ -21,6 +35,7 @@ from apps.wip.schemas import (
     DispatchListOut,
     ExceptionReportIn,
     ExperimentResultIn,
+    WIPAddSamplesIn,
     WIPDetailOut,
     WIPIn,
     WIPListOut,
@@ -43,31 +58,26 @@ automation_router = Router(tags=["Automation"], auth=JWTAuth())
 
 def _wip_detail_queryset() -> "models.QuerySet[WIP]":
     """Base queryset with all prefetches needed for WIPDetailOut."""
-    return WIP.objects.prefetch_related(
+    return WIP.objects.select_related("equipment").prefetch_related(
+        "samples",
         Prefetch(
             "dispatches",
             queryset=Dispatch.objects.select_related(
-                "experiment_type", "equipment", "recipe"
+                "experiment_type", "recipe"
             ).order_by("created_at"),
-        )
+        ),
     )
 
 
 def _dispatch_detail_queryset() -> "models.QuerySet[Dispatch]":
     """Base queryset with all prefetches needed for DispatchDetailOut."""
     return Dispatch.objects.select_related(
-        "experiment_type", "equipment", "recipe"
+        "experiment_type", "recipe", "wip__equipment"
     ).prefetch_related("result")
 
 
 def _check_all_dispatches_done(wip: WIP) -> bool:
-    """Return True if all dispatches for the WIP are in a terminal state.
-
-    PENDING_REDISPATCH is intentionally treated as terminal here: when a
-    dispatch is redispatched, the original stays at PENDING_REDISPATCH (a
-    historical record) and a new dispatch is created. The WIP can be marked
-    complete once the new dispatch (and all others) finish.
-    """
+    """Return True if all dispatches for the WIP are in a terminal state."""
     active_statuses = {
         DispatchStatus.PENDING,
         DispatchStatus.DISPATCHED,
@@ -78,36 +88,109 @@ def _check_all_dispatches_done(wip: WIP) -> bool:
     return not wip.dispatches.filter(status__in=active_statuses).exists()
 
 
-def _complete_sample_and_check_request(sample: Sample) -> None:
-    """Mark sample as completed, then auto-complete the request if all samples are done.
+def _equipment_remaining_capacity(
+    equipment: Equipment, exclude_wip_id: int | None = None
+) -> int:
+    """Return how many more samples can be added to active WIPs on this equipment.
 
-    Must be called inside an active transaction.atomic() block, after the
-    caller has already acquired a select_for_update lock on the sample row.
+    Active WIPs are those not in COMPLETED or ABORTED state.
     """
-    try:
-        target = validate_sample_transition(sample.status, "complete")
-    except InvalidTransitionError:
-        return  # Sample not in a completable state; skip
+    active_statuses = {WIPStatus.CREATED, WIPStatus.IN_PROGRESS}
+    active_wips = WIP.objects.filter(equipment=equipment, status__in=active_statuses)
+    if exclude_wip_id is not None:
+        active_wips = active_wips.exclude(pk=exclude_wip_id)
+    occupied = WIPSample.objects.filter(wip__in=active_wips).count()
+    return max(equipment.capacity - occupied, 0)
 
-    sample.status = target
-    sample.save()
 
-    # Lock the request row to prevent concurrent auto-completion races.
-    req = Request.objects.select_for_update().get(pk=sample.request_id)
-    if req.status != RequestStatus.IN_PROGRESS:
-        return
+def _validate_samples_for_wip(sample_ids: list[int]) -> tuple[list[Sample], str | None]:
+    """Validate that samples are eligible for WIP creation/addition.
 
-    completed_statuses = {
-        SampleStatus.COMPLETED,
-        SampleStatus.VOIDED,
-        SampleStatus.RETURNED,
-    }
-    total = req.samples.count()
-    terminal_count = req.samples.filter(status__in=completed_statuses).count()
+    Returns (samples, error_message). error_message is None on success.
+    """
+    samples = list(Sample.objects.select_related("request").filter(pk__in=sample_ids))
+    if len(samples) != len(set(sample_ids)):
+        return [], "One or more samples not found"
 
-    if total > 0 and terminal_count == total:
-        req.status = RequestStatus.COMPLETED
-        req.save()
+    for sample in samples:
+        if sample.request.status != RequestStatus.IN_PROGRESS:
+            return [], (
+                f"Sample {sample.wafer_id}: request is not in_progress "
+                f"(all samples must be received first)"
+            )
+        if sample.status not in (SampleStatus.RECEIVED, SampleStatus.PROCESSING):
+            return [], (
+                f"Sample {sample.wafer_id}: status is '{sample.status}', "
+                f"must be 'received' or 'processing'"
+            )
+
+    return samples, None
+
+
+def _transition_samples_to_processing(samples: list[Sample]) -> None:
+    """Transition RECEIVED samples to PROCESSING status."""
+    for sample in samples:
+        if sample.status == SampleStatus.RECEIVED:
+            target = validate_sample_transition(sample.status, "start_processing")
+            sample.status = target
+            sample.save(update_fields=["status", "updated_at"])
+
+
+def _update_experiment_statuses_on_dispatch_complete(dispatch: Dispatch) -> None:
+    """When a dispatch completes, update SampleExperimentStatus for all
+    samples in the WIP, then check for sample/request auto-completion.
+
+    Must be called inside an active transaction.atomic() block.
+    """
+    wip = dispatch.wip
+    experiment_type = dispatch.experiment_type
+    result = getattr(dispatch, "result", None)
+    verdict_status = SampleExperimentProgress.COMPLETED
+    if result and result.verdict == ExperimentResult.Verdict.FAIL:
+        verdict_status = SampleExperimentProgress.FAILED
+
+    sample_ids = list(wip.samples.values_list("pk", flat=True))
+
+    SampleExperimentStatus.objects.filter(
+        sample_id__in=sample_ids,
+        experiment_type=experiment_type,
+    ).update(status=verdict_status, dispatch=dispatch)
+
+    # Check auto-completion for each sample.
+    for sample in Sample.objects.select_for_update().filter(pk__in=sample_ids):
+        if sample.status != SampleStatus.PROCESSING:
+            continue
+
+        total = SampleExperimentStatus.objects.filter(sample=sample).count()
+        completed = SampleExperimentStatus.objects.filter(
+            sample=sample, status=SampleExperimentProgress.COMPLETED
+        ).count()
+
+        if total > 0 and completed >= total:
+            try:
+                target = validate_sample_transition(sample.status, "complete")
+            except InvalidTransitionError:
+                continue
+            sample.status = target
+            sample.save(update_fields=["status", "updated_at"])
+
+            # Check request auto-completion.
+            req = Request.objects.select_for_update().get(pk=sample.request_id)
+            if req.status != RequestStatus.IN_PROGRESS:
+                continue
+
+            terminal_statuses = {
+                SampleStatus.COMPLETED,
+                SampleStatus.VOIDED,
+                SampleStatus.RETURNED,
+            }
+            total_samples = req.samples.count()
+            terminal_count = req.samples.filter(status__in=terminal_statuses).count()
+
+            if total_samples > 0 and terminal_count == total_samples:
+                req.status = RequestStatus.COMPLETED
+                req.completed_at = timezone.now()
+                req.save(update_fields=["status", "completed_at", "updated_at"])
 
 
 # =============================================================================
@@ -124,11 +207,11 @@ def list_wips(
     if not has_lab_role(request):
         return 403, {"detail": "Permission denied"}
 
-    qs = WIP.objects.order_by("-created_at")
+    qs = WIP.objects.select_related("equipment").order_by("-created_at")
     if status:
         qs = qs.filter(status=status)
 
-    return 200, list(qs)
+    return 200, [WIPListOut.from_wip(w) for w in qs]
 
 
 @router.post(
@@ -138,28 +221,47 @@ def list_wips(
         400: ErrorOut,
         403: ErrorOut,
         404: ErrorOut,
-        409: ErrorOut,
     },
 )
 def create_wip(request: HttpRequest, payload: WIPIn):
-    """Create a WIP for a sample. Lab staff only."""
+    """Create a WIP with samples on a single equipment. Lab staff only."""
     if not has_lab_role(request):
         return 403, {"detail": "Permission denied"}
 
+    # Validate equipment.
     try:
-        sample = Sample.objects.get(pk=payload.sample_id)
-    except Sample.DoesNotExist:
-        return 404, {"detail": "Sample not found"}
+        equipment = Equipment.objects.get(pk=payload.equipment_id)
+    except Equipment.DoesNotExist:
+        return 404, {"detail": "Equipment not found"}
 
-    try:
-        with transaction.atomic():
-            wip = WIP.objects.create(
-                sample=sample,
-                note=payload.note,
-                created_by=request.auth,
+    if equipment.status != EquipmentStatus.AVAILABLE:
+        return 400, {"detail": "Equipment is not available"}
+
+    # Validate samples.
+    samples, error = _validate_samples_for_wip(payload.sample_ids)
+    if error:
+        return 400, {"detail": error}
+
+    # Check equipment capacity.
+    remaining = _equipment_remaining_capacity(equipment)
+    if len(samples) > remaining:
+        return 400, {
+            "detail": (
+                f"Equipment capacity exceeded: {remaining} slot(s) remaining, "
+                f"but {len(samples)} sample(s) requested"
             )
-    except IntegrityError:
-        return 409, {"detail": "A WIP already exists for this sample"}
+        }
+
+    with transaction.atomic():
+        wip = WIP.objects.create(
+            equipment=equipment,
+            note=payload.note,
+            created_by=request.auth,
+        )
+        for sample in samples:
+            WIPSample.objects.create(wip=wip, sample=sample)
+
+        _transition_samples_to_processing(samples)
 
     wip = _wip_detail_queryset().get(pk=wip.pk)
     return 201, WIPDetailOut.from_wip(wip)
@@ -180,41 +282,17 @@ def get_wip(request: HttpRequest, wip_id: int):
 
 
 @router.post(
-    "/{wip_id}/dispatches/",
-    response={201: WIPDetailOut, 400: ErrorOut, 403: ErrorOut, 404: ErrorOut},
+    "/{wip_id}/samples/",
+    response={200: WIPDetailOut, 400: ErrorOut, 403: ErrorOut, 404: ErrorOut},
 )
-def create_dispatch(request: HttpRequest, wip_id: int, payload: DispatchIn):
-    """Create a dispatch for a WIP. Validates equipment capability and recipe.
-
-    Automatically transitions WIP to in_progress on first dispatch.
-    """
+def add_samples_to_wip(request: HttpRequest, wip_id: int, payload: WIPAddSamplesIn):
+    """Add samples to an existing WIP. Lab staff only."""
     if not has_lab_role(request):
         return 403, {"detail": "Permission denied"}
 
-    # Validate foreign keys before acquiring the WIP lock.
-    try:
-        experiment_type = ExperimentType.objects.get(
-            pk=payload.experiment_type_id, is_active=True
-        )
-    except ExperimentType.DoesNotExist:
-        return 400, {"detail": "Experiment type not found or inactive"}
-
-    try:
-        equipment = Equipment.objects.get(pk=payload.equipment_id)
-    except Equipment.DoesNotExist:
-        return 400, {"detail": "Equipment not found"}
-
-    try:
-        recipe = Recipe.objects.get(pk=payload.recipe_id, equipment=equipment)
-    except Recipe.DoesNotExist:
-        return 400, {
-            "detail": "Recipe not found or does not belong to the given equipment"
-        }
-
-    if not EquipmentCapability.objects.filter(
-        equipment=equipment, experiment_type=experiment_type
-    ).exists():
-        return 400, {"detail": "Equipment does not support this experiment type"}
+    samples, error = _validate_samples_for_wip(payload.sample_ids)
+    if error:
+        return 400, {"detail": error}
 
     with transaction.atomic():
         try:
@@ -222,10 +300,100 @@ def create_dispatch(request: HttpRequest, wip_id: int, payload: DispatchIn):
         except WIP.DoesNotExist:
             return 404, {"detail": "Not found"}
 
+        if wip.status not in (WIPStatus.CREATED, WIPStatus.IN_PROGRESS):
+            return 400, {"detail": "Cannot add samples to a completed or aborted WIP"}
+
+        existing_sample_ids = set(wip.samples.values_list("pk", flat=True))
+        for sample in samples:
+            if sample.pk in existing_sample_ids:
+                return 400, {
+                    "detail": f"Sample {sample.wafer_id} is already in this WIP"
+                }
+
+        # Check equipment capacity (exclude current WIP's own samples).
+        remaining = _equipment_remaining_capacity(wip.equipment, exclude_wip_id=wip.pk)
+        total_after = len(existing_sample_ids) + len(samples)
+        if total_after > wip.equipment.capacity:
+            avail = remaining - len(existing_sample_ids)
+            return 400, {
+                "detail": (
+                    f"Equipment capacity exceeded: {max(avail, 0)} more slot(s) "
+                    f"available, but {len(samples)} sample(s) requested"
+                )
+            }
+
+        for sample in samples:
+            WIPSample.objects.create(wip=wip, sample=sample)
+
+        _transition_samples_to_processing(samples)
+
+    wip = _wip_detail_queryset().get(pk=wip_id)
+    return 200, WIPDetailOut.from_wip(wip)
+
+
+@router.post(
+    "/{wip_id}/dispatches/",
+    response={201: WIPDetailOut, 400: ErrorOut, 403: ErrorOut, 404: ErrorOut},
+)
+def create_dispatch(request: HttpRequest, wip_id: int, payload: DispatchIn):
+    """Create a dispatch for a WIP. Validates recipe matches WIP equipment.
+
+    Automatically transitions WIP to in_progress on first dispatch.
+    """
+    if not has_lab_role(request):
+        return 403, {"detail": "Permission denied"}
+
+    # Validate experiment type.
+    try:
+        experiment_type = ExperimentType.objects.get(
+            pk=payload.experiment_type_id, is_active=True
+        )
+    except ExperimentType.DoesNotExist:
+        return 400, {"detail": "Experiment type not found or inactive"}
+
+    with transaction.atomic():
+        try:
+            wip = (
+                WIP.objects.select_for_update()
+                .select_related("equipment")
+                .get(pk=wip_id)
+            )
+        except WIP.DoesNotExist:
+            return 404, {"detail": "Not found"}
+
+        # Validate recipe belongs to this WIP's equipment.
+        try:
+            recipe = Recipe.objects.get(pk=payload.recipe_id)
+        except Recipe.DoesNotExist:
+            return 400, {"detail": "Recipe not found"}
+
+        if recipe.equipment_id != wip.equipment_id:
+            return 400, {"detail": "Recipe does not belong to this WIP's equipment"}
+
+        if recipe.experiment_type_id != experiment_type.pk:
+            return 400, {
+                "detail": "Recipe experiment type does not match the dispatch experiment type"
+            }
+
+        # Validate equipment capability.
+        if not EquipmentCapability.objects.filter(
+            equipment=wip.equipment, experiment_type=experiment_type
+        ).exists():
+            return 400, {"detail": "Equipment does not support this experiment type"}
+
+        # Validate experiment type is relevant to at least one sample in the WIP.
+        sample_request_ids = wip.samples.values_list("request_id", flat=True)
+        if not Request.objects.filter(
+            pk__in=sample_request_ids,
+            request_experiments__experiment_type=experiment_type,
+        ).exists():
+            return 400, {
+                "detail": "Experiment type is not required by any sample's request in this WIP"
+            }
+
         Dispatch.objects.create(
             wip=wip,
             experiment_type=experiment_type,
-            equipment=equipment,
             recipe=recipe,
             note=payload.note,
             created_by=request.auth,
@@ -234,7 +402,15 @@ def create_dispatch(request: HttpRequest, wip_id: int, payload: DispatchIn):
         # Auto-transition WIP to in_progress on first dispatch.
         if wip.status == WIPStatus.CREATED:
             wip.status = WIPStatus.IN_PROGRESS
-            wip.save()
+            wip.save(update_fields=["status", "updated_at"])
+
+        # Mark experiment statuses as in_progress for relevant samples.
+        sample_ids = list(wip.samples.values_list("pk", flat=True))
+        SampleExperimentStatus.objects.filter(
+            sample_id__in=sample_ids,
+            experiment_type=experiment_type,
+            status=SampleExperimentProgress.PENDING,
+        ).update(status=SampleExperimentProgress.IN_PROGRESS)
 
     wip = _wip_detail_queryset().get(pk=wip_id)
     return 201, WIPDetailOut.from_wip(wip)
@@ -247,7 +423,7 @@ def create_dispatch(request: HttpRequest, wip_id: int, payload: DispatchIn):
 def complete_wip(request: HttpRequest, wip_id: int):
     """Complete a WIP. Requires all dispatches to be in terminal state.
 
-    Auto-completes the sample and checks if the parent request is done.
+    Auto-completes samples and checks if parent requests are done.
     """
     if not has_lab_role(request):
         return 403, {"detail": "Permission denied"}
@@ -270,11 +446,48 @@ def complete_wip(request: HttpRequest, wip_id: int):
 
         wip.status = target
         wip.completed_at = timezone.now()
-        wip.save()
+        wip.save(update_fields=["status", "completed_at", "updated_at"])
 
-        # Auto-complete the sample and propagate to the request if needed.
-        sample = Sample.objects.select_for_update().get(pk=wip.sample_id)
-        _complete_sample_and_check_request(sample)
+        # Check sample/request auto-completion for each sample in the WIP.
+        for sample in Sample.objects.select_for_update().filter(
+            pk__in=wip.samples.values_list("pk", flat=True)
+        ):
+            if sample.status != SampleStatus.PROCESSING:
+                continue
+
+            total = SampleExperimentStatus.objects.filter(sample=sample).count()
+            completed = SampleExperimentStatus.objects.filter(
+                sample=sample, status=SampleExperimentProgress.COMPLETED
+            ).count()
+
+            if total > 0 and completed >= total:
+                try:
+                    sample_target = validate_sample_transition(
+                        sample.status, "complete"
+                    )
+                except InvalidTransitionError:
+                    continue
+                sample.status = sample_target
+                sample.save(update_fields=["status", "updated_at"])
+
+                req = Request.objects.select_for_update().get(pk=sample.request_id)
+                if req.status != RequestStatus.IN_PROGRESS:
+                    continue
+
+                terminal_statuses = {
+                    SampleStatus.COMPLETED,
+                    SampleStatus.VOIDED,
+                    SampleStatus.RETURNED,
+                }
+                total_samples = req.samples.count()
+                terminal_count = req.samples.filter(
+                    status__in=terminal_statuses
+                ).count()
+
+                if total_samples > 0 and terminal_count == total_samples:
+                    req.status = RequestStatus.COMPLETED
+                    req.completed_at = timezone.now()
+                    req.save(update_fields=["status", "completed_at", "updated_at"])
 
     wip = _wip_detail_queryset().get(pk=wip_id)
     return 200, WIPDetailOut.from_wip(wip)
@@ -285,7 +498,7 @@ def complete_wip(request: HttpRequest, wip_id: int):
     response={200: WIPDetailOut, 400: ErrorOut, 403: ErrorOut, 404: ErrorOut},
 )
 def abort_wip(request: HttpRequest, wip_id: int):
-    """Abort a WIP. Marks the associated sample as processing_exception."""
+    """Abort a WIP. Marks associated samples as processing_exception."""
     if not has_lab_role(request):
         return 403, {"detail": "Permission denied"}
 
@@ -301,18 +514,20 @@ def abort_wip(request: HttpRequest, wip_id: int):
             return 400, {"detail": str(e)}
 
         wip.status = target
-        wip.save()
+        wip.save(update_fields=["status", "updated_at"])
 
-        # Mark sample as processing_exception; skip if already in a terminal state.
-        sample = Sample.objects.select_for_update().get(pk=wip.sample_id)
-        try:
-            sample_target = validate_sample_transition(
-                sample.status, "processing_exception"
-            )
-            sample.status = sample_target
-            sample.save()
-        except InvalidTransitionError:
-            pass
+        # Mark PROCESSING samples as processing_exception.
+        for sample in Sample.objects.select_for_update().filter(
+            pk__in=wip.samples.values_list("pk", flat=True)
+        ):
+            try:
+                sample_target = validate_sample_transition(
+                    sample.status, "processing_exception"
+                )
+                sample.status = sample_target
+                sample.save(update_fields=["status", "updated_at"])
+            except InvalidTransitionError:
+                pass
 
     wip = _wip_detail_queryset().get(pk=wip_id)
     return 200, WIPDetailOut.from_wip(wip)
@@ -340,7 +555,7 @@ def list_dispatches(
     if wip_id:
         qs = qs.filter(wip_id=wip_id)
     if equipment_id:
-        qs = qs.filter(equipment_id=equipment_id)
+        qs = qs.filter(wip__equipment_id=equipment_id)
 
     return 200, list(qs)
 
@@ -473,7 +688,11 @@ def complete_dispatch(request: HttpRequest, dispatch_id: int):
 
     with transaction.atomic():
         try:
-            dispatch = Dispatch.objects.select_for_update().get(pk=dispatch_id)
+            dispatch = (
+                Dispatch.objects.select_for_update()
+                .select_related("wip", "experiment_type")
+                .get(pk=dispatch_id)
+            )
         except Dispatch.DoesNotExist:
             return 404, {"detail": "Not found"}
 
@@ -485,6 +704,9 @@ def complete_dispatch(request: HttpRequest, dispatch_id: int):
         dispatch.status = target
         dispatch.completed_at = timezone.now()
         dispatch.save()
+
+        # Update experiment statuses for all samples in the WIP.
+        _update_experiment_statuses_on_dispatch_complete(dispatch)
 
     dispatch = _dispatch_detail_queryset().get(pk=dispatch_id)
     return 200, DispatchDetailOut.from_dispatch(dispatch)
@@ -550,11 +772,10 @@ def redispatch(request: HttpRequest, dispatch_id: int):
         dispatch.status = target
         dispatch.save()
 
-        # Create a new dispatch at PENDING with the same equipment/experiment parameters.
+        # Create a new dispatch with the same experiment/recipe parameters.
         Dispatch.objects.create(
             wip=dispatch.wip,
             experiment_type=dispatch.experiment_type,
-            equipment=dispatch.equipment,
             recipe=dispatch.recipe,
             created_by=request.auth,
         )
@@ -610,7 +831,11 @@ def submit_equipment_result(request: HttpRequest, payload: AutomationResultIn):
 
     with transaction.atomic():
         try:
-            dispatch = Dispatch.objects.select_for_update().get(pk=payload.dispatch_id)
+            dispatch = (
+                Dispatch.objects.select_for_update()
+                .select_related("wip", "experiment_type")
+                .get(pk=payload.dispatch_id)
+            )
         except Dispatch.DoesNotExist:
             return 404, {"detail": "Dispatch not found"}
 
@@ -632,6 +857,9 @@ def submit_equipment_result(request: HttpRequest, payload: AutomationResultIn):
             data=payload.data,
             data_source=ExperimentResult.DataSource.AUTOMATED,
         )
+
+        # Update experiment statuses for all samples in the WIP.
+        _update_experiment_statuses_on_dispatch_complete(dispatch)
 
     dispatch = _dispatch_detail_queryset().get(pk=payload.dispatch_id)
     return 200, DispatchDetailOut.from_dispatch(dispatch)

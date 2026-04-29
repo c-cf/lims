@@ -60,9 +60,9 @@ class TestEquipmentUtilization:
     def test_lab_manager_can_access(self, client, auth_headers, lab_manager):
         """Lab manager can access the endpoint and get valid utilization data."""
         equipment = EquipmentFactory()
-        wip = WIPFactory()
-        DispatchFactory(equipment=equipment, wip=wip, status=DispatchStatus.COMPLETED)
-        DispatchFactory(equipment=equipment, wip=wip, status=DispatchStatus.COMPLETED)
+        wip = WIPFactory(equipment=equipment)
+        DispatchFactory(wip=wip, status=DispatchStatus.COMPLETED)
+        DispatchFactory(wip=wip, status=DispatchStatus.COMPLETED)
 
         params = "?period=week&start_date=2000-01-01&end_date=2099-12-31"
         resp = client.get(
@@ -108,9 +108,10 @@ class TestEquipmentUtilization:
         equipment_a = EquipmentFactory()
         equipment_b = EquipmentFactory()
 
-        wip = WIPFactory()
-        DispatchFactory(equipment=equipment_a, wip=wip, status=DispatchStatus.COMPLETED)
-        DispatchFactory(equipment=equipment_b, wip=wip, status=DispatchStatus.COMPLETED)
+        wip_a = WIPFactory(equipment=equipment_a)
+        wip_b = WIPFactory(equipment=equipment_b)
+        DispatchFactory(wip=wip_a, status=DispatchStatus.COMPLETED)
+        DispatchFactory(wip=wip_b, status=DispatchStatus.COMPLETED)
 
         params = (
             f"?period=month&start_date=2000-01-01&end_date=2099-12-31"
@@ -142,13 +143,13 @@ class TestEquipmentUtilization:
     def test_sample_count_counts_distinct_wips(self, client, auth_headers, lab_manager):
         """sample_count reflects the number of distinct WIPs (each WIP = 1 sample)."""
         equipment = EquipmentFactory()
-        wip_a = WIPFactory()
-        wip_b = WIPFactory()
+        wip_a = WIPFactory(equipment=equipment)
+        wip_b = WIPFactory(equipment=equipment)
         # Two dispatches on the same WIP — should count as 1 unique WIP/sample
-        DispatchFactory(equipment=equipment, wip=wip_a, status=DispatchStatus.COMPLETED)
-        DispatchFactory(equipment=equipment, wip=wip_a, status=DispatchStatus.COMPLETED)
+        DispatchFactory(wip=wip_a, status=DispatchStatus.COMPLETED)
+        DispatchFactory(wip=wip_a, status=DispatchStatus.COMPLETED)
         # One dispatch on a different WIP
-        DispatchFactory(equipment=equipment, wip=wip_b, status=DispatchStatus.COMPLETED)
+        DispatchFactory(wip=wip_b, status=DispatchStatus.COMPLETED)
 
         params = "?period=week&start_date=2000-01-01&end_date=2099-12-31"
         resp = client.get(

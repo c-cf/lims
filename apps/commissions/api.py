@@ -30,6 +30,7 @@ from apps.commissions.schemas import (
     RequestListOut,
     RequestUpdateIn,
     SampleDetailOut,
+    SampleExperimentStatusOut,
     SampleListOut,
 )
 from apps.commissions.state_machine import (
@@ -38,6 +39,7 @@ from apps.commissions.state_machine import (
     validate_sample_transition,
 )
 from apps.experiments.models import ExperimentType
+from apps.wip.models import SampleExperimentStatus
 
 router = Router(tags=["Requests"], auth=JWTAuth())
 sample_router = Router(tags=["Samples"], auth=JWTAuth())
@@ -107,6 +109,21 @@ def _get_sample_for_user(sample_id: int, request: HttpRequest) -> Sample | None:
         return None
 
 
+def _initialize_sample_experiment_statuses(req: Request) -> None:
+    """Create SampleExperimentStatus rows for every sample × experiment_type
+    in this request.  Called once when the request transitions to IN_PROGRESS.
+    """
+    request_experiments = req.request_experiments.select_related(
+        "experiment_type"
+    ).all()
+    for sample in req.samples.all():
+        for re in request_experiments:
+            SampleExperimentStatus.objects.get_or_create(
+                sample=sample,
+                experiment_type=re.experiment_type,
+            )
+
+
 def _check_all_samples_received(req: Request) -> None:
     """If all samples in a sample_shipped request are accounted for,
     auto-transition the request to in_progress.
@@ -121,7 +138,7 @@ def _check_all_samples_received(req: Request) -> None:
 
     accounted_statuses = {
         SampleStatus.RECEIVED,
-        SampleStatus.SPLIT,
+        SampleStatus.PROCESSING,
         SampleStatus.COMPLETED,
         SampleStatus.VOIDED,
         SampleStatus.RETURNED,
@@ -132,6 +149,7 @@ def _check_all_samples_received(req: Request) -> None:
     if total > 0 and accounted_count == total:
         req.status = RequestStatus.IN_PROGRESS
         req.save()
+        _initialize_sample_experiment_statuses(req)
 
 
 def _check_request_completed(req: Request) -> None:
@@ -640,3 +658,29 @@ def return_sample(request: HttpRequest, sample_id: int):
     return _lab_sample_action(
         request, sample_id, "return", post_save_in_txn=post_save_in_txn
     )
+
+
+@sample_router.get(
+    "/{sample_id}/experiment-status",
+    response={200: list[SampleExperimentStatusOut], 404: ErrorOut},
+)
+def get_sample_experiment_status(request: HttpRequest, sample_id: int):
+    """Get experiment progress for a sample. Fab users see only their own samples."""
+    sample = _get_sample_for_user(sample_id, request)
+    if sample is None:
+        return 404, {"detail": "Not found"}
+
+    statuses = (
+        SampleExperimentStatus.objects.filter(sample=sample)
+        .select_related("experiment_type")
+        .order_by("experiment_type__name")
+    )
+    return 200, [
+        {
+            "experiment_type_id": s.experiment_type_id,
+            "experiment_type_name": s.experiment_type.name,
+            "status": s.status,
+            "dispatch_id": s.dispatch_id,
+        }
+        for s in statuses
+    ]

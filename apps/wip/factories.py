@@ -7,7 +7,15 @@ from apps.accounts.factories import UserFactory
 from apps.commissions.factories import SampleFactory
 from apps.equipment.factories import EquipmentFactory, RecipeFactory
 from apps.experiments.factories import ExperimentTypeFactory
-from apps.wip.models import WIP, Dispatch, DispatchStatus, ExperimentResult, WIPStatus
+from apps.wip.models import (
+    WIP,
+    Dispatch,
+    DispatchStatus,
+    ExperimentResult,
+    SampleExperimentStatus,
+    WIPSample,
+    WIPStatus,
+)
 
 
 class WIPFactory(DjangoModelFactory):
@@ -16,10 +24,28 @@ class WIPFactory(DjangoModelFactory):
     class Meta:
         model = WIP
 
-    sample = factory.SubFactory(SampleFactory)
+    equipment = factory.SubFactory(EquipmentFactory)
     status = WIPStatus.CREATED
     note = ""
     created_by = factory.SubFactory(UserFactory)
+
+    @factory.post_generation
+    def samples(self, create, extracted, **kwargs):
+        if not create:
+            return
+        if extracted:
+            for sample in extracted:
+                WIPSample.objects.create(wip=self, sample=sample)
+
+
+class WIPSampleFactory(DjangoModelFactory):
+    """Factory for WIPSample instances."""
+
+    class Meta:
+        model = WIPSample
+
+    wip = factory.SubFactory(WIPFactory)
+    sample = factory.SubFactory(SampleFactory)
 
 
 class DispatchFactory(DjangoModelFactory):
@@ -30,7 +56,6 @@ class DispatchFactory(DjangoModelFactory):
 
     wip = factory.SubFactory(WIPFactory)
     experiment_type = factory.SubFactory(ExperimentTypeFactory)
-    equipment = factory.SubFactory(EquipmentFactory)
     recipe = factory.SubFactory(RecipeFactory)
     status = DispatchStatus.PENDING
     note = ""
@@ -48,3 +73,13 @@ class ExperimentResultFactory(DjangoModelFactory):
     verdict = ExperimentResult.Verdict.PASS
     data = factory.LazyFunction(dict)
     data_source = ExperimentResult.DataSource.MANUAL
+
+
+class SampleExperimentStatusFactory(DjangoModelFactory):
+    """Factory for SampleExperimentStatus instances."""
+
+    class Meta:
+        model = SampleExperimentStatus
+
+    sample = factory.SubFactory(SampleFactory)
+    experiment_type = factory.SubFactory(ExperimentTypeFactory)

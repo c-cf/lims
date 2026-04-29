@@ -26,7 +26,7 @@ class SampleStatus(models.TextChoices):
     SHIPPED = "shipped", "已送樣"
     RECEIVED = "received", "已接樣"
     RECEIVING_EXCEPTION = "receiving_exception", "接樣異常"
-    SPLIT = "split", "已分貨"
+    PROCESSING = "processing", "處理中"
     PROCESSING_EXCEPTION = "processing_exception", "處理異常"
     COMPLETED = "completed", "已完成"
     LOST = "lost", "送樣遺失"

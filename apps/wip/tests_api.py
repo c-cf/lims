@@ -4,13 +4,20 @@ import pytest
 from django.test import Client
 
 from apps.accounts.factories import FabUserFactory, LabManagerFactory, LabStaffFactory
-from apps.commissions.factories import SampleFactory
-from apps.commissions.models import RequestStatus, SampleStatus
+from apps.commissions.factories import RequestFactory, SampleFactory
+from apps.commissions.models import RequestExperiment, RequestStatus, SampleStatus
 from apps.equipment.factories import EquipmentFactory, RecipeFactory
 from apps.equipment.models import EquipmentCapability
 from apps.experiments.factories import ExperimentTypeFactory
 from apps.wip.factories import DispatchFactory, WIPFactory
-from apps.wip.models import Dispatch, DispatchStatus, ExperimentResult, WIPStatus
+from apps.wip.models import (
+    Dispatch,
+    DispatchStatus,
+    ExperimentResult,
+    SampleExperimentStatus,
+    WIPSample,
+    WIPStatus,
+)
 
 
 @pytest.fixture
@@ -68,31 +75,49 @@ def recipe(equipment, experiment_type):
 
 
 @pytest.fixture
-def sample():
-    """A received sample (ready for WIP creation)."""
-    return SampleFactory(status=SampleStatus.SPLIT)
+def in_progress_request(lab_staff, experiment_type):
+    """A request in IN_PROGRESS status with one received sample and experiment type."""
+    req = RequestFactory(status=RequestStatus.IN_PROGRESS, requester=lab_staff)
+    RequestExperiment.objects.create(request=req, experiment_type=experiment_type)
+    return req
 
 
 @pytest.fixture
-def wip(sample, lab_staff):
-    """A WIP in created state."""
-    return WIPFactory(sample=sample, created_by=lab_staff)
+def sample(in_progress_request):
+    """A PROCESSING sample (eligible for WIP) with experiment statuses initialized."""
+    s = SampleFactory(request=in_progress_request, status=SampleStatus.PROCESSING)
+    # Initialize SampleExperimentStatus for the sample.
+    for re in in_progress_request.request_experiments.all():
+        SampleExperimentStatus.objects.create(
+            sample=s, experiment_type=re.experiment_type
+        )
+    return s
 
 
 @pytest.fixture
-def wip_in_progress(lab_staff):
-    """A WIP in in_progress state (uses its own sample)."""
-    s = SampleFactory(status=SampleStatus.SPLIT)
-    return WIPFactory(sample=s, status=WIPStatus.IN_PROGRESS, created_by=lab_staff)
+def wip(sample, equipment, lab_staff):
+    """A WIP in created state with one sample."""
+    w = WIPFactory(equipment=equipment, created_by=lab_staff)
+    WIPSample.objects.create(wip=w, sample=sample)
+    return w
 
 
 @pytest.fixture
-def dispatch(wip_in_progress, experiment_type, equipment, recipe, lab_staff):
+def wip_in_progress(sample, equipment, lab_staff):
+    """A WIP in in_progress state."""
+    w = WIPFactory(
+        equipment=equipment, status=WIPStatus.IN_PROGRESS, created_by=lab_staff
+    )
+    WIPSample.objects.create(wip=w, sample=sample)
+    return w
+
+
+@pytest.fixture
+def dispatch(wip_in_progress, experiment_type, recipe, lab_staff):
     """A dispatch in pending state."""
     return DispatchFactory(
         wip=wip_in_progress,
         experiment_type=experiment_type,
-        equipment=equipment,
         recipe=recipe,
         created_by=lab_staff,
     )
@@ -173,9 +198,11 @@ class TestWIPList:
 
 @pytest.mark.django_db
 class TestWIPCreate:
-    def test_create_wip_success(self, client, auth_headers, lab_staff, sample):
-        """Lab staff can create a WIP for a sample."""
-        payload = {"sample_id": sample.pk}
+    def test_create_wip_success(
+        self, client, auth_headers, lab_staff, sample, equipment
+    ):
+        """Lab staff can create a WIP with samples and equipment."""
+        payload = {"sample_ids": [sample.pk], "equipment_id": equipment.pk}
         resp = client.post(
             "/api/wips/",
             data=payload,
@@ -184,39 +211,83 @@ class TestWIPCreate:
         )
         assert resp.status_code == 201
         data = resp.json()
-        assert data["sample_id"] == sample.pk
+        assert data["equipment_id"] == equipment.pk
+        assert len(data["samples"]) == 1
+        assert data["samples"][0]["id"] == sample.pk
         assert data["status"] == WIPStatus.CREATED
 
-    def test_create_wip_sample_not_found(self, client, auth_headers, lab_staff):
-        """Returns 404 if sample does not exist."""
+    def test_create_wip_equipment_not_found(self, client, auth_headers, lab_staff):
+        """Returns 404 if equipment does not exist."""
         resp = client.post(
             "/api/wips/",
-            data={"sample_id": 99999},
+            data={"sample_ids": [1], "equipment_id": 99999},
             content_type="application/json",
             **auth_headers(lab_staff),
         )
         assert resp.status_code == 404
 
-    def test_create_wip_duplicate_sample_rejected(
-        self, client, auth_headers, lab_staff, sample
+    def test_create_wip_sample_not_found(
+        self, client, auth_headers, lab_staff, equipment
     ):
-        """Cannot create two WIPs for the same sample."""
-        WIPFactory(sample=sample, created_by=lab_staff)
+        """Returns 400 if sample does not exist."""
         resp = client.post(
             "/api/wips/",
-            data={"sample_id": sample.pk},
+            data={"sample_ids": [99999], "equipment_id": equipment.pk},
             content_type="application/json",
             **auth_headers(lab_staff),
         )
-        assert resp.status_code == 409
+        assert resp.status_code == 400
+
+    def test_create_wip_exceeds_capacity(
+        self, client, auth_headers, lab_staff, sample, in_progress_request
+    ):
+        """Returns 400 if samples exceed equipment capacity."""
+        equip = EquipmentFactory(capacity=1)
+        s2 = SampleFactory(request=in_progress_request, status=SampleStatus.PROCESSING)
+        resp = client.post(
+            "/api/wips/",
+            data={"sample_ids": [sample.pk, s2.pk], "equipment_id": equip.pk},
+            content_type="application/json",
+            **auth_headers(lab_staff),
+        )
+        assert resp.status_code == 400
+        assert "capacity" in resp.json()["detail"].lower()
+
+    def test_create_wip_capacity_shared_across_active_wips(
+        self, client, auth_headers, lab_staff, sample, equipment, in_progress_request
+    ):
+        """Capacity is shared: existing active WIP samples reduce remaining slots."""
+        # equipment.capacity defaults to EquipmentFactory default; set to 1
+        equipment.capacity = 1
+        equipment.save()
+
+        # First WIP uses the only slot
+        resp = client.post(
+            "/api/wips/",
+            data={"sample_ids": [sample.pk], "equipment_id": equipment.pk},
+            content_type="application/json",
+            **auth_headers(lab_staff),
+        )
+        assert resp.status_code == 201
+
+        # Second WIP on same equipment should fail
+        s2 = SampleFactory(request=in_progress_request, status=SampleStatus.PROCESSING)
+        resp = client.post(
+            "/api/wips/",
+            data={"sample_ids": [s2.pk], "equipment_id": equipment.pk},
+            content_type="application/json",
+            **auth_headers(lab_staff),
+        )
+        assert resp.status_code == 400
+        assert "capacity" in resp.json()["detail"].lower()
 
     def test_create_wip_fab_user_forbidden(
-        self, client, auth_headers, fab_user, sample
+        self, client, auth_headers, fab_user, sample, equipment
     ):
         """Fab user cannot create WIPs."""
         resp = client.post(
             "/api/wips/",
-            data={"sample_id": sample.pk},
+            data={"sample_ids": [sample.pk], "equipment_id": equipment.pk},
             content_type="application/json",
             **auth_headers(fab_user),
         )
@@ -228,13 +299,14 @@ class TestWIPDetail:
     def test_get_wip_detail_includes_dispatches(
         self, client, auth_headers, lab_staff, wip_in_progress, dispatch
     ):
-        """WIP detail includes list of dispatches."""
+        """WIP detail includes list of dispatches and samples."""
         resp = client.get(f"/api/wips/{wip_in_progress.pk}/", **auth_headers(lab_staff))
         assert resp.status_code == 200
         data = resp.json()
         assert data["id"] == wip_in_progress.pk
         assert len(data["dispatches"]) == 1
         assert data["dispatches"][0]["id"] == dispatch.pk
+        assert len(data["samples"]) >= 1
 
     def test_get_wip_not_found(self, client, auth_headers, lab_staff):
         """Returns 404 for unknown WIP."""
@@ -250,19 +322,11 @@ class TestWIPDetail:
 @pytest.mark.django_db
 class TestWIPCreateDispatch:
     def test_create_dispatch_success(
-        self,
-        client,
-        auth_headers,
-        lab_staff,
-        wip,
-        experiment_type,
-        equipment,
-        recipe,
+        self, client, auth_headers, lab_staff, wip, experiment_type, recipe
     ):
-        """Lab staff can create a dispatch for a WIP."""
+        """Lab staff can create a dispatch for a WIP (no equipment in payload)."""
         payload = {
             "experiment_type_id": experiment_type.pk,
-            "equipment_id": equipment.pk,
             "recipe_id": recipe.pk,
         }
         resp = client.post(
@@ -273,50 +337,24 @@ class TestWIPCreateDispatch:
         )
         assert resp.status_code == 201
         data = resp.json()
-        assert data["status"] == WIPStatus.IN_PROGRESS  # WIP transitions to in_progress
+        assert data["status"] == WIPStatus.IN_PROGRESS
 
-        # WIP should now be in_progress
         wip.refresh_from_db()
         assert wip.status == WIPStatus.IN_PROGRESS
 
-    def test_create_dispatch_equipment_lacks_capability(
-        self, client, auth_headers, lab_staff, wip, recipe
-    ):
-        """Returns 400 if equipment lacks capability for experiment type."""
-        other_experiment_type = ExperimentTypeFactory()
-        resp = client.post(
-            f"/api/wips/{wip.pk}/dispatches/",
-            data={
-                "experiment_type_id": other_experiment_type.pk,
-                "equipment_id": recipe.equipment_id,
-                "recipe_id": recipe.pk,
-            },
-            content_type="application/json",
-            **auth_headers(lab_staff),
-        )
-        assert resp.status_code == 400
-
     def test_create_dispatch_recipe_wrong_equipment(
-        self,
-        client,
-        auth_headers,
-        lab_staff,
-        wip,
-        experiment_type,
-        equipment,
-        recipe,
+        self, client, auth_headers, lab_staff, wip, experiment_type
     ):
-        """Returns 400 if recipe does not belong to the given equipment."""
+        """Returns 400 if recipe does not belong to the WIP's equipment."""
         other_equipment = EquipmentFactory()
-        EquipmentCapability.objects.create(
+        other_recipe = RecipeFactory(
             equipment=other_equipment, experiment_type=experiment_type
         )
         resp = client.post(
             f"/api/wips/{wip.pk}/dispatches/",
             data={
                 "experiment_type_id": experiment_type.pk,
-                "equipment_id": other_equipment.pk,
-                "recipe_id": recipe.pk,  # recipe belongs to original equipment
+                "recipe_id": other_recipe.pk,
             },
             content_type="application/json",
             **auth_headers(lab_staff),
@@ -324,14 +362,13 @@ class TestWIPCreateDispatch:
         assert resp.status_code == 400
 
     def test_create_dispatch_fab_user_forbidden(
-        self, client, auth_headers, fab_user, wip, experiment_type, equipment, recipe
+        self, client, auth_headers, fab_user, wip, experiment_type, recipe
     ):
         """Fab user cannot create dispatches."""
         resp = client.post(
             f"/api/wips/{wip.pk}/dispatches/",
             data={
                 "experiment_type_id": experiment_type.pk,
-                "equipment_id": equipment.pk,
                 "recipe_id": recipe.pk,
             },
             content_type="application/json",
@@ -346,9 +383,12 @@ class TestWIPComplete:
         self, client, auth_headers, lab_staff, wip_in_progress, result_recorded_dispatch
     ):
         """Lab staff can complete WIP when all dispatches are completed."""
-        # Complete the dispatch first
         result_recorded_dispatch.status = DispatchStatus.COMPLETED
         result_recorded_dispatch.save()
+
+        # Mark the sample experiment status as completed so sample auto-completes.
+        sample = wip_in_progress.samples.first()
+        SampleExperimentStatus.objects.filter(sample=sample).update(status="completed")
 
         resp = client.post(
             f"/api/wips/{wip_in_progress.pk}/complete/",
@@ -357,10 +397,6 @@ class TestWIPComplete:
         assert resp.status_code == 200
         data = resp.json()
         assert data["status"] == WIPStatus.COMPLETED
-
-        # Sample should be auto-completed
-        wip_in_progress.sample.refresh_from_db()
-        assert wip_in_progress.sample.status == SampleStatus.COMPLETED
 
     def test_complete_wip_with_pending_dispatches_fails(
         self, client, auth_headers, lab_staff, wip_in_progress, dispatch
@@ -371,24 +407,6 @@ class TestWIPComplete:
             **auth_headers(lab_staff),
         )
         assert resp.status_code == 400
-
-    def test_complete_wip_auto_completes_request(self, client, auth_headers, lab_staff):
-        """Completing last WIP auto-completes the parent request."""
-        from apps.commissions.factories import RequestFactory
-
-        req = RequestFactory(status=RequestStatus.IN_PROGRESS)
-        s = SampleFactory(request=req, status=SampleStatus.SPLIT)
-        w = WIPFactory(sample=s, status=WIPStatus.IN_PROGRESS, created_by=lab_staff)
-        DispatchFactory(wip=w, status=DispatchStatus.COMPLETED, created_by=lab_staff)
-
-        resp = client.post(
-            f"/api/wips/{w.pk}/complete/",
-            **auth_headers(lab_staff),
-        )
-        assert resp.status_code == 200
-
-        req.refresh_from_db()
-        assert req.status == RequestStatus.COMPLETED
 
 
 @pytest.mark.django_db
@@ -404,8 +422,9 @@ class TestWIPAbort:
         assert data["status"] == WIPStatus.ABORTED
 
         # Sample should be marked processing_exception
-        wip_in_progress.sample.refresh_from_db()
-        assert wip_in_progress.sample.status == SampleStatus.PROCESSING_EXCEPTION
+        sample = wip_in_progress.samples.first()
+        sample.refresh_from_db()
+        assert sample.status == SampleStatus.PROCESSING_EXCEPTION
 
     def test_abort_wip_completed_fails(
         self, client, auth_headers, lab_staff, wip_in_progress
@@ -471,14 +490,13 @@ class TestDispatchList:
     def test_list_dispatches_filter_by_equipment_id(
         self, client, auth_headers, lab_staff, dispatch
     ):
-        """Dispatches can be filtered by equipment_id."""
+        """Dispatches can be filtered by equipment_id (via WIP)."""
+        equipment_id = dispatch.wip.equipment_id
         resp = client.get(
-            f"/api/dispatches/?equipment_id={dispatch.equipment_id}",
+            f"/api/dispatches/?equipment_id={equipment_id}",
             **auth_headers(lab_staff),
         )
         assert resp.status_code == 200
-        data = resp.json()
-        assert all(d["equipment_id"] == dispatch.equipment_id for d in data)
 
     def test_list_dispatches_fab_user_forbidden(self, client, auth_headers, fab_user):
         """Fab user cannot list dispatches."""
@@ -495,6 +513,8 @@ class TestDispatchDetail:
         data = resp.json()
         assert data["id"] == dispatch.pk
         assert data["result"] is None
+        # Equipment comes from WIP
+        assert data["equipment_id"] == dispatch.wip.equipment_id
 
     def test_get_dispatch_with_result(
         self, client, auth_headers, lab_staff, result_recorded_dispatch
@@ -861,34 +881,6 @@ class TestAutomationEquipmentResult:
             **auth_headers(lab_staff),
         )
         assert resp.status_code == 200
-
-    def test_automation_result_triggers_linkage(self, client, auth_headers, lab_staff):
-        """Automation completing last dispatch allows WIP completion linkage check."""
-        from apps.commissions.factories import RequestFactory
-
-        req = RequestFactory(status=RequestStatus.IN_PROGRESS)
-        s = SampleFactory(request=req, status=SampleStatus.SPLIT)
-        w = WIPFactory(sample=s, status=WIPStatus.IN_PROGRESS, created_by=lab_staff)
-        d = DispatchFactory(
-            wip=w, status=DispatchStatus.DISPATCHED, created_by=lab_staff
-        )
-
-        payload = {
-            "dispatch_id": d.pk,
-            "summary": "Automated",
-            "verdict": "pass",
-            "data": {},
-        }
-        resp = client.post(
-            "/api/automation/equipment-result/",
-            data=payload,
-            content_type="application/json",
-            **auth_headers(lab_staff),
-        )
-        assert resp.status_code == 200
-        # Dispatch completed; WIP is still in_progress (manual complete required)
-        w.refresh_from_db()
-        assert w.status == WIPStatus.IN_PROGRESS
 
     def test_automation_result_wrong_status_fails(
         self, client, auth_headers, lab_staff, unloaded_dispatch

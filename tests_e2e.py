@@ -10,7 +10,7 @@ from django.test import Client
 
 from apps.accounts.auth import create_access_token
 from apps.accounts.factories import FabUserFactory, LabManagerFactory, LabStaffFactory
-from apps.commissions.models import RequestStatus, SampleStatus
+from apps.commissions.models import RequestExperiment, RequestStatus, SampleStatus
 from apps.equipment.factories import EquipmentFactory, RecipeFactory
 from apps.equipment.models import EquipmentCapability
 from apps.experiments.factories import ExperimentTypeFactory
@@ -177,13 +177,18 @@ class TestFullWorkflow:
         r = _get(client, f"/api/samples/{sample_id}", lab_staff)
         assert r.json()["status"] == SampleStatus.RECEIVED
 
-        # --- Phase 2: Set sample to SPLIT (no API endpoint; direct ORM) ---
+        # --- Phase 2: Set sample to PROCESSING (no API endpoint; direct ORM) ---
         from apps.commissions.models import Sample
 
-        Sample.objects.filter(pk=sample_id).update(status=SampleStatus.SPLIT)
+        Sample.objects.filter(pk=sample_id).update(status=SampleStatus.PROCESSING)
 
         # --- Phase 3: Create WIP ---
-        r = _post(client, "/api/wips/", lab_staff, {"sample_id": sample_id})
+        r = _post(
+            client,
+            "/api/wips/",
+            lab_staff,
+            {"sample_ids": [sample_id], "equipment_id": equipment.pk},
+        )
         assert r.status_code == 201, r.json()
         wip_id = r.json()["id"]
         assert r.json()["status"] == WIPStatus.CREATED
@@ -242,11 +247,16 @@ class TestMultiDispatchWorkflow:
     ):
         from apps.commissions.factories import SampleFactory
         from apps.wip.factories import WIPFactory
+        from apps.wip.models import WIPSample
 
-        sample = SampleFactory(status=SampleStatus.SPLIT)
-        wip = WIPFactory(
-            sample=sample, status=WIPStatus.IN_PROGRESS, created_by=lab_staff
+        sample = SampleFactory(status=SampleStatus.PROCESSING)
+        RequestExperiment.objects.create(
+            request=sample.request, experiment_type=experiment_type
         )
+        wip = WIPFactory(
+            equipment=equipment, status=WIPStatus.IN_PROGRESS, created_by=lab_staff
+        )
+        WIPSample.objects.create(wip=wip, sample=sample)
         wip_id = wip.pk
 
         # Create first dispatch
@@ -256,7 +266,6 @@ class TestMultiDispatchWorkflow:
             lab_staff,
             {
                 "experiment_type_id": experiment_type.pk,
-                "equipment_id": equipment.pk,
                 "recipe_id": recipe.pk,
             },
         )
@@ -270,7 +279,6 @@ class TestMultiDispatchWorkflow:
             lab_staff,
             {
                 "experiment_type_id": experiment_type.pk,
-                "equipment_id": equipment.pk,
                 "recipe_id": recipe.pk,
             },
         )
@@ -313,11 +321,16 @@ class TestExceptionRedispatch:
     ):
         from apps.commissions.factories import SampleFactory
         from apps.wip.factories import WIPFactory
+        from apps.wip.models import WIPSample
 
-        sample = SampleFactory(status=SampleStatus.SPLIT)
-        wip = WIPFactory(
-            sample=sample, status=WIPStatus.IN_PROGRESS, created_by=lab_staff
+        sample = SampleFactory(status=SampleStatus.PROCESSING)
+        RequestExperiment.objects.create(
+            request=sample.request, experiment_type=experiment_type
         )
+        wip = WIPFactory(
+            equipment=equipment, status=WIPStatus.IN_PROGRESS, created_by=lab_staff
+        )
+        WIPSample.objects.create(wip=wip, sample=sample)
         wip_id = wip.pk
 
         # Create dispatch and start it
@@ -327,7 +340,6 @@ class TestExceptionRedispatch:
             lab_staff,
             {
                 "experiment_type_id": experiment_type.pk,
-                "equipment_id": equipment.pk,
                 "recipe_id": recipe.pk,
             },
         )
@@ -524,11 +536,16 @@ class TestAutomationWorkflow:
     ):
         from apps.commissions.factories import SampleFactory
         from apps.wip.factories import WIPFactory
+        from apps.wip.models import WIPSample
 
-        sample = SampleFactory(status=SampleStatus.SPLIT)
-        wip = WIPFactory(
-            sample=sample, status=WIPStatus.IN_PROGRESS, created_by=lab_staff
+        sample = SampleFactory(status=SampleStatus.PROCESSING)
+        RequestExperiment.objects.create(
+            request=sample.request, experiment_type=experiment_type
         )
+        wip = WIPFactory(
+            equipment=equipment, status=WIPStatus.IN_PROGRESS, created_by=lab_staff
+        )
+        WIPSample.objects.create(wip=wip, sample=sample)
         wip_id = wip.pk
 
         # Create dispatch and start it
@@ -538,7 +555,6 @@ class TestAutomationWorkflow:
             lab_staff,
             {
                 "experiment_type_id": experiment_type.pk,
-                "equipment_id": equipment.pk,
                 "recipe_id": recipe.pk,
             },
         )
@@ -584,17 +600,20 @@ class TestAutomationWorkflow:
         """Automation endpoint accepts dispatch in DISPATCHED (not yet running) state."""
         from apps.commissions.factories import SampleFactory
         from apps.wip.factories import DispatchFactory, WIPFactory
-        from apps.wip.models import DispatchStatus
+        from apps.wip.models import DispatchStatus, WIPSample
 
-        sample = SampleFactory(status=SampleStatus.SPLIT)
-        wip = WIPFactory(
-            sample=sample, status=WIPStatus.IN_PROGRESS, created_by=lab_staff
+        sample = SampleFactory(status=SampleStatus.PROCESSING)
+        RequestExperiment.objects.create(
+            request=sample.request, experiment_type=experiment_type
         )
+        wip = WIPFactory(
+            equipment=equipment, status=WIPStatus.IN_PROGRESS, created_by=lab_staff
+        )
+        WIPSample.objects.create(wip=wip, sample=sample)
 
         dispatch = DispatchFactory(
             wip=wip,
             experiment_type=experiment_type,
-            equipment=equipment,
             recipe=recipe,
             status=DispatchStatus.DISPATCHED,
             created_by=lab_staff,

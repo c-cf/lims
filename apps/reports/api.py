@@ -46,24 +46,24 @@ def equipment_utilization(
         created_at__date__lte=end_date,
     )
     if equipment_id is not None:
-        dispatch_qs = dispatch_qs.filter(equipment_id=equipment_id)
+        dispatch_qs = dispatch_qs.filter(wip__equipment_id=equipment_id)
 
     # Aggregate per equipment: wip_count = number of dispatches,
-    # sample_count = distinct WIP count (each WIP maps to one sample).
+    # sample_count = distinct WIP count (proxy for batch count).
     aggregated = (
-        dispatch_qs.values("equipment_id", "equipment__name")
+        dispatch_qs.values("wip__equipment_id", "wip__equipment__name")
         .annotate(
             wip_count=Count("id"),
             sample_count=Count("wip_id", distinct=True),
         )
-        .order_by("equipment_id")
+        .order_by("wip__equipment_id")
     )
 
     data = [
         {
             "equipment": {
-                "id": row["equipment_id"],
-                "name": row["equipment__name"],
+                "id": row["wip__equipment_id"],
+                "name": row["wip__equipment__name"],
             },
             "wip_count": row["wip_count"],
             "sample_count": row["sample_count"],

@@ -257,6 +257,15 @@ class SampleDetailOut(Schema):
         }
 
 
+class SampleExperimentStatusOut(Schema):
+    """Output schema for per-sample experiment progress."""
+
+    experiment_type_id: int
+    experiment_type_name: str
+    status: str
+    dispatch_id: int | None
+
+
 class SampleListOut(Schema):
     """Output schema for sample list responses."""
 

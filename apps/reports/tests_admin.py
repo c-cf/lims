@@ -46,24 +46,24 @@ class TestEquipmentUtilizationAdmin:
 
     def test_query_aggregates_dispatch_data(self, admin_client):
         equipment = EquipmentFactory()
-        wip = WIPFactory()
-        DispatchFactory(wip=wip, equipment=equipment)
+        wip = WIPFactory(equipment=equipment)
+        DispatchFactory(wip=wip)
         url = reverse("admin:reports_equipmentutilizationreport_changelist")
         start = (date.today() - timedelta(days=1)).isoformat()
         end = date.today().isoformat()
         response = admin_client.get(url, {"start_date": start, "end_date": end})
         rows = response.context["rows"]
         assert len(rows) == 1
-        assert rows[0]["equipment__name"] == equipment.name
+        assert rows[0]["wip__equipment__name"] == equipment.name
         assert rows[0]["wip_count"] == 1
 
     def test_equipment_filter_narrows_results(self, admin_client):
         eq1 = EquipmentFactory()
         eq2 = EquipmentFactory()
-        wip1 = WIPFactory()
-        wip2 = WIPFactory()
-        DispatchFactory(wip=wip1, equipment=eq1)
-        DispatchFactory(wip=wip2, equipment=eq2)
+        wip1 = WIPFactory(equipment=eq1)
+        wip2 = WIPFactory(equipment=eq2)
+        DispatchFactory(wip=wip1)
+        DispatchFactory(wip=wip2)
         url = reverse("admin:reports_equipmentutilizationreport_changelist")
         start = (date.today() - timedelta(days=1)).isoformat()
         end = date.today().isoformat()
@@ -72,7 +72,7 @@ class TestEquipmentUtilizationAdmin:
         )
         rows = response.context["rows"]
         assert len(rows) == 1
-        assert rows[0]["equipment_id"] == eq1.pk
+        assert rows[0]["wip__equipment_id"] == eq1.pk
 
     def test_requires_login(self, client):
         url = reverse("admin:reports_equipmentutilizationreport_changelist")

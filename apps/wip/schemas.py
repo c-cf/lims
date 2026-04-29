@@ -14,14 +14,22 @@ if TYPE_CHECKING:
 # --- Nested output schemas ---
 
 
+class SampleBriefOut(Schema):
+    """Brief sample info nested in WIP responses."""
+
+    id: int
+    wafer_id: str
+    wafer_size: str
+    status: str
+    request_id: int
+
+
 class DispatchBriefOut(Schema):
     """Brief dispatch info nested in WIP responses."""
 
     id: int
     experiment_type_id: int
     experiment_type_name: str
-    equipment_id: int
-    equipment_name: str
     recipe_id: int
     recipe_name: str
     status: str
@@ -47,8 +55,15 @@ class ExperimentResultOut(Schema):
 class WIPIn(Schema):
     """Input schema for creating a WIP."""
 
-    sample_id: int
+    sample_ids: list[int] = Field(..., min_length=1)
+    equipment_id: int
     note: str = ""
+
+
+class WIPAddSamplesIn(Schema):
+    """Input schema for adding samples to an existing WIP."""
+
+    sample_ids: list[int] = Field(..., min_length=1)
 
 
 # --- Dispatch input schemas ---
@@ -58,7 +73,6 @@ class DispatchIn(Schema):
     """Input schema for creating a dispatch."""
 
     experiment_type_id: int
-    equipment_id: int
     recipe_id: int
     note: str = ""
 
@@ -94,19 +108,38 @@ class WIPListOut(Schema):
     """Output schema for WIP list responses."""
 
     id: int
-    sample_id: int
+    equipment_id: int
+    equipment_name: str
+    sample_count: int
     status: str
     note: str
     completed_at: datetime | None
     created_at: datetime
     updated_at: datetime
 
+    @staticmethod
+    def from_wip(wip: WIP) -> dict:
+        """Build a dict from a WIP instance."""
+        return {
+            "id": wip.pk,
+            "equipment_id": wip.equipment_id,
+            "equipment_name": wip.equipment.name,
+            "sample_count": wip.samples.count(),
+            "status": wip.status,
+            "note": wip.note,
+            "completed_at": wip.completed_at,
+            "created_at": wip.created_at,
+            "updated_at": wip.updated_at,
+        }
+
 
 class WIPDetailOut(Schema):
     """Output schema for WIP detail responses."""
 
     id: int
-    sample_id: int
+    equipment_id: int
+    equipment_name: str
+    samples: list[SampleBriefOut]
     status: str
     note: str
     dispatches: list[DispatchBriefOut]
@@ -116,7 +149,7 @@ class WIPDetailOut(Schema):
 
     @staticmethod
     def from_wip(wip: WIP) -> dict:
-        """Build a dict from a WIP instance with nested dispatches."""
+        """Build a dict from a WIP instance with nested dispatches and samples."""
         dispatches = []
         for d in wip.dispatches.all():
             dispatches.append(
@@ -124,8 +157,6 @@ class WIPDetailOut(Schema):
                     "id": d.pk,
                     "experiment_type_id": d.experiment_type_id,
                     "experiment_type_name": d.experiment_type.name,
-                    "equipment_id": d.equipment_id,
-                    "equipment_name": d.equipment.name,
                     "recipe_id": d.recipe_id,
                     "recipe_name": d.recipe.name,
                     "status": d.status,
@@ -134,9 +165,21 @@ class WIPDetailOut(Schema):
                     "created_at": d.created_at,
                 }
             )
+        samples = [
+            {
+                "id": s.pk,
+                "wafer_id": s.wafer_id,
+                "wafer_size": s.wafer_size,
+                "status": s.status,
+                "request_id": s.request_id,
+            }
+            for s in wip.samples.all()
+        ]
         return {
             "id": wip.pk,
-            "sample_id": wip.sample_id,
+            "equipment_id": wip.equipment_id,
+            "equipment_name": wip.equipment.name,
+            "samples": samples,
             "status": wip.status,
             "note": wip.note,
             "dispatches": dispatches,
@@ -187,8 +230,8 @@ class DispatchDetailOut(Schema):
             "wip_id": dispatch.wip_id,
             "experiment_type_id": dispatch.experiment_type_id,
             "experiment_type_name": dispatch.experiment_type.name,
-            "equipment_id": dispatch.equipment_id,
-            "equipment_name": dispatch.equipment.name,
+            "equipment_id": dispatch.wip.equipment_id,
+            "equipment_name": dispatch.wip.equipment.name,
             "recipe_id": dispatch.recipe_id,
             "recipe_name": dispatch.recipe.name,
             "status": dispatch.status,
@@ -207,7 +250,6 @@ class DispatchListOut(Schema):
     id: int
     wip_id: int
     experiment_type_id: int
-    equipment_id: int
     recipe_id: int
     status: str
     dispatched_at: datetime | None

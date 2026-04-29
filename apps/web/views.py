@@ -18,7 +18,7 @@ from django.contrib.auth import (
     logout,
 )
 from django.contrib.sessions.backends.db import SessionStore
-from django.db import IntegrityError, transaction
+from django.db import transaction
 from django.db.models import Avg, Count, DurationField, ExpressionWrapper, F, Prefetch
 from django.http import HttpRequest, HttpResponse
 from django.shortcuts import get_object_or_404, redirect, render
@@ -47,7 +47,16 @@ from apps.equipment.models import (
     Recipe,
 )
 from apps.experiments.models import ExperimentType
-from apps.wip.models import WIP, Dispatch, DispatchStatus, ExperimentResult, WIPStatus
+from apps.wip.models import (
+    WIP,
+    Dispatch,
+    DispatchStatus,
+    ExperimentResult,
+    SampleExperimentProgress,
+    SampleExperimentStatus,
+    WIPSample,
+    WIPStatus,
+)
 from apps.wip.state_machine import validate_dispatch_transition, validate_wip_transition
 
 from .decorators import role_required
@@ -459,7 +468,7 @@ def dashboard_chart_capacity(request: HttpRequest) -> HttpResponse:
             dispatched_at__date__lte=end,
         )
         .values("dispatched_at__date")
-        .annotate(active=Count("equipment_id", distinct=True))
+        .annotate(active=Count("wip__equipment_id", distinct=True))
         .order_by("dispatched_at__date")
     )
     utilization_map = {
@@ -871,7 +880,7 @@ def _check_all_samples_received(req: Request) -> None:
         return
     received_statuses = {
         SampleStatus.RECEIVED,
-        SampleStatus.SPLIT,
+        SampleStatus.PROCESSING,
         SampleStatus.COMPLETED,
     }
     total = req.samples.count()
@@ -922,17 +931,21 @@ def sample_return(request: HttpRequest, sample_id: int) -> HttpResponse:
 @role_required("lab_staff", "lab_manager")
 def wips_list(request: HttpRequest) -> HttpResponse:
     status_filter = request.GET.get("status", "")
-    qs = WIP.objects.select_related("sample__request__requester").order_by(
-        "-created_at"
+    qs = (
+        WIP.objects.select_related("equipment")
+        .prefetch_related("samples")
+        .order_by("-created_at")
     )
     if status_filter:
         qs = qs.filter(status=status_filter)
-    # Samples that can have a WIP created (received, no existing WIP)
-    available_samples = (
-        Sample.objects.filter(status=SampleStatus.RECEIVED)
-        .exclude(wip__isnull=False)
-        .select_related("request")
-    )
+    # Samples eligible for WIP: received/processing with request in_progress
+    available_samples = Sample.objects.filter(
+        status__in=[SampleStatus.RECEIVED, SampleStatus.PROCESSING],
+        request__status=RequestStatus.IN_PROGRESS,
+    ).select_related("request")
+    equipment_list = Equipment.objects.filter(
+        status=EquipmentStatus.AVAILABLE
+    ).order_by("name")
     return render(
         request,
         "web/wips/list.html",
@@ -942,6 +955,7 @@ def wips_list(request: HttpRequest) -> HttpResponse:
             "status_choices": WIPStatus.choices,
             "current_status": status_filter,
             "available_samples": available_samples,
+            "equipment_list": equipment_list,
         },
     )
 
@@ -949,47 +963,92 @@ def wips_list(request: HttpRequest) -> HttpResponse:
 @role_required("lab_staff", "lab_manager")
 @require_POST
 def wip_create(request: HttpRequest) -> HttpResponse:
-    sample_id = request.POST.get("sample_id", "").strip()
+    sample_ids = request.POST.getlist("sample_ids")
+    equipment_id = request.POST.get("equipment_id", "").strip()
     note = request.POST.get("note", "").strip()
-    try:
-        sample = Sample.objects.get(pk=sample_id)
-    except (Sample.DoesNotExist, ValueError):
-        return _action_error(request, "Sample not found.", redirect_url="/wips/")
 
     try:
-        with transaction.atomic():
-            wip = WIP.objects.create(
-                sample=sample,
-                note=note,
-                created_by=request.user,
-            )
-    except IntegrityError:
+        equipment = Equipment.objects.get(pk=equipment_id)
+    except (Equipment.DoesNotExist, ValueError):
+        return _action_error(request, "Invalid equipment.", redirect_url="/wips/")
+
+    if equipment.status != EquipmentStatus.AVAILABLE:
         return _action_error(
-            request, "A WIP already exists for this sample.", redirect_url="/wips/"
+            request, "Equipment is not available.", redirect_url="/wips/"
         )
+
+    samples = list(Sample.objects.select_related("request").filter(pk__in=sample_ids))
+    if not samples:
+        return _action_error(request, "No samples selected.", redirect_url="/wips/")
+
+    for sample in samples:
+        if sample.request.status != RequestStatus.IN_PROGRESS:
+            return _action_error(
+                request,
+                f"Sample {sample.wafer_id}: request is not in_progress.",
+                redirect_url="/wips/",
+            )
+        if sample.status not in (SampleStatus.RECEIVED, SampleStatus.PROCESSING):
+            return _action_error(
+                request,
+                f"Sample {sample.wafer_id}: invalid status '{sample.status}'.",
+                redirect_url="/wips/",
+            )
+
+    # Check equipment capacity.
+    from apps.wip.api import _equipment_remaining_capacity
+
+    remaining = _equipment_remaining_capacity(equipment)
+    if len(samples) > remaining:
+        return _action_error(
+            request,
+            f"Equipment capacity exceeded: {remaining} slot(s) remaining, "
+            f"but {len(samples)} sample(s) selected.",
+            redirect_url="/wips/",
+        )
+
+    with transaction.atomic():
+        wip = WIP.objects.create(
+            equipment=equipment,
+            note=note,
+            created_by=request.user,
+        )
+        for sample in samples:
+            WIPSample.objects.create(wip=wip, sample=sample)
+            if sample.status == SampleStatus.RECEIVED:
+                sample.status = validate_sample_transition(
+                    sample.status, "start_processing"
+                )
+                sample.save(update_fields=["status", "updated_at"])
+
     return redirect("web:wip-detail", wip_id=wip.pk)
 
 
 @role_required("lab_staff", "lab_manager")
 def wip_detail(request: HttpRequest, wip_id: int) -> HttpResponse:
     wip = get_object_or_404(
-        WIP.objects.select_related("sample__request__requester").prefetch_related(
+        WIP.objects.select_related("equipment").prefetch_related(
+            "samples__request",
             Prefetch(
                 "dispatches",
-                queryset=Dispatch.objects.select_related(
-                    "experiment_type", "equipment", "recipe"
-                )
+                queryset=Dispatch.objects.select_related("experiment_type", "recipe")
                 .prefetch_related("result")
                 .order_by("created_at"),
-            )
+            ),
         ),
         pk=wip_id,
     )
-    # Experiment types from the parent request for the dispatch form
-    exp_types = list(wip.sample.request.experiment_types.filter(is_active=True))
-    equipment_list = Equipment.objects.filter(
-        status=EquipmentStatus.AVAILABLE
-    ).order_by("name")
+    # Collect experiment types from all samples' requests for the dispatch form.
+    request_ids = wip.samples.values_list("request_id", flat=True)
+    exp_types = list(
+        ExperimentType.objects.filter(
+            is_active=True, requests__pk__in=request_ids
+        ).distinct()
+    )
+    # Recipes for this WIP's equipment, filtered by capability.
+    recipes = Recipe.objects.filter(
+        equipment=wip.equipment, is_active=True
+    ).select_related("experiment_type")
     return render(
         request,
         "web/wips/detail.html",
@@ -997,7 +1056,7 @@ def wip_detail(request: HttpRequest, wip_id: int) -> HttpResponse:
             "title": f"WIP #{wip.pk}",
             "wip": wip,
             "exp_types": exp_types,
-            "equipment_list": equipment_list,
+            "recipes": recipes,
         },
     )
 
@@ -1029,34 +1088,44 @@ def wip_complete(request: HttpRequest, wip_id: int) -> HttpResponse:
         wip.completed_at = timezone.now()
         wip.save()
 
-        # Auto-complete sample
-        sample = Sample.objects.select_for_update().get(pk=wip.sample_id)
-        try:
-            s_target = validate_sample_transition(sample.status, "complete")
-            sample.status = s_target
-            sample.save()
-            _check_all_samples_received_completed(sample.request)
-        except InvalidTransitionError:
-            pass
+        # Auto-complete samples whose all experiment statuses are done.
+        for sample in Sample.objects.select_for_update().filter(
+            pk__in=wip.samples.values_list("pk", flat=True)
+        ):
+            if sample.status != SampleStatus.PROCESSING:
+                continue
+            total = SampleExperimentStatus.objects.filter(sample=sample).count()
+            completed = SampleExperimentStatus.objects.filter(
+                sample=sample, status=SampleExperimentProgress.COMPLETED
+            ).count()
+            if total > 0 and completed >= total:
+                try:
+                    s_target = validate_sample_transition(sample.status, "complete")
+                    sample.status = s_target
+                    sample.save(update_fields=["status", "updated_at"])
+                    _check_request_auto_complete(sample.request_id)
+                except InvalidTransitionError:
+                    pass
 
     return redirect("web:wip-detail", wip_id=wip_id)
 
 
-def _check_all_samples_received_completed(req: Request) -> None:
+def _check_request_auto_complete(request_id: int) -> None:
     """Auto-complete request when all samples are in terminal state."""
-    req = Request.objects.select_for_update().get(pk=req.pk)
+    req = Request.objects.select_for_update().get(pk=request_id)
     if req.status != RequestStatus.IN_PROGRESS:
         return
-    completed_statuses = {
+    terminal_statuses = {
         SampleStatus.COMPLETED,
         SampleStatus.VOIDED,
         SampleStatus.RETURNED,
     }
     total = req.samples.count()
-    terminal_count = req.samples.filter(status__in=completed_statuses).count()
+    terminal_count = req.samples.filter(status__in=terminal_statuses).count()
     if total > 0 and terminal_count == total:
         req.status = RequestStatus.COMPLETED
-        req.save()
+        req.completed_at = timezone.now()
+        req.save(update_fields=["status", "completed_at", "updated_at"])
 
 
 @role_required("lab_staff", "lab_manager")
@@ -1070,13 +1139,19 @@ def wip_abort(request: HttpRequest, wip_id: int) -> HttpResponse:
             return _action_error(request, str(e), redirect_url=f"/wips/{wip_id}/")
         wip.status = target
         wip.save()
-        sample = Sample.objects.select_for_update().get(pk=wip.sample_id)
-        try:
-            s_target = validate_sample_transition(sample.status, "processing_exception")
-            sample.status = s_target
-            sample.save()
-        except InvalidTransitionError:
-            pass
+
+        # Mark all PROCESSING samples as processing_exception.
+        for sample in Sample.objects.select_for_update().filter(
+            pk__in=wip.samples.values_list("pk", flat=True)
+        ):
+            try:
+                s_target = validate_sample_transition(
+                    sample.status, "processing_exception"
+                )
+                sample.status = s_target
+                sample.save(update_fields=["status", "updated_at"])
+            except InvalidTransitionError:
+                pass
     return redirect("web:wip-detail", wip_id=wip_id)
 
 
@@ -1089,7 +1164,7 @@ def wip_abort(request: HttpRequest, wip_id: int) -> HttpResponse:
 def dispatches_list(request: HttpRequest) -> HttpResponse:
     status_filter = request.GET.get("status", "")
     qs = Dispatch.objects.select_related(
-        "wip__sample__request", "experiment_type", "equipment", "recipe"
+        "wip__equipment", "experiment_type", "recipe"
     ).order_by("-created_at")
     if status_filter:
         qs = qs.filter(status=status_filter)
@@ -1109,12 +1184,11 @@ def dispatches_list(request: HttpRequest) -> HttpResponse:
 def dispatch_detail(request: HttpRequest, dispatch_id: int) -> HttpResponse:
     dispatch = get_object_or_404(
         Dispatch.objects.select_related(
-            "wip__sample__request__requester",
+            "wip__equipment",
             "experiment_type",
-            "equipment",
             "recipe",
             "created_by",
-        ).prefetch_related("result"),
+        ).prefetch_related("result", "wip__samples__request"),
         pk=dispatch_id,
     )
     return render(
@@ -1127,9 +1201,8 @@ def dispatch_detail(request: HttpRequest, dispatch_id: int) -> HttpResponse:
 @role_required("lab_staff", "lab_manager")
 @require_POST
 def dispatch_create(request: HttpRequest, wip_id: int) -> HttpResponse:
-    wip = get_object_or_404(WIP, pk=wip_id)
+    wip = get_object_or_404(WIP.objects.select_related("equipment"), pk=wip_id)
     exp_type_id = request.POST.get("experiment_type_id", "").strip()
-    equipment_id = request.POST.get("equipment_id", "").strip()
     recipe_id = request.POST.get("recipe_id", "").strip()
     note = request.POST.get("note", "").strip()
 
@@ -1140,19 +1213,23 @@ def dispatch_create(request: HttpRequest, wip_id: int) -> HttpResponse:
             request, "Invalid experiment type.", redirect_url=f"/wips/{wip_id}/"
         )
     try:
-        equipment = Equipment.objects.get(pk=equipment_id)
-    except (Equipment.DoesNotExist, ValueError):
-        return _action_error(
-            request, "Invalid equipment.", redirect_url=f"/wips/{wip_id}/"
+        recipe = Recipe.objects.get(
+            pk=recipe_id, equipment=wip.equipment, is_active=True
         )
-    try:
-        recipe = Recipe.objects.get(pk=recipe_id, equipment=equipment, is_active=True)
     except (Recipe.DoesNotExist, ValueError):
         return _action_error(
-            request, "Invalid recipe.", redirect_url=f"/wips/{wip_id}/"
+            request,
+            "Invalid recipe for this equipment.",
+            redirect_url=f"/wips/{wip_id}/",
+        )
+    if recipe.experiment_type_id != exp_type.pk:
+        return _action_error(
+            request,
+            "Recipe experiment type does not match.",
+            redirect_url=f"/wips/{wip_id}/",
         )
     if not EquipmentCapability.objects.filter(
-        equipment=equipment, experiment_type=exp_type
+        equipment=wip.equipment, experiment_type=exp_type
     ).exists():
         return _action_error(
             request,
@@ -1165,7 +1242,6 @@ def dispatch_create(request: HttpRequest, wip_id: int) -> HttpResponse:
         Dispatch.objects.create(
             wip=wip,
             experiment_type=exp_type,
-            equipment=equipment,
             recipe=recipe,
             note=note,
             created_by=request.user,
@@ -1173,6 +1249,14 @@ def dispatch_create(request: HttpRequest, wip_id: int) -> HttpResponse:
         if wip.status == WIPStatus.CREATED:
             wip.status = WIPStatus.IN_PROGRESS
             wip.save()
+
+        # Mark experiment statuses as in_progress.
+        sample_ids = list(wip.samples.values_list("pk", flat=True))
+        SampleExperimentStatus.objects.filter(
+            sample_id__in=sample_ids,
+            experiment_type=exp_type,
+            status=SampleExperimentProgress.PENDING,
+        ).update(status=SampleExperimentProgress.IN_PROGRESS)
 
     return redirect("web:wip-detail", wip_id=wip_id)
 
@@ -1323,7 +1407,6 @@ def dispatch_redispatch(request: HttpRequest, dispatch_id: int) -> HttpResponse:
         new_dispatch = Dispatch.objects.create(
             wip=old_dispatch.wip,
             experiment_type=old_dispatch.experiment_type,
-            equipment=old_dispatch.equipment,
             recipe=old_dispatch.recipe,
             note=f"Redispatch of #{old_dispatch.pk}",
             created_by=request.user,

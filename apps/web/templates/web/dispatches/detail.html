@@ -17,7 +17,7 @@
     <h1 class="text-xl font-semibold text-slate-900">Dispatch #{{ dispatch.pk }}</h1>
     <div class="flex items-center gap-3 mt-2">
       {% include "web/_status_badge.html" with status=dispatch.status %}
-      <span class="text-sm text-slate-500">{{ dispatch.experiment_type.name }} → {{ dispatch.equipment.name }}</span>
+      <span class="text-sm text-slate-500">{{ dispatch.experiment_type.name }} → {{ dispatch.wip.equipment.name }}</span>
     </div>
   </div>
 
@@ -159,12 +159,10 @@
       <dl class="grid grid-cols-2 gap-x-8 gap-y-3 text-sm">
         <dt class="text-slate-400">WIP</dt>
         <dd><a href="{% url 'web:wip-detail' dispatch.wip.pk %}" class="text-blue-600 hover:text-blue-700 font-medium">#{{ dispatch.wip.pk }}</a></dd>
-        <dt class="text-slate-400">Sample</dt>
-        <dd class="font-mono text-slate-700">{{ dispatch.wip.sample.wafer_id }}</dd>
         <dt class="text-slate-400">Experiment Type</dt>
         <dd class="text-slate-700">{{ dispatch.experiment_type.name }}</dd>
         <dt class="text-slate-400">Equipment</dt>
-        <dd class="text-slate-700">{{ dispatch.equipment.name }}</dd>
+        <dd class="text-slate-700">{{ dispatch.wip.equipment.name }}</dd>
         <dt class="text-slate-400">Recipe</dt>
         <dd class="text-slate-700">{{ dispatch.recipe.name }}</dd>
         {% if dispatch.dispatched_at %}
