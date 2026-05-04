@@ -1,7 +1,8 @@
-# Step 3: Remove old fields and make WIP.equipment non-nullable.
+# Step 3: Remove old fields. WIP.equipment stays nullable at the schema level
+# (per zero-downtime migration policy); business logic enforces presence
+# before transitioning to in_progress.
 
-import django.db.models.deletion
-from django.db import migrations, models
+from django.db import migrations
 
 
 class Migration(migrations.Migration):
@@ -23,15 +24,5 @@ class Migration(migrations.Migration):
         migrations.RemoveField(
             model_name="dispatch",
             name="equipment",
-        ),
-        # Make WIP.equipment non-nullable.
-        migrations.AlterField(
-            model_name="wip",
-            name="equipment",
-            field=models.ForeignKey(
-                on_delete=django.db.models.deletion.PROTECT,
-                related_name="wips",
-                to="equipment.equipment",
-            ),
         ),
     ]

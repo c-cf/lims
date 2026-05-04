@@ -35,6 +35,8 @@ class WIP(models.Model):
         "equipment.Equipment",
         on_delete=models.PROTECT,
         related_name="wips",
+        null=True,
+        blank=True,
     )
     samples = models.ManyToManyField(
         "commissions.Sample",
