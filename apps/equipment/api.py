@@ -84,6 +84,7 @@ def create_equipment(request: HttpRequest, payload: EquipmentIn):
             name=payload.name,
             model_name=payload.model_name,
             capacity=payload.capacity,
+            parameters=payload.parameters,
         )
 
         if valid_ids:

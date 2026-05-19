@@ -232,6 +232,59 @@ class TestCreateEquipment:
         )
         assert response.status_code == 401
 
+    def test_create_with_parameters_round_trip(self, client, auth_headers):
+        """Equipment parameters (alterable-parameter schema) round-trip
+        through create and detail."""
+        profile = LabStaffFactory()
+        params = {
+            "temperature_c": {"min": 25, "max": 200},
+            "humidity_percent": [10, 50, 90],
+        }
+
+        response = client.post(
+            "/api/equipment/",
+            data=json.dumps(
+                {
+                    "name": "Param rig",
+                    "model_name": "PR-1",
+                    "capacity": 4,
+                    "parameters": params,
+                }
+            ),
+            content_type="application/json",
+            **auth_headers(profile.user),
+        )
+        assert response.status_code == 201
+        data = response.json()
+        assert data["parameters"] == params
+
+        # Detail response also exposes parameters.
+        detail = client.get(
+            f"/api/equipment/{data['id']}", **auth_headers(profile.user)
+        )
+        assert detail.status_code == 200
+        assert detail.json()["parameters"] == params
+
+    def test_create_without_parameters_defaults_to_empty_dict(
+        self, client, auth_headers
+    ):
+        """parameters is optional on create; defaults to {}."""
+        profile = LabStaffFactory()
+        response = client.post(
+            "/api/equipment/",
+            data=json.dumps(
+                {
+                    "name": "No-param rig",
+                    "model_name": "NP-1",
+                    "capacity": 1,
+                }
+            ),
+            content_type="application/json",
+            **auth_headers(profile.user),
+        )
+        assert response.status_code == 201
+        assert response.json()["parameters"] == {}
+
 
 # ---------------------------------------------------------------------------
 # Equipment API tests — GET /api/equipment/{id}
@@ -339,6 +392,24 @@ class TestUpdateEquipment:
 
         assert response.status_code == 200
         assert response.json()["status"] == "maintenance"
+
+    def test_update_parameters(self, client, auth_headers):
+        """PATCH can replace the parameters dict."""
+        profile = LabStaffFactory()
+        equip = EquipmentFactory()
+        new_params = {"voltage_v": {"min": 1.0, "max": 5.0, "default": 3.3}}
+
+        response = client.patch(
+            f"/api/equipment/{equip.pk}",
+            data=json.dumps({"parameters": new_params}),
+            content_type="application/json",
+            **auth_headers(profile.user),
+        )
+
+        assert response.status_code == 200
+        assert response.json()["parameters"] == new_params
+        equip.refresh_from_db()
+        assert equip.parameters == new_params
 
     def test_update_invalid_status_returns_422(self, client, auth_headers):
         """Updating with an invalid status value returns 422."""

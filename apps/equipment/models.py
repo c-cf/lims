@@ -24,6 +24,7 @@ class Equipment(models.Model):
         through="EquipmentCapability",
         related_name="equipments",
     )
+    parameters = models.JSONField(default=dict, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 

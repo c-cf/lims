@@ -79,6 +79,35 @@ class TestEquipment:
 
         assert Equipment._meta.db_table == "equipment"
 
+    def test_equipment_parameters_defaults_to_empty_dict(self):
+        """parameters defaults to {} so manager UIs can iterate it safely."""
+        from apps.equipment.models import Equipment
+
+        equip = Equipment.objects.create(
+            name="Param defaults",
+            model_name="P-100",
+            capacity=4,
+        )
+        assert equip.parameters == {}
+
+    def test_equipment_parameters_round_trip(self):
+        """Arbitrary JSON-serializable dicts can be stored and read back."""
+        from apps.equipment.models import Equipment
+
+        params = {
+            "temperature_c": {"min": 25, "max": 200, "step": 5},
+            "humidity_percent": [10, 50, 90],
+            "note": "managed by tech lead",
+        }
+        equip = Equipment.objects.create(
+            name="Param round-trip",
+            model_name="P-200",
+            capacity=2,
+            parameters=params,
+        )
+        fresh = Equipment.objects.get(pk=equip.pk)
+        assert fresh.parameters == params
+
     def test_equipment_capability_db_table_name(self):
         """Database table name is equipment_capability."""
         from apps.equipment.models import EquipmentCapability

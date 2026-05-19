@@ -30,6 +30,7 @@ class EquipmentIn(Schema):
     model_name: str = Field(..., min_length=1, max_length=200)
     capacity: int = Field(..., gt=0)
     experiment_type_ids: list[int] = []
+    parameters: dict[str, Any] = {}
 
 
 EquipmentStatusLiteral = Literal["available", "maintenance", "disabled"]
@@ -42,6 +43,7 @@ class EquipmentUpdate(Schema):
     model_name: str | None = Field(None, min_length=1, max_length=200)
     capacity: int | None = Field(None, gt=0)
     status: EquipmentStatusLiteral | None = None
+    parameters: dict[str, Any] | None = None
 
 
 class EquipmentOut(Schema):
@@ -53,6 +55,7 @@ class EquipmentOut(Schema):
     capacity: int
     status: EquipmentStatusLiteral
     capabilities: list[CapabilityOut] = []
+    parameters: dict[str, Any] = {}
     created_at: datetime
     updated_at: datetime
 
@@ -67,6 +70,7 @@ class EquipmentOut(Schema):
             "capacity": equipment.capacity,
             "status": equipment.status,
             "capabilities": caps,
+            "parameters": equipment.parameters,
             "created_at": equipment.created_at,
             "updated_at": equipment.updated_at,
         }
