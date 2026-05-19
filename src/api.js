@@ -108,6 +108,17 @@
   const wipCode = (id) => `WIP-${String(id).padStart(4, '0')}`;
   const dispatchCode = (id) => `DP-${String(id).padStart(4, '0')}`;
 
+  // Backend returns timestamps as ISO 8601 ("2026-05-09T08:14:00.000Z").
+  // The existing JSX assumes a "YYYY-MM-DD HH:MM" string and does things like
+  // `r.created.split(' ')[0]` to grab the date portion. Normalize at the wire.
+  const formatTimestamp = (iso) => {
+    if (!iso) return iso || null;
+    const d = new Date(iso);
+    if (Number.isNaN(d.getTime())) return iso;
+    const pad = (n) => String(n).padStart(2, '0');
+    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  };
+
   // ---------------------------------------------------------------------------
   // Request normalizers. Each turns a backend payload into the shape the
   // existing JSX expects. Keep these dumb (no business logic).
@@ -121,9 +132,9 @@
       urgency: r.urgency || '1w',                            // backend default since §2.2
       requester: r.requester,
       note: r.note,
-      created: r.created_at,
-      submitted: r.submitted_at,
-      updated: r.updated_at,
+      created: formatTimestamp(r.created_at),
+      submitted: formatTimestamp(r.submitted_at),
+      updated: formatTimestamp(r.updated_at),
       // these are filled in by the detail endpoint
       expIds: [],
       samples: [],
@@ -146,11 +157,11 @@
       history: (r.approval_logs || []).map(log => ({
         action: log.action.toUpperCase(),
         by: log.reviewer?.username,
-        at: log.created_at,
+        at: formatTimestamp(log.created_at),
         note: log.comment || '',
       })),
-      completed_at: r.completed_at,
-      closed_at: r.closed_at,
+      completed_at: formatTimestamp(r.completed_at),
+      closed_at: formatTimestamp(r.closed_at),
     };
   }
 
@@ -165,9 +176,9 @@
       // received_at is set when the lab confirms receipt (backend §2.5).
       // Until that transition fires it'll be null — countdowns in the UI
       // should treat null as "not yet started" rather than "0 time left".
-      receivedAt: s.received_at || null,
-      arrivedAt: s.received_at || null,    // alias kept for existing JSX
-      created: s.created_at,
+      receivedAt: formatTimestamp(s.received_at),
+      arrivedAt: formatTimestamp(s.received_at),    // alias kept for existing JSX
+      created: formatTimestamp(s.created_at),
     };
   }
 
@@ -178,8 +189,8 @@
       sampleId: w.sample_id,
       status: w.status,
       note: w.note,
-      created: w.created_at,
-      completed: w.completed_at,
+      created: formatTimestamp(w.created_at),
+      completed: formatTimestamp(w.completed_at),
       dispatches: (w.dispatches || []).map(normalizeDispatch),
     };
   }
@@ -200,9 +211,9 @@
       operatorDepartment: d.created_by?.department || null,
       status: DISPATCH_STATUS_MAP[d.status] || d.status,
       raw_status: d.status,
-      dispatchedAt: d.dispatched_at,
-      completedAt: d.completed_at,
-      created: d.created_at,
+      dispatchedAt: formatTimestamp(d.dispatched_at),
+      completedAt: formatTimestamp(d.completed_at),
+      created: formatTimestamp(d.created_at),
       result: d.result ? {
         summary: d.result.summary,
         verdict: d.result.verdict,
@@ -500,8 +511,8 @@
           sampleId: w.sample_id,
           status: w.status,
           note: w.note,
-          completed: w.completed_at,
-          created: w.created_at,
+          completed: formatTimestamp(w.completed_at),
+          created: formatTimestamp(w.created_at),
         }));
       },
       async get(id) {
@@ -541,9 +552,9 @@
           operatorId: d.created_by?.id || null,
           status: DISPATCH_STATUS_MAP[d.status] || d.status,
           raw_status: d.status,
-          dispatchedAt: d.dispatched_at,
-          completedAt: d.completed_at,
-          created: d.created_at,
+          dispatchedAt: formatTimestamp(d.dispatched_at),
+          completedAt: formatTimestamp(d.completed_at),
+          created: formatTimestamp(d.created_at),
         }));
       },
       async get(id) {

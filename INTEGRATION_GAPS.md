@@ -141,6 +141,9 @@ Frontend: `{ id, size, requestId, urgency, arrivedAt, status, wipId, expIds }`. 
 
 | Frontend usage | Suggested endpoint | Notes |
 |---|---|---|
+| **Sample count on `RequestListOut`** | annotate `Count('samples')` on the queryset, add `sample_count: int` to `RequestListOut` | **Surfaced during Fab Dashboard wiring smoke-test 2026-05-19.** Every list row currently shows "0 wafers" because the list endpoint omits samples. One-line backend change. |
+| Dispatch count on `WIPListOut` | same pattern — annotate `Count('dispatches')` | Lab WIP list will hit the same issue once wired. |
+| WIP count on `SampleListOut` | annotate `Exists` subquery or `Count('wips')` | Lab Samples list will need this to compute the derived `in_wip` status without a second round-trip. |
 | Lab manager dashboard trend chart | `GET /reports/trends?metric=requests_per_day&days=30` | Currently the chart in `MgrDashboard` is faked. |
 | Manager "Awaiting your Response" count badge | `GET /requests/?status=pending_approval` | Already supported — just call it. |
 | Dashboard tile counts (In Progress / Drafts / etc.) | reuse `GET /requests/?status=…` per tile, or add `GET /requests/summary` | 4 parallel calls is fine for v1. |

@@ -37,6 +37,31 @@ const URGENCY_OPTS = [
   { id: '2w',  label: '2 Weeks', sub: 'Flexible' },
 ];
 
+// Live request list fetched from the backend via window.api.requests.list().
+// Dashboard and My Requests each call this independently — sharing the fetch
+// isn't a goal; one fetch on mount per consumer is acceptable for v1.
+const useRequests = () => {
+  const [data, setData] = uS([]);
+  const [loading, setLoading] = uS(true);
+  const [error, setError] = uS(null);
+  const refresh = React.useCallback(() => {
+    if (!window.api || !window.api.requests) {
+      setLoading(false);
+      return;
+    }
+    setLoading(true);
+    window.api.requests.list()
+      .then(rs => { setData(rs); setError(null); })
+      .catch(err => setError(err.message || String(err)))
+      .finally(() => setLoading(false));
+  }, []);
+  React.useEffect(() => { refresh(); }, [refresh]);
+  return { data, loading, error, refresh };
+};
+
+// TODO: drop once offline mode is removed — the standalone single-file demo
+// still consumes this as a fallback dataset. The dev build now uses
+// useRequests() above instead.
 const REQUEST_SEED = [
   // Two fresh submissions waiting on lab_manager approval — show up in the
   // dashboard's "Waiting Approval" tile and in the manager's All Requests view.
@@ -542,7 +567,8 @@ const InProgressRow = ({ request, navigate, defaultExpanded = false }) => {
   );
 };
 
-const FabDashboard = ({ requests, navigate }) => {
+const FabDashboard = ({ navigate }) => {
+  const { data: requests, loading, error } = useRequests();
   const inProgress = requests.filter(r => r.status === 'in_progress').slice(0, 5);
   const drafts = requests.filter(r => r.status === 'draft');
   const attention = requests.filter(r => r.status === 'returned' || r.status === 'rejected').slice(0, 3);
@@ -570,12 +596,35 @@ const FabDashboard = ({ requests, navigate }) => {
     return items.sort((a,b) => b.at.localeCompare(a.at)).slice(0, 5);
   }, [requests]);
 
+  if (loading && requests.length === 0) {
+    return (
+      <FabPage
+        title="Dashboard"
+        subtitle="Welcome back, fab_user"
+        right={<PrimaryBtn icon={<F.Plus size={16}/>} onClick={() => navigate({ page: 'fab_new' })}>New Request</PrimaryBtn>}
+      >
+        <div style={{ padding: '60px 20px', textAlign: 'center', color: 'var(--text-muted)', fontSize: 14 }}>
+          Loading…
+        </div>
+      </FabPage>
+    );
+  }
+
   return (
     <FabPage
       title="Dashboard"
       subtitle="Welcome back, fab_user"
       right={<PrimaryBtn icon={<F.Plus size={16}/>} onClick={() => navigate({ page: 'fab_new' })}>New Request</PrimaryBtn>}
     >
+      {error && (
+        <div style={{
+          padding: '12px 16px', marginBottom: 14, borderRadius: 10,
+          background: '#fde4e4', color: '#c0394a', fontSize: 13.5, fontWeight: 500,
+          border: '1px solid #f6c4c4',
+        }}>
+          Failed to load requests: {error}
+        </div>
+      )}
       {/* Top stat tiles — mirrors the lab dashboard's quick counts */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 14, marginBottom: 18 }}>
         <FabStatTile
@@ -816,7 +865,8 @@ const TABS = [
   { id: 'cancelled',   label: 'Cancelled',   filter: (r) => r.status === 'cancelled' },
 ];
 
-const FabRequestList = ({ requests, navigate, initialTab = 'all', titleOverride, drafts = false }) => {
+const FabRequestList = ({ navigate, initialTab = 'all', titleOverride, drafts = false }) => {
+  const { data: requests, loading, error } = useRequests();
   const [tab, setTab] = uS(initialTab);
   const [search, setSearch] = uS('');
   const [urgency, setUrgency] = uS('all');
@@ -843,6 +893,20 @@ const FabRequestList = ({ requests, navigate, initialTab = 'all', titleOverride,
     drafts ? { page: 'fab_draft_edit', id: r.id } : { page: 'fab_request', id: r.id }
   );
 
+  if (loading && requests.length === 0) {
+    return (
+      <FabPage
+        title={titleOverride || 'My Requests'}
+        subtitle=""
+        right={<PrimaryBtn icon={<F.Plus size={16}/>} onClick={() => navigate({ page: 'fab_new' })}>New Request</PrimaryBtn>}
+      >
+        <div style={{ padding: '60px 20px', textAlign: 'center', color: 'var(--text-muted)', fontSize: 14 }}>
+          Loading…
+        </div>
+      </FabPage>
+    );
+  }
+
   return (
     <FabPage
       title={titleOverride || 'My Requests'}
@@ -851,6 +915,15 @@ const FabRequestList = ({ requests, navigate, initialTab = 'all', titleOverride,
         : `${requests.length} total · ${inProgressCount} in progress`}
       right={<PrimaryBtn icon={<F.Plus size={16}/>} onClick={() => navigate({ page: 'fab_new' })}>New Request</PrimaryBtn>}
     >
+      {error && (
+        <div style={{
+          padding: '12px 16px', marginBottom: 14, borderRadius: 10,
+          background: '#fde4e4', color: '#c0394a', fontSize: 13.5, fontWeight: 500,
+          border: '1px solid #f6c4c4',
+        }}>
+          Failed to load requests: {error}
+        </div>
+      )}
       {/* Tabs */}
       {!drafts && (
         <div style={{ display: 'flex', gap: 22, borderBottom: '1px solid rgba(0,0,0,0.07)', marginBottom: 22 }}>
@@ -1620,19 +1693,19 @@ const FabApp = ({ route, navigate }) => {
   };
 
   let page = null;
-  if (route.page === 'fab_dashboard') page = <FabDashboard requests={requests} navigate={navigate}/>;
-  else if (route.page === 'fab_requests') page = <FabRequestList requests={requests} navigate={navigate} initialTab={route.tab || 'all'}/>;
-  else if (route.page === 'fab_drafts') page = <FabRequestList requests={requests} navigate={navigate} drafts titleOverride="Drafts"/>;
+  if (route.page === 'fab_dashboard') page = <FabDashboard navigate={navigate}/>;
+  else if (route.page === 'fab_requests') page = <FabRequestList navigate={navigate} initialTab={route.tab || 'all'}/>;
+  else if (route.page === 'fab_drafts') page = <FabRequestList navigate={navigate} drafts titleOverride="Drafts"/>;
   else if (route.page === 'fab_new')      page = <FabNewRequest navigate={navigate} onSubmit={submitNew} onSaveDraft={saveDraft}/>;
   else if (route.page === 'fab_draft_edit') {
     const d = requests.find(r => r.id === route.id);
     page = d
       ? <FabNewRequest navigate={navigate} draft={d} isEdit
           onSubmit={(p) => submitNew(p, d.id)} onSaveDraft={(p) => saveDraft(p, d.id)}/>
-      : <FabRequestList requests={requests} navigate={navigate} drafts titleOverride="Drafts"/>;
+      : <FabRequestList navigate={navigate} drafts titleOverride="Drafts"/>;
   }
   else if (route.page === 'fab_request')  page = <FabRequestDetail id={route.id} requests={requests} navigate={navigate} onCancel={cancelRequest}/>;
-  else page = <FabDashboard requests={requests} navigate={navigate}/>;
+  else page = <FabDashboard navigate={navigate}/>;
 
   return (
     <>
