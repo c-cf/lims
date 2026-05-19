@@ -786,6 +786,70 @@ class TestSampleReceive:
         req.refresh_from_db()
         assert req.status == RequestStatus.SAMPLE_SHIPPED
 
+    def test_receive_stamps_received_at(self, client, auth_headers, lab_staff):
+        """Receiving a sample sets received_at to the current time and the
+        list/detail responses expose it."""
+        from django.utils import timezone
+
+        sample = SampleFactory(status=SampleStatus.SHIPPED)
+        assert sample.received_at is None
+
+        before = timezone.now()
+        resp = client.post(
+            f"/api/samples/{sample.pk}/receive",
+            content_type="application/json",
+            **auth_headers(lab_staff),
+        )
+        after = timezone.now()
+        assert resp.status_code == 200
+
+        sample.refresh_from_db()
+        assert sample.received_at is not None
+        assert before <= sample.received_at <= after
+
+        # Detail response exposes received_at.
+        assert resp.json()["received_at"] is not None
+
+        # List response also exposes it.
+        list_resp = client.get(
+            "/api/samples/",
+            **auth_headers(lab_staff),
+        )
+        assert list_resp.status_code == 200
+        rows = {row["id"]: row for row in list_resp.json()}
+        assert rows[sample.pk]["received_at"] is not None
+
+    def test_received_at_not_overwritten_by_later_transition(
+        self, client, auth_headers, lab_staff
+    ):
+        """Transitioning past 'received' (e.g. to voided) must preserve the
+        original received_at — it's a once-stamped clock, not a status timer."""
+        sample = SampleFactory(status=SampleStatus.SHIPPED)
+
+        # First, receive the sample.
+        client.post(
+            f"/api/samples/{sample.pk}/receive",
+            content_type="application/json",
+            **auth_headers(lab_staff),
+        )
+        sample.refresh_from_db()
+        original_received_at = sample.received_at
+        assert original_received_at is not None
+
+        # State machine: received -> split -> processing_exception -> voided.
+        sample.status = SampleStatus.PROCESSING_EXCEPTION
+        sample.save(update_fields=["status"])
+
+        resp = client.post(
+            f"/api/samples/{sample.pk}/void",
+            content_type="application/json",
+            **auth_headers(lab_staff),
+        )
+        assert resp.status_code == 200
+
+        sample.refresh_from_db()
+        assert sample.received_at == original_received_at
+
 
 @pytest.mark.django_db
 class TestSampleRejectReceiving:

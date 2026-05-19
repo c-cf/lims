@@ -242,6 +242,7 @@ class SampleDetailOut(Schema):
     status: str
     request: RequestSummaryOut
     note: str
+    received_at: datetime | None
     created_at: datetime
     updated_at: datetime
 
@@ -258,6 +259,7 @@ class SampleDetailOut(Schema):
                 "title": sample.request.title,
             },
             "note": sample.note,
+            "received_at": sample.received_at,
             "created_at": sample.created_at,
             "updated_at": sample.updated_at,
         }
@@ -280,5 +282,6 @@ class SampleListOut(Schema):
     wafer_size: str
     status: str
     request_id: int
+    received_at: datetime | None
     created_at: datetime
     updated_at: datetime

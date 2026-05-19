@@ -593,14 +593,28 @@ def get_sample(request: HttpRequest, sample_id: int):
     response={200: SampleDetailOut, 400: ErrorOut, 403: ErrorOut, 404: ErrorOut},
 )
 def receive_sample(request: HttpRequest, sample_id: int):
-    """Confirm sample receipt. Only lab staff/managers allowed."""
+    """Confirm sample receipt. Only lab staff/managers allowed.
+
+    Stamps Sample.received_at with the current time on the receive
+    transition. The frontend uses this to render the urgency countdown
+    on the Samples list (deadline = received_at + urgency_duration),
+    so it must be captured at the moment of receipt, not derived from
+    later updated_at values.
+    """
+
+    def pre_save(sample: Sample) -> None:
+        sample.received_at = timezone.now()
 
     def post_save_in_txn(sample: Sample) -> None:
         req = Request.objects.select_for_update().get(pk=sample.request_id)
         _check_all_samples_received(req)
 
     return _lab_sample_action(
-        request, sample_id, "receive", post_save_in_txn=post_save_in_txn
+        request,
+        sample_id,
+        "receive",
+        pre_save=pre_save,
+        post_save_in_txn=post_save_in_txn,
     )
 
 

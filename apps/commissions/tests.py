@@ -169,6 +169,16 @@ class TestSample:
         assert sample.status == SampleStatus.LOST
         assert SampleStatus.LOST.value == "lost"
 
+    def test_sample_received_at_defaults_to_none(self, user):
+        """received_at is null until the sample is explicitly received."""
+        from apps.commissions.models import Request, Sample, WaferSize
+
+        req = Request.objects.create(title="received_at 預設", requester=user)
+        sample = Sample.objects.create(
+            request=req, wafer_id="WF-RX-001", wafer_size=WaferSize.SIZE_300MM
+        )
+        assert sample.received_at is None
+
     def test_sample_status_choices_count(self):
         """SampleStatus has exactly 10 states."""
         from apps.commissions.models import SampleStatus
