@@ -37,6 +37,26 @@ const URGENCY_OPTS = [
   { id: '2w',  label: '2 Weeks', sub: 'Flexible' },
 ];
 
+// Live experiment-type catalogue (TCT, HAST, CP, FT, BTC, …). The id is an
+// integer assigned by the backend; the frontend's old hardcoded list used
+// string slugs which the new-request flow no longer touches.
+const useExperimentTypes = () => {
+  const [data, setData] = uS([]);
+  const [loading, setLoading] = uS(true);
+  const [error, setError] = uS(null);
+  React.useEffect(() => {
+    if (!window.api || !window.api.experimentTypes) {
+      setLoading(false);
+      return;
+    }
+    window.api.experimentTypes.list()
+      .then(rs => { setData(rs); setError(null); })
+      .catch(err => setError(err.message || String(err)))
+      .finally(() => setLoading(false));
+  }, []);
+  return { data, loading, error };
+};
+
 // Live request list fetched from the backend via window.api.requests.list().
 // Dashboard and My Requests each call this independently — sharing the fetch
 // isn't a goal; one fetch on mount per consumer is acceptable for v1.
@@ -281,16 +301,17 @@ const PrimaryBtn = ({ children, onClick, type = 'button', icon, disabled, style 
     {icon}{children}
   </button>
 );
-const SecondaryBtn = ({ children, onClick, icon, style }) => (
-  <button onClick={onClick} style={{
+const SecondaryBtn = ({ children, onClick, icon, style, disabled }) => (
+  <button onClick={onClick} disabled={disabled} style={{
     display: 'inline-flex', alignItems: 'center', gap: 8,
     padding: '10px 16px', borderRadius: 10,
-    background: '#fff', color: 'var(--text-primary)', fontWeight: 600, fontSize: 14,
-    border: '1px solid rgba(0,0,0,0.16)', transition: 'background 0.12s', cursor: 'pointer',
+    background: '#fff', color: disabled ? 'var(--text-muted)' : 'var(--text-primary)', fontWeight: 600, fontSize: 14,
+    border: '1px solid rgba(0,0,0,0.16)', transition: 'background 0.12s',
+    cursor: disabled ? 'not-allowed' : 'pointer', opacity: disabled ? 0.7 : 1,
     ...style,
   }}
-    onMouseEnter={(e) => e.currentTarget.style.background = '#f8f8fb'}
-    onMouseLeave={(e) => e.currentTarget.style.background = '#fff'}
+    onMouseEnter={(e) => { if (!disabled) e.currentTarget.style.background = '#f8f8fb'; }}
+    onMouseLeave={(e) => { if (!disabled) e.currentTarget.style.background = '#fff'; }}
   >{icon}{children}</button>
 );
 const DangerBtn = ({ children, onClick, style }) => (
@@ -1160,11 +1181,27 @@ const ExpCard = ({ exp, active, onClick }) => (
   </button>
 );
 
-const FabNewRequest = ({ navigate, onSubmit, onSaveDraft, draft, isEdit = false }) => {
+const FabNewRequest = ({ navigate, onSubmit, onSaveDraft, draft, isEdit = false, showToast }) => {
+  // Edit mode still runs on the seed-backed local-state path (FabApp callbacks)
+  // because the backend's RequestUpdateIn only accepts title/note/urgency —
+  // it can't replace experiment_type_ids or samples. New-request creation goes
+  // straight to the live API.
+  const { data: liveExperiments, error: experimentsError } = useExperimentTypes();
+  const experimentChoices = isEdit
+    ? ALL_EXPERIMENTS
+    : liveExperiments.map(e => ({
+        id: e.id,
+        name: e.name,
+        desc: e.description,
+        group: e.labCategory,
+      }));
+
   const [title, setTitle] = uS(draft?.title || '');
   const [note, setNote] = uS(draft?.note || '');
   const [urgency, setUrgency] = uS(draft?.urgency || '1w');
   const [wafers, setWafers] = uS(draft?.samples?.length ? draft.samples.map(s => ({ wafer: s.wafer, size: s.size, expIds: draft.expIds || [] })) : [{ wafer: '', size: '200mm', expIds: [] }]);
+  const [busy, setBusy] = uS(false);
+  const [apiError, setApiError] = uS(null);
 
   const addWafer = () => setWafers(w => [...w, { wafer: '', size: '200mm', expIds: [] }]);
   const removeWafer = (i) => setWafers(w => w.length === 1 ? w : w.filter((_, j) => j !== i));
@@ -1178,12 +1215,45 @@ const FabNewRequest = ({ navigate, onSubmit, onSaveDraft, draft, isEdit = false 
   const samplesValid = wafers.every(w => w.wafer.trim() && w.expIds.length > 0);
   const valid = basicValid && samplesValid;
 
-  const handle = (publish) => {
+  const handle = async (publish) => {
+    if (isEdit) {
+      // Legacy local-state path — backend can't yet replay wafer/experiment
+      // edits on a draft. Keep using FabApp's callbacks for now.
+      const expIdsAll = Array.from(new Set(wafers.flatMap(w => w.expIds)));
+      const samples = wafers.map(w => ({ wafer: w.wafer.trim(), size: w.size, status: 'pending' }));
+      const payload = { title: title.trim(), note: note.trim(), urgency, expIds: expIdsAll, samples };
+      if (publish) onSubmit(payload);
+      else onSaveDraft(payload);
+      return;
+    }
+
     const expIdsAll = Array.from(new Set(wafers.flatMap(w => w.expIds)));
-    const samples = wafers.map(w => ({ wafer: w.wafer.trim(), size: w.size, status: 'pending' }));
-    const payload = { title: title.trim(), note: note.trim(), urgency, expIds: expIdsAll, samples };
-    if (publish) onSubmit(payload);
-    else onSaveDraft(payload);
+    const samples = wafers.map(w => ({ wafer_id: w.wafer.trim(), wafer_size: w.size }));
+    const payload = {
+      title: title.trim(),
+      note: note.trim(),
+      urgency,
+      experiment_type_ids: expIdsAll,
+      samples,
+    };
+
+    setBusy(true);
+    setApiError(null);
+    try {
+      const created = await window.api.requests.create(payload);
+      if (publish) {
+        await window.api.requests.submit(created.id);
+        showToast && showToast(`Request #${created.id} submitted — awaiting approval`);
+        navigate({ page: 'fab_requests' });
+      } else {
+        showToast && showToast(`Draft #${created.id} saved`);
+        navigate({ page: 'fab_drafts' });
+      }
+    } catch (err) {
+      setApiError(err.message || String(err));
+    } finally {
+      setBusy(false);
+    }
   };
 
   return (
@@ -1272,7 +1342,12 @@ const FabNewRequest = ({ navigate, onSubmit, onSaveDraft, draft, isEdit = false 
                       {w.expIds.length === 0 && <span style={{ fontSize: 12, fontWeight: 600, color: '#c0394a' }}>Pick at least one</span>}
                     </div>
                     <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 10 }}>
-                      {ALL_EXPERIMENTS.map(e => (
+                      {experimentChoices.length === 0 && experimentsError && (
+                        <div style={{ gridColumn: '1 / -1', fontSize: 13, color: '#c0394a', padding: '12px 14px', background: '#fde4e4', border: '1px solid #f6c4c4', borderRadius: 10 }}>
+                          Couldn't load experiment types: {experimentsError}
+                        </div>
+                      )}
+                      {experimentChoices.map(e => (
                         <ExpCard key={e.id} exp={e} active={w.expIds.includes(e.id)} onClick={() => toggleExp(i, e.id)}/>
                       ))}
                     </div>
@@ -1326,6 +1401,16 @@ const FabNewRequest = ({ navigate, onSubmit, onSaveDraft, draft, isEdit = false 
         </div>
       </div>
 
+      {apiError && (
+        <div style={{
+          padding: '12px 16px', marginTop: 16, borderRadius: 10,
+          background: '#fde4e4', color: '#c0394a', fontSize: 13.5, fontWeight: 500,
+          border: '1px solid #f6c4c4',
+        }}>
+          {apiError}
+        </div>
+      )}
+
       {/* Bottom action bar */}
       <div style={{
         position: 'sticky', bottom: 0, marginTop: 24, marginLeft: -44, marginRight: -44,
@@ -1340,8 +1425,8 @@ const FabNewRequest = ({ navigate, onSubmit, onSaveDraft, draft, isEdit = false 
         </div>
         <div style={{ display: 'flex', gap: 10 }}>
           <SecondaryBtn onClick={() => navigate(isEdit ? { page: 'fab_drafts' } : { page: 'fab_requests' })}>Cancel</SecondaryBtn>
-          <SecondaryBtn onClick={() => handle(false)}>{isEdit ? 'Save & Stay Draft' : 'Save Draft'}</SecondaryBtn>
-          <PrimaryBtn disabled={!valid} onClick={() => handle(true)}>{isEdit ? 'Submit Draft' : 'Submit Request'}</PrimaryBtn>
+          <SecondaryBtn disabled={busy} onClick={() => handle(false)}>{busy ? 'Saving…' : (isEdit ? 'Save & Stay Draft' : 'Save Draft')}</SecondaryBtn>
+          <PrimaryBtn disabled={!valid || busy} onClick={() => handle(true)}>{busy ? 'Submitting…' : (isEdit ? 'Submit Draft' : 'Submit Request')}</PrimaryBtn>
         </div>
       </div>
     </FabPage>
@@ -1696,11 +1781,11 @@ const FabApp = ({ route, navigate }) => {
   if (route.page === 'fab_dashboard') page = <FabDashboard navigate={navigate}/>;
   else if (route.page === 'fab_requests') page = <FabRequestList navigate={navigate} initialTab={route.tab || 'all'}/>;
   else if (route.page === 'fab_drafts') page = <FabRequestList navigate={navigate} drafts titleOverride="Drafts"/>;
-  else if (route.page === 'fab_new')      page = <FabNewRequest navigate={navigate} onSubmit={submitNew} onSaveDraft={saveDraft}/>;
+  else if (route.page === 'fab_new')      page = <FabNewRequest navigate={navigate} onSubmit={submitNew} onSaveDraft={saveDraft} showToast={showToast}/>;
   else if (route.page === 'fab_draft_edit') {
     const d = requests.find(r => r.id === route.id);
     page = d
-      ? <FabNewRequest navigate={navigate} draft={d} isEdit
+      ? <FabNewRequest navigate={navigate} draft={d} isEdit showToast={showToast}
           onSubmit={(p) => submitNew(p, d.id)} onSaveDraft={(p) => saveDraft(p, d.id)}/>
       : <FabRequestList navigate={navigate} drafts titleOverride="Drafts"/>;
   }
