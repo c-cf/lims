@@ -118,7 +118,7 @@
       title: r.title,
       status: REQUEST_STATUS_MAP[r.status] || r.status,
       raw_status: r.status,                                  // keep for state-machine calls
-      urgency: r.urgency || null,                            // backend gap: §2.2
+      urgency: r.urgency || '1w',                            // backend default since §2.2
       requester: r.requester,
       note: r.note,
       created: r.created_at,
@@ -162,7 +162,11 @@
       requestId: s.request_id,
       status: SAMPLE_STATUS_MAP[s.status] || s.status,
       raw_status: s.status,
-      arrivedAt: s.received_at || s.updated_at || null,  // backend gap: §2.5
+      // received_at is set when the lab confirms receipt (backend §2.5).
+      // Until that transition fires it'll be null — countdowns in the UI
+      // should treat null as "not yet started" rather than "0 time left".
+      receivedAt: s.received_at || null,
+      arrivedAt: s.received_at || null,    // alias kept for existing JSX
       created: s.created_at,
     };
   }
@@ -191,7 +195,9 @@
       equipmentName: d.equipment_name,
       recipeId: d.recipe_id,
       recipeName: d.recipe_name,
-      operator: d.created_by?.username || null,  // backend gap: §2.6 (created_by not yet exposed)
+      operator: d.created_by?.username || null,    // exposed by backend §2.6
+      operatorId: d.created_by?.id || null,
+      operatorDepartment: d.created_by?.department || null,
       status: DISPATCH_STATUS_MAP[d.status] || d.status,
       raw_status: d.status,
       dispatchedAt: d.dispatched_at,
@@ -215,6 +221,10 @@
       status: EQUIPMENT_STATUS_MAP[e.status] || e.status,
       raw_status: e.status,
       capabilities: e.capabilities || [],
+      // Admin-defined schema of dispatch parameters this equipment exposes
+      // (backend §2.4). Shape is open-ended; the UI walks the object to
+      // render input fields.
+      parameters: e.parameters || {},
     };
   }
 
@@ -223,8 +233,8 @@
       id: r.id,
       name: r.name,
       description: r.description,
-      // Recipe.equipment is currently required on the backend (see §2.3). For
-      // now we surface it; the UI ignores it once §2.3 lands.
+      // Recipe.equipment is now nullable (backend §2.3). Surface null for
+      // recipes that aren't tied to a specific machine.
       equipmentId: r.equipment?.id || null,
       equipmentName: r.equipment?.name || null,
       experimentId: r.experiment_type?.id || null,
@@ -413,8 +423,9 @@
         return normalizeRequestDetail(out);
       },
       async create(payload) {
-        // payload = { title, note?, experiment_type_ids, experiment_parameters?, samples }
-        // urgency goes here once §2.2 lands.
+        // payload = { title, note?, urgency?, experiment_type_ids,
+        //             experiment_parameters?, samples }
+        // urgency: '3d' | '1w' | '2w' (default '1w' server-side, backend §2.2)
         const out = await call('/requests/', { method: 'POST', body: payload });
         return normalizeRequestDetail(out);
       },
@@ -526,6 +537,8 @@
           experimentId: d.experiment_type_id,
           equipmentId: d.equipment_id,
           recipeId: d.recipe_id,
+          operator: d.created_by?.username || null,       // backend §2.6
+          operatorId: d.created_by?.id || null,
           status: DISPATCH_STATUS_MAP[d.status] || d.status,
           raw_status: d.status,
           dispatchedAt: d.dispatched_at,

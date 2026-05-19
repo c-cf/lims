@@ -1,8 +1,10 @@
 # LIMS Frontend ↔ Backend Integration — Gap Analysis
 
-_As of 2026-05-19. Backend: Django + Ninja at `https://lims.cchuml.com/api/`. Frontend: `LIMS_0-8-1.html` (standalone) and `LIMS_0-8-1.dev.html` (multi-file, with `src/` + `fonts/`)._ 
+_As of 2026-05-19. Backend: Django + Ninja at `https://lims.cchuml.com/api/`. Frontend: `LIMS_0-8-1.html` (standalone) and `LIMS_0-8-1.dev.html` (multi-file, with `src/` + `fonts/`)._
 
 This document maps every frontend feature to a backend endpoint and flags what's missing on each side. Items are tagged `[FE]` (frontend work), `[BE]` (backend work), or `[BOTH]`.
+
+> **Status update (2026-05-19, post-handoff):** Backend tasks §2.2, §2.3, §2.4, §2.5, §2.6 all landed on `feat/frontend-integration` as five commits (`2535fcc`, `a13f949`, `c893c9f`, `0a39799`, `270311a`). Test count went 437 → 472. `src/api.js` adapter updated to consume the new fields. The frontend wiring work (section 6 below) is now unblocked. Section 2 entries are kept for history with ✅ markers.
 
 ---
 
@@ -42,28 +44,28 @@ All routes mounted on `/api/`. Auth: JWT bearer, `Authorization: Bearer <access_
 - Frontend `login.jsx` & shell routing: `fab_user`, `lab_member`, `lab_manager`.
 - **Resolution:** keep `lab_staff` as the wire value; map `lab_staff → lab_member` for display in the new `src/api.js` adapter. The shell's role check (`role === 'lab_member'`) gets normalized at the auth boundary.
 
-### 2.2 Request `urgency` field is frontend-only  `[BE]` **major**
+### 2.2 ✅ Request `urgency` field is frontend-only  `[BE]` **major** — _resolved in 2535fcc_
 - Frontend stores `urgency: '3d' | '1w' | '2w'` on every request and renders Urgency pills everywhere (My Requests, request detail, sample list as countdown).
 - Backend `Request` model has no urgency / priority / due-date field.
 - **Resolution:** add `urgency` (`CharField(choices=['3d','1w','2w'], default='1w')`) to `Request`, expose it in `RequestIn`, `RequestUpdateIn`, `RequestListOut`, `RequestDetailOut`. Until then the frontend can either hide urgency or treat everything as `1w`.
 
-### 2.3 Recipes don't belong to equipment in the frontend  `[BE]` **major**
+### 2.3 ✅ Recipes don't belong to equipment in the frontend  `[BE]` **major** — _resolved in a13f949_
 - Frontend (final design decision in chat #5): "Remove selecting equipment for the recipes. A recipe doesn't need to be assigned to equipment. Equipment is chosen at dispatch time."
 - Backend `Recipe.equipment` is a non-null FK and `RecipeIn.equipment_id` is required.
 - **Resolution:** make `Recipe.equipment` nullable; make `equipment_id` optional in `RecipeIn`; relax `Dispatch` validation: instead of `recipe must belong to equipment`, require `recipe.experiment_type == equipment.capability`.
 - Frontend then lists/creates/edits recipes without an `equipment_id`.
 
-### 2.4 Equipment "alterable parameters"  `[BE]`
+### 2.4 ✅ Equipment "alterable parameters"  `[BE]` — _resolved in 270311a_
 - Chat #6: manager equipment-create form asks for "parameters that can be altered". Backend `Equipment` has no `parameters` JSONField.
 - **Resolution:** add `Equipment.parameters = JSONField(default=dict)` for an admin-defined schema of which dispatch parameters the equipment exposes.
 - _Lower priority — UI ships fine without this until manager flow is exercised._
 
-### 2.5 Sample countdown (`time remaining`) needs an explicit clock  `[BE]`
+### 2.5 ✅ Sample countdown (`time remaining`) needs an explicit clock  `[BE]` — _resolved in c893c9f_
 - Frontend Samples list shows a countdown derived from `arrivedAt + urgency_duration`.
 - Backend has `Sample.created_at` and `updated_at` but no dedicated `received_at` timestamp; the moment a sample transitions to `received` is recoverable only via approval logs / state-machine history, neither of which is exposed.
 - **Resolution:** add `Sample.received_at = DateTimeField(null=True)`; set it inside `receive_sample` view; expose on `SampleListOut` + `SampleDetailOut`.
 
-### 2.6 Dispatch operator on list rows  `[BE]` _small_
+### 2.6 ✅ Dispatch operator on list rows  `[BE]` _small_ — _resolved in 0a39799_
 - Frontend Dispatches list shows operator (the lab member who created the dispatch).
 - `Dispatch.created_by` exists on the model but `DispatchListOut` doesn't include it.
 - **Resolution:** add `created_by: {id, username}` to `DispatchListOut` and `DispatchDetailOut`.
@@ -185,7 +187,7 @@ These are independent of backend gaps — needed to call the live API at all:
 
 ### Fab `My Requests`, `Drafts`
 - [ ] `GET /requests/` (already filtered server-side by requester for fab users)
-- [ ] urgency pill renders `'—'` until §2.2 lands
+- [x] urgency pill (§2.2 ✅ landed — `r.urgency` is now in the response)
 
 ### Fab `New Request`
 - [ ] `GET /experiment-types/` for the picker (drop the hardcoded `RA_EXPERIMENTS` list)
@@ -205,7 +207,7 @@ These are independent of backend gaps — needed to call the live API at all:
 ### Lab `Samples`
 - [ ] `GET /samples/`
 - [ ] receive / reject-receiving buttons → corresponding sample actions
-- [ ] urgency / time-remaining: §2.2 + §2.5 must land first
+- [x] urgency / time-remaining (§2.2 + §2.5 ✅ landed — urgency from parent request, `received_at` from sample)
 
 ### Lab `WIP` list + detail
 - [ ] `GET /wips/`, `GET /wips/:id`
@@ -215,7 +217,7 @@ These are independent of backend gaps — needed to call the live API at all:
 
 ### Lab `Dispatches` list + detail
 - [ ] `GET /dispatches/`, `GET /dispatches/:id`
-- [ ] operator column needs §2.6 first
+- [x] operator column (§2.6 ✅ landed — `created_by` exposed on both list + detail)
 - [ ] start / unload / record-result / complete buttons → corresponding actions
 
 ### Lab `Equipment`
@@ -229,12 +231,12 @@ These are independent of backend gaps — needed to call the live API at all:
 ### Manager `Recipes`
 - [ ] `GET /recipes/`
 - [ ] New / Edit / Delete recipe → corresponding endpoints
-- [ ] **blocked on §2.3** until backend equipment FK is nullable; alternative is to keep equipment in the modal as a workaround
+- [x] §2.3 ✅ landed — `equipment_id` is optional in `RecipeIn`; modal drops the equipment field per the user's design decision
 
 ### Manager `Equipment`
 - [ ] `POST /equipment/` from the create-equipment modal
 - [ ] Setting capabilities → `POST /equipment/:id/capabilities`
-- [ ] "alterable parameters" UI: blocked on §2.4
+- [x] "alterable parameters" UI (§2.4 ✅ landed — `Equipment.parameters` JSONField is in EquipmentIn/EquipmentOut)
 
 ### Manager `Reports`
 - [ ] `GET /reports/equipment-utilization?period=…&start_date=…&end_date=…`
@@ -248,11 +250,11 @@ These are independent of backend gaps — needed to call the live API at all:
 
 ## 7. Suggested ordering
 
-1. **Backend, two PRs:** §2.1 role rename guard (or accept FE adapter), §2.2 `urgency`, §2.3 nullable recipe equipment, §2.5 `received_at`, §2.6 `created_by` on dispatch out-schemas. These five alone unblock 90 % of the integration.
-2. **Frontend, one PR:** add `src/api.js`, wire `LoginPage` end-to-end, add status/role adapters. Smoke-test sign-in and `/me`.
-3. **Frontend, second PR:** wire every list page (fab requests, lab samples/wips/dispatches/equipment, manager requests/recipes/reports). State transitions still call API, on success refetch.
-4. **Frontend, third PR:** form pages (new request, new WIP, add dispatch, new/edit recipe, new equipment, approve/return/reject modals). Validation goes through Ninja's 400 responses.
-5. **Backend, follow-up:** §2.4 equipment parameters, §2.7 recipe duration, §2.8 wafer rollup, §4 trends + activity endpoints. These are quality-of-life — frontend ships without them.
+1. ~~**Backend, two PRs:** §2.1–§2.6.~~ ✅ **Done** — landed as 5 commits on `feat/frontend-integration` (2535fcc, a13f949, c893c9f, 0a39799, 270311a). §2.1 (role rename) handled by FE adapter in `src/api.js`.
+2. ~~**Frontend, one PR:** add `src/api.js`, wire `LoginPage` end-to-end, add status/role adapters.~~ ✅ **Done** — `src/api.js` exists, `login.jsx` calls it.
+3. **Frontend, next:** wire each list page (fab requests, lab samples/wips/dispatches/equipment, manager requests/recipes/reports). State transitions call API, on success refetch. ⬅ _we are here_
+4. **Frontend, after that:** form pages (new request, new WIP, add dispatch, new/edit recipe, new equipment, approve/return/reject modals). Validation goes through Ninja's 400 responses.
+5. **Backend, follow-up:** §2.7 recipe duration, §2.8 wafer rollup, §4 trends + activity endpoints. These are quality-of-life — frontend ships without them.
 
 ---
 
