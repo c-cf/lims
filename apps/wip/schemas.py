@@ -293,7 +293,10 @@ class DispatchListOut(Schema):
             "id": dispatch.pk,
             "wip_id": dispatch.wip_id,
             "experiment_type_id": dispatch.experiment_type_id,
-            "equipment_id": dispatch.equipment_id,
+            # Equipment moved from Dispatch to WIP in PR #34. The
+            # list endpoint must prefetch wip — see _dispatch_list_queryset
+            # (or list_dispatches view) to avoid an N+1.
+            "equipment_id": dispatch.wip.equipment_id,
             "recipe_id": dispatch.recipe_id,
             "status": dispatch.status,
             "dispatched_at": dispatch.dispatched_at,

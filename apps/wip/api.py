@@ -557,7 +557,9 @@ def list_dispatches(
     if not has_lab_role(request):
         return 403, {"detail": "Permission denied"}
 
-    qs = Dispatch.objects.select_related("created_by__profile").order_by("-created_at")
+    qs = Dispatch.objects.select_related("created_by__profile", "wip").order_by(
+        "-created_at"
+    )
     if status:
         qs = qs.filter(status=status)
     if wip_id:
