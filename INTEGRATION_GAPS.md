@@ -49,7 +49,40 @@ All routes mounted on `/api/`. Auth: JWT bearer, `Authorization: Bearer <access_
 - Backend `Request` model has no urgency / priority / due-date field.
 - **Resolution:** add `urgency` (`CharField(choices=['3d','1w','2w'], default='1w')`) to `Request`, expose it in `RequestIn`, `RequestUpdateIn`, `RequestListOut`, `RequestDetailOut`. Until then the frontend can either hide urgency or treat everything as `1w`.
 
-### 2.3 ✅ Recipes don't belong to equipment in the frontend  `[BE]` **major** — _resolved in a13f949_
+### 2.3 ✅ Recipes are equipment-agnostic  `[BE]` **major** — _completed on `feat/frontend-integration-v2`_
+
+The chat-design model is fully restored on the backend across 5 commits (`6960d4a`, `94de543`, `dafa466`, `87e4410`, `d4c1690`). 477 tests passing, ruff clean. `src/api.js` adapter is in sync. **One follow-up:** `DispatchBriefOut` (nested inside `WIPDetailOut.dispatches`) doesn't include `equipment_id`/`equipment_name`. The WIP detail page needs equipment per dispatch row, so either: (a) add those two fields to the schema (1-line change in `apps/wip/schemas.py` + `from_wip` builder), or (b) frontend makes N extra `/dispatches/:id` calls. Option (a) is the right answer — flag it for the next backend session.
+
+
+
+**Decision history:**
+
+1. **a13f949 (original chat design):** decouple recipes from equipment. WIP picks experiment; dispatch picks equipment + recipe.
+2. **PR #34 merged to main (`766fe60`):** opposite direction — WIP picks equipment + multi-sample batch; dispatch inherits equipment; recipes pinned to equipment.
+3. **2026-05-19 morning pivot:** adopted PR #34's model, dropped a13f949.
+4. **2026-05-19 afternoon reverse-pivot — current direction:** the frontend chat-design wins. Backend layered on top of v2 to restore the chat-design model. PR #34 is not reverted; new commits supersede its shape.
+
+**Target model (what the backend must look like after this branch ships):**
+
+- `WIP`: has `experiment_type` (FK, required); **keeps PR #34's multi-sample shape** — `samples` (M2M via `WIPSample`); no `equipment` field. Constraint: every sample in the M2M must have `wip.experiment_type` in its request's `request_experiments`.
+- `Dispatch`: has `equipment` (FK, required); has `recipe` (FK, required); `experiment_type` derived from the parent WIP, not in the input payload.
+- `Recipe`: has `experiment_type`; **no `equipment` field at all** (drop the column). Dispatch validates that `dispatch.equipment` has `wip.experiment_type` as a capability AND `recipe.experiment_type == wip.experiment_type`.
+- `apps/web/` templates updated to match.
+
+**Migration path (layer-on-top, no revert of PR #34):**
+
+The branch keeps the 6 existing commits and adds new commits on top that reshape the model. `WIPSample` stays; we're just swapping equipment for experiment_type at the WIP level and putting equipment back on Dispatch.
+
+1. Add `WIP.experiment_type` (nullable initially). Data-migrate by inferring from `WIP.dispatches.first().experiment_type` per WIP; fallback to the experiment_type from any sample's `request_experiments`.
+2. Add `Dispatch.equipment` (FK, nullable initially). Data-migrate by copying `dispatch.wip.equipment_id`.
+3. Make `WIP.experiment_type` and `Dispatch.equipment` non-null.
+4. Drop `WIP.equipment` column.
+5. Drop `Recipe.equipment` column. Update validation in `create_dispatch`: equipment capability + recipe.experiment_type matches WIP.experiment_type.
+6. Update `WIPIn` to accept `{experiment_type_id, sample_ids: list[int], note}` with the constraint that every sample's request has the experiment_type.
+7. Update `DispatchIn` to accept `{equipment_id, recipe_id, note}` — drop `experiment_type_id` from the payload (derived from parent WIP server-side).
+8. Update `apps/web/` templates referencing `wip.equipment`, recipe-equipment dropdowns, or dispatch.experiment_type-as-input. Multi-sample iteration in templates stays.
+
+`src/api.js` adapter adjustments after this lands: `normalizeWip` adds `experimentId`, drops `equipmentId`; `normalizeRecipe` drops `equipmentId`/`equipmentName`. Dispatch normalizer stays as-is (already exposes `equipmentId`).
 - Frontend (final design decision in chat #5): "Remove selecting equipment for the recipes. A recipe doesn't need to be assigned to equipment. Equipment is chosen at dispatch time."
 - Backend `Recipe.equipment` is a non-null FK and `RecipeIn.equipment_id` is required.
 - **Resolution:** make `Recipe.equipment` nullable; make `equipment_id` optional in `RecipeIn`; relax `Dispatch` validation: instead of `recipe must belong to equipment`, require `recipe.experiment_type == equipment.capability`.

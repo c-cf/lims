@@ -62,6 +62,44 @@ const WIP_SEED = [
   { id: 'WIP-7698', equipmentId: 'QA-TCT-02',  experimentId: 'tct',  waferIds: ['W040701'],            note: '',                     status: 'completed',   createdAt: '2026-05-08 10:00', dispatchIds: ['DP-3300'] },
 ];
 
+// Live samples list. Co-fetches /requests/ so each row can show the
+// urgency window (urgency lives on the parent request, not the sample —
+// see INTEGRATION_GAPS.md §3.7). Returns frontend-shaped wafers with the
+// integer PK as `id` and the human-readable wafer id as `wafer`.
+const useLabSamples = () => {
+  const [samples, setSamples] = lS([]);
+  const [requestsById, setRequestsById] = lS(new Map());
+  const [loading, setLoading] = lS(true);
+  const [error, setError] = lS(null);
+  const refresh = React.useCallback(() => {
+    if (!window.api || !window.api.samples) {
+      setLoading(false);
+      return;
+    }
+    setLoading(true);
+    Promise.all([
+      window.api.samples.list(),
+      window.api.requests.list().catch(() => []),
+    ])
+      .then(([ss, rs]) => {
+        setSamples(ss);
+        setRequestsById(new Map(rs.map(r => [r.id, r])));
+        setError(null);
+      })
+      .catch(err => setError(err.message || String(err)))
+      .finally(() => setLoading(false));
+  }, []);
+  React.useEffect(() => { refresh(); }, [refresh]);
+
+  // Join urgency from the parent request so the countdown widget works.
+  // Default to '1w' if the request isn't visible to the current user.
+  const wafers = samples.map(s => ({
+    ...s,
+    urgency: requestsById.get(s.requestId)?.urgency || '1w',
+  }));
+  return { wafers, loading, error, refresh };
+};
+
 const DISPATCH_SEED = [
   { id: 'DP-3308', wipId: 'WIP-7700', equipmentId: 'QA-TCT-01',  experimentId: 'tct',  recipeId: 'tct_std',  operator: 'lab_member', status: 'running',        dispatchedAt: '2026-05-11 08:30', startedAt: '2026-05-11 08:35', endedAt: null,               result: null },
   { id: 'DP-3305', wipId: 'WIP-7701', equipmentId: 'QA-HAST-01', experimentId: 'hast', recipeId: 'hast_std', operator: 'lab_member', status: 'running',        dispatchedAt: '2026-05-11 07:05', startedAt: '2026-05-11 07:10', endedAt: null,               result: null },
@@ -169,13 +207,14 @@ const PrimaryBtn = ({ children, onClick, icon, disabled, style, danger, success 
     }}>{icon}{children}</button>
   );
 };
-const SecondaryBtn = ({ children, onClick, icon, style, danger }) => (
-  <button onClick={onClick} style={{
+const SecondaryBtn = ({ children, onClick, icon, style, danger, disabled }) => (
+  <button onClick={onClick} disabled={disabled} style={{
     display: 'inline-flex', alignItems: 'center', gap: 7,
     padding: '9px 14px', borderRadius: 8,
-    background: '#fff', color: danger ? '#b9384a' : ink,
+    background: '#fff', color: disabled ? muted : (danger ? '#b9384a' : ink),
     border: `1px solid ${danger ? '#e6c2c7' : line}`,
-    fontSize: 13, fontWeight: 600, cursor: 'pointer',
+    fontSize: 13, fontWeight: 600,
+    cursor: disabled ? 'not-allowed' : 'pointer', opacity: disabled ? 0.7 : 1,
     fontFamily: 'inherit', ...style,
   }}>{icon}{children}</button>
 );
@@ -650,8 +689,39 @@ const REMAINING_STYLE = {
   none:     { bg: '#ecedf0', fg: '#8e8ea0', rowBg: '#fff'    }, // not started
 };
 
-const LabSamples = ({ wafers, navigate, onReceive, onReject, defaultTab = 'all' }) => {
+const LabSamples = ({ navigate, defaultTab = 'all', showToast }) => {
+  const { wafers, loading, error, refresh } = useLabSamples();
   const [tab, setTab] = lS(defaultTab);
+  const [busyIds, setBusyIds] = lS(new Set());
+  const [actionError, setActionError] = lS(null);
+
+  const runAction = async (id, op, label) => {
+    setBusyIds(prev => new Set(prev).add(id));
+    setActionError(null);
+    try {
+      await op();
+      showToast && showToast(label);
+      refresh();
+    } catch (e) {
+      setActionError(e.message || String(e));
+    } finally {
+      setBusyIds(prev => {
+        const next = new Set(prev);
+        next.delete(id);
+        return next;
+      });
+    }
+  };
+  const handleReceive = (w) => runAction(w.id, () => window.api.samples.receive(w.id), `${w.wafer} received`);
+  // reason is optional on the backend; pass empty so the sample note isn't
+  // littered with a placeholder string. A real reason prompt can come later.
+  const handleReject = (w) => runAction(w.id, () => window.api.samples.rejectReceiving(w.id, ''), `${w.wafer} rejected`);
+  const handleBulkReceive = () => {
+    wafers
+      .filter(w => w.status === 'incoming' && !busyIds.has(w.id))
+      .forEach(handleReceive);
+  };
+
   const tabs = [
     { id: 'all',       label: 'All',       count: wafers.length },
     { id: 'incoming',  label: 'Incoming',  count: wafers.filter(w => w.status === 'incoming').length },
@@ -662,16 +732,33 @@ const LabSamples = ({ wafers, navigate, onReceive, onReject, defaultTab = 'all' 
   ];
   const list = tab === 'all' ? wafers : wafers.filter(w => w.status === tab);
 
+  if (loading && wafers.length === 0) {
+    return (
+      <Page title="Samples" subtitle="Loading…">
+        <div style={{ padding: '60px 20px', textAlign: 'center', color: muted, fontSize: 14 }}>
+          Loading…
+        </div>
+      </Page>
+    );
+  }
+
   return (
     <Page
       title="Samples"
       subtitle="Wafers from fab — countdown starts when received. Red rows are past deadline."
       right={
-        <SecondaryBtn icon={<LF.Inbox size={14}/>} onClick={() => {
-          wafers.filter(w => w.status === 'incoming').forEach(w => onReceive(w.id));
-        }}>Bulk receive incoming</SecondaryBtn>
+        <SecondaryBtn icon={<LF.Inbox size={14}/>} onClick={handleBulkReceive}>Bulk receive incoming</SecondaryBtn>
       }
     >
+      {(error || actionError) && (
+        <div style={{
+          padding: '12px 16px', marginBottom: 14, borderRadius: 10,
+          background: '#fde4e4', color: '#c0394a', fontSize: 13.5, fontWeight: 500,
+          border: '1px solid #f6c4c4',
+        }}>
+          {error || actionError}
+        </div>
+      )}
       <div style={{ display: 'flex', gap: 4, marginBottom: 14, borderBottom: `1px solid ${line}` }}>
         {tabs.map(t => (
           <button key={t.id} onClick={() => setTab(t.id)} style={{
@@ -707,6 +794,7 @@ const LabSamples = ({ wafers, navigate, onReceive, onReject, defaultTab = 'all' 
           const fmt = formatRemaining(remaining);
           const style = REMAINING_STYLE[fmt.level];
           const showDot = fmt.level === 'overdue' || fmt.level === 'critical';
+          const busy = busyIds.has(w.id);
           return (
             <button key={w.id} onClick={() => navigate({ page: 'lab_wafer', id: w.id })} style={{
               display: 'grid',
@@ -724,7 +812,7 @@ const LabSamples = ({ wafers, navigate, onReceive, onReject, defaultTab = 'all' 
             >
               <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
                 {showDot && <span title="Past or near deadline" style={{ width: 6, height: 6, borderRadius: 999, background: '#c0394a', flexShrink: 0 }}/>}
-                <span style={{ fontFamily: 'var(--font-mono)', fontSize: 13.5, fontWeight: 700, color: ink, letterSpacing: '0.02em' }}>{w.id}</span>
+                <span style={{ fontFamily: 'var(--font-mono)', fontSize: 13.5, fontWeight: 700, color: ink, letterSpacing: '0.02em' }}>{w.wafer}</span>
               </span>
               <div style={{ minWidth: 0 }}>
                 <div style={{ fontSize: 14, fontWeight: 600, color: ink }}>
@@ -732,7 +820,7 @@ const LabSamples = ({ wafers, navigate, onReceive, onReject, defaultTab = 'all' 
                 </div>
                 <div style={{ display: 'inline-flex', alignItems: 'center', gap: 6, marginTop: 6, fontSize: 12.5, color: muted }}>
                   <LF.Calendar size={12}/>
-                  <span style={{ fontFamily: 'var(--font-mono)' }}>{w.arrivedAt}</span>
+                  <span style={{ fontFamily: 'var(--font-mono)' }}>{w.arrivedAt || '—'}</span>
                   <span>·</span>
                   <span>{(URGENCY_DAYS[w.urgency] === 3 ? '3-day' : URGENCY_DAYS[w.urgency] === 7 ? '1-week' : '2-week')} window</span>
                 </div>
@@ -753,8 +841,8 @@ const LabSamples = ({ wafers, navigate, onReceive, onReject, defaultTab = 'all' 
                 onClick={(e) => e.stopPropagation()}>
                 {w.status === 'incoming' ? (
                   <>
-                    <SecondaryBtn onClick={() => onReceive(w.id)} style={{ padding: '5px 10px', fontSize: 12 }}>Receive</SecondaryBtn>
-                    <SecondaryBtn danger onClick={() => onReject(w.id)} style={{ padding: '5px 10px', fontSize: 12 }}>Reject</SecondaryBtn>
+                    <SecondaryBtn onClick={() => handleReceive(w)} disabled={busy} style={{ padding: '5px 10px', fontSize: 12 }}>{busy ? '…' : 'Receive'}</SecondaryBtn>
+                    <SecondaryBtn danger onClick={() => handleReject(w)} disabled={busy} style={{ padding: '5px 10px', fontSize: 12 }}>{busy ? '…' : 'Reject'}</SecondaryBtn>
                   </>
                 ) : (
                   <span style={{ fontSize: 12, color: muted }}>—</span>
@@ -2114,7 +2202,7 @@ const LabApp = ({ route, navigate, canManage = false }) => {
   if (p === 'lab_dashboard' || p === 'dashboard')
     page = <LabDashboard wafers={wafers} wips={wips} dispatches={dispatches} equipment={equipment} navigate={navigate}/>;
   else if (p === 'lab_samples' || p === 'samples')
-    page = <LabSamples wafers={wafers} navigate={navigate} onReceive={onReceive} onReject={onReject} defaultTab={route.tab || 'all'}/>;
+    page = <LabSamples navigate={navigate} defaultTab={route.tab || 'all'} showToast={showToast}/>;
   else if (p === 'lab_wafer')
     page = <LabWaferDetail id={route.id} wafers={wafers} wips={wips} dispatches={dispatches} navigate={navigate} onReceive={onReceive} onReject={onReject}/>;
   else if (p === 'lab_wip' || p === 'wip')

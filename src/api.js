@@ -183,13 +183,28 @@
   }
 
   function normalizeWip(w) {
+    // WIPListOut surfaces sample_count; WIPDetailOut surfaces the samples
+    // list inline. Handle both shapes here so callers don't have to care.
+    const samples = (w.samples || []).map(s => ({
+      id: s.id,
+      wafer: s.wafer_id,
+      size: s.wafer_size,
+      status: SAMPLE_STATUS_MAP[s.status] || s.status,
+      raw_status: s.status,
+      requestId: s.request_id,
+    }));
     return {
       id: w.id,
       code: wipCode(w.id),
-      sampleId: w.sample_id,
+      experimentId: w.experiment_type_id,
+      experimentName: w.experiment_type_name,
+      // WIPListOut → sample_count; WIPDetailOut → derive from samples list
+      sampleCount: typeof w.sample_count === 'number' ? w.sample_count : samples.length,
+      samples,           // empty array on list responses; populated on detail
       status: w.status,
       note: w.note,
       created: formatTimestamp(w.created_at),
+      updated: formatTimestamp(w.updated_at),
       completed: formatTimestamp(w.completed_at),
       dispatches: (w.dispatches || []).map(normalizeDispatch),
     };
@@ -240,14 +255,12 @@
   }
 
   function normalizeRecipe(r) {
+    // Recipe.equipment was dropped entirely in the chat-design restoration
+    // (backend §2.3). Recipes belong to an experiment_type only now.
     return {
       id: r.id,
       name: r.name,
       description: r.description,
-      // Recipe.equipment is now nullable (backend §2.3). Surface null for
-      // recipes that aren't tied to a specific machine.
-      equipmentId: r.equipment?.id || null,
-      equipmentName: r.equipment?.name || null,
       experimentId: r.experiment_type?.id || null,
       experimentName: r.experiment_type?.name || null,
       params: r.parameters || {},
@@ -408,8 +421,8 @@
         return out.map(normalizeRecipe);
       },
       async create(payload) {
-        // payload = { name, description?, equipment_id, experiment_type_id, parameters }
-        // §2.3: equipment_id will be optional once backend lands the change.
+        // payload = { name, description?, experiment_type_id, parameters }
+        // Recipe.equipment was dropped entirely — see backend §2.3.
         const out = await call('/recipes/', { method: 'POST', body: payload });
         return normalizeRecipe(out);
       },
@@ -505,28 +518,32 @@
       async list(q = {}) {
         const usp = new URLSearchParams(q);
         const out = await call(`/wips/?${usp}`);
-        return out.map(w => ({
-          id: w.id,
-          code: wipCode(w.id),
-          sampleId: w.sample_id,
-          status: w.status,
-          note: w.note,
-          completed: formatTimestamp(w.completed_at),
-          created: formatTimestamp(w.created_at),
-        }));
+        // WIPListOut now carries experiment_type_id/name + sample_count.
+        // Reuse normalizeWip so list rows and detail share the same shape
+        // (samples will be [] on list responses; check sampleCount instead).
+        return out.map(normalizeWip);
       },
       async get(id) {
         return normalizeWip(await call(`/wips/${id}/`));
       },
-      async create(sampleId, note = '') {
+      async create({ experimentTypeId, sampleIds, note = '' }) {
+        // payload = { experiment_type_id, sample_ids: list[int], note }
+        // WIP picks experiment + a batch of samples that all need it.
         return normalizeWip(await call('/wips/', {
-          method: 'POST', body: { sample_id: sampleId, note },
+          method: 'POST',
+          body: {
+            experiment_type_id: experimentTypeId,
+            sample_ids: sampleIds,
+            note,
+          },
         }));
       },
-      async createDispatch(wipId, payload) {
-        // payload = { experiment_type_id, equipment_id, recipe_id, note? }
+      async createDispatch(wipId, { equipmentId, recipeId, note = '' }) {
+        // payload = { equipment_id, recipe_id, note? }
+        // experiment_type is derived server-side from the parent WIP.
         return normalizeWip(await call(`/wips/${wipId}/dispatches/`, {
-          method: 'POST', body: payload,
+          method: 'POST',
+          body: { equipment_id: equipmentId, recipe_id: recipeId, note },
         }));
       },
       async complete(id) {
