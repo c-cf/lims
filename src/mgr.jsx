@@ -17,6 +17,159 @@ const mLineSft = 'rgba(0,0,0,0.05)';
 const mAccent  = '#6c67b8';
 const mBgSoft  = '#f7f7fa';
 
+// ── Live data hooks ──────────────────────────────────────────────
+// Manager-side request list. The lab manager sees every request across
+// fab users; tabs filter client-side so a single fetch drives the page.
+// (The /requests/ endpoint also accepts a ?status= filter — useful for
+// "only Pending" optimisation later if the volume justifies it.)
+const useMgrRequests = () => {
+  const [data, setData] = mS([]);
+  const [loading, setLoading] = mS(true);
+  const [error, setError] = mS(null);
+  const refresh = React.useCallback(() => {
+    if (!window.api || !window.api.requests) { setLoading(false); return; }
+    setLoading(true);
+    window.api.requests.list()
+      .then(rs => { setData(rs); setError(null); })
+      .catch(err => setError(err.message || String(err)))
+      .finally(() => setLoading(false));
+  }, []);
+  React.useEffect(() => { refresh(); }, [refresh]);
+  return { data, loading, error, refresh };
+};
+
+// Manager Dashboard data — tile counts come from a single requests
+// fetch + an equipment count fetch, both in parallel (mirrors the Lab
+// Dashboard's `useLabDashboardData` pattern).
+const useMgrDashboardData = () => {
+  const [requests, setRequests] = mS([]);
+  const [equipmentCount, setEquipmentCount] = mS(0);
+  const [loading, setLoading] = mS(true);
+  const [error, setError] = mS(null);
+  const refresh = React.useCallback(() => {
+    if (!window.api) { setLoading(false); return; }
+    setLoading(true);
+    Promise.all([
+      window.api.requests.list(),
+      window.api.equipment.list().catch(() => []),
+    ])
+      .then(([rs, eqs]) => {
+        setRequests(rs);
+        setEquipmentCount(eqs.length);
+        setError(null);
+      })
+      .catch(err => setError(err.message || String(err)))
+      .finally(() => setLoading(false));
+  }, []);
+  React.useEffect(() => { refresh(); }, [refresh]);
+  return { requests, equipmentCount, loading, error, refresh };
+};
+
+// Live trend points for the dashboard chart. The backend `/reports/trends`
+// endpoint takes a metric + window in days and returns
+// `{metric, days, points: [{date, count}]}`.
+const useMgrTrend = (metric = 'requests_per_day', days = 30) => {
+  const [data, setData] = mS(null);
+  const [loading, setLoading] = mS(true);
+  const [error, setError] = mS(null);
+  React.useEffect(() => {
+    if (!window.api || !window.api.reports) { setLoading(false); return; }
+    setLoading(true);
+    window.api.reports.trends({ metric, days })
+      .then(d => { setData(d); setError(null); })
+      .catch(err => setError(err.message || String(err)))
+      .finally(() => setLoading(false));
+  }, [metric, days]);
+  return { data, loading, error };
+};
+
+// Live experiment-types catalogue, used by the Recipe and Equipment
+// modals to populate their dropdowns. (`fab.jsx` has its own
+// `useExperimentTypes` inside that file's IIFE — not reachable here.)
+const useMgrExperimentTypes = () => {
+  const [data, setData] = mS([]);
+  const [loading, setLoading] = mS(true);
+  const [error, setError] = mS(null);
+  React.useEffect(() => {
+    if (!window.api || !window.api.experimentTypes) { setLoading(false); return; }
+    window.api.experimentTypes.list()
+      .then(rs => { setData(rs); setError(null); })
+      .catch(err => setError(err.message || String(err)))
+      .finally(() => setLoading(false));
+  }, []);
+  return { data, loading, error };
+};
+
+// Best-effort mapping from a live experiment-type name to the local
+// string slug RECIPE_PARAM_SCHEMA is keyed on. Lets us keep the
+// schema-driven UI for the four canonical experiment types while
+// gracefully degrading to a raw-JSON textarea for any custom type.
+const slugForExperimentName = (name) => {
+  if (!name) return null;
+  const l = name.toLowerCase();
+  if (l.includes('temperature cycling')) return 'tct';
+  if (l.includes('hast') || l.includes('highly accelerated')) return 'hast';
+  if (l.includes('bias temperature')) return 'btc';
+  if (l.includes('circuit prob')) return 'cp';
+  if (l.includes('final test')) return 'ft';
+  return null;
+};
+
+// Manager-side recipe list. Wired for create / edit / delete via the
+// RecipeModal redesign (this commit).
+const useMgrRecipes = () => {
+  const [data, setData] = mS([]);
+  const [loading, setLoading] = mS(true);
+  const [error, setError] = mS(null);
+  const refresh = React.useCallback(() => {
+    if (!window.api || !window.api.recipes) { setLoading(false); return; }
+    setLoading(true);
+    window.api.recipes.list()
+      .then(rs => { setData(rs); setError(null); })
+      .catch(err => setError(err.message || String(err)))
+      .finally(() => setLoading(false));
+  }, []);
+  React.useEffect(() => { refresh(); }, [refresh]);
+  return { data, loading, error, refresh };
+};
+
+// Manager-side equipment list. Same /equipment/ endpoint as Lab
+// Equipment; both pages stay independent so the manager surface can
+// add maintenance controls later without coupling lab + manager.
+const useMgrEquipment = () => {
+  const [data, setData] = mS([]);
+  const [loading, setLoading] = mS(true);
+  const [error, setError] = mS(null);
+  const refresh = React.useCallback(() => {
+    if (!window.api || !window.api.equipment) { setLoading(false); return; }
+    setLoading(true);
+    window.api.equipment.list()
+      .then(es => { setData(es); setError(null); })
+      .catch(err => setError(err.message || String(err)))
+      .finally(() => setLoading(false));
+  }, []);
+  React.useEffect(() => { refresh(); }, [refresh]);
+  return { data, loading, error, refresh };
+};
+
+// Manager-side single-request detail (samples + approval_logs inline).
+// `refresh` is exposed so approve/return/reject can re-render in place.
+const useMgrRequestDetail = (id) => {
+  const [data, setData] = mS(null);
+  const [loading, setLoading] = mS(true);
+  const [error, setError] = mS(null);
+  const refresh = React.useCallback(() => {
+    if (id == null || !window.api || !window.api.requests) { setLoading(false); return; }
+    setLoading(true);
+    window.api.requests.get(id)
+      .then(r => { setData(r); setError(null); })
+      .catch(err => setError(err.message || String(err)))
+      .finally(() => setLoading(false));
+  }, [id]);
+  React.useEffect(() => { refresh(); }, [refresh]);
+  return { data, loading, error, refresh };
+};
+
 // ── Domain seeds ─────────────────────────────────────────────────
 // Pending requests waiting on manager approval. Mirrors the shape used by
 // fab.jsx's REQUEST_SEED so the same fields render.
@@ -302,16 +455,34 @@ const ALL_REQ_TABS = [
 
 const findExpById = (id) => MGR_EXPERIMENTS.find(e => e.id === id);
 
-const MgrAllRequests = ({ requests, navigate }) => {
+const MgrAllRequests = ({ navigate }) => {
+  const { data: requests, loading, error } = useMgrRequests();
   const [tab, setTab] = mS('pending');
   const counts = mM(() => Object.fromEntries(ALL_REQ_TABS.map(t => [t.id, requests.filter(t.filter).length])), [requests]);
   const list = requests.filter(ALL_REQ_TABS.find(t => t.id === tab)?.filter || (() => true));
+
+  if (loading && requests.length === 0) {
+    return (
+      <Page title="All Requests" subtitle="Loading…">
+        <div style={{ padding: '60px 20px', textAlign: 'center', color: mMuted, fontSize: 14 }}>Loading…</div>
+      </Page>
+    );
+  }
 
   return (
     <Page
       title="All Requests"
       subtitle="廠區送審申請 — approve, return, or reject submitted requests"
     >
+      {error && (
+        <div style={{
+          padding: '12px 16px', marginBottom: 14, borderRadius: 10,
+          background: '#fde4e4', color: '#c0394a', fontSize: 13.5, fontWeight: 500,
+          border: '1px solid #f6c4c4',
+        }}>
+          Couldn't load requests: {error}
+        </div>
+      )}
       <div style={{ display: 'flex', gap: 22, borderBottom: `1px solid ${mLine}`, marginBottom: 22 }}>
         {ALL_REQ_TABS.map(t => {
           const active = t.id === tab;
@@ -350,7 +521,12 @@ const MgrAllRequests = ({ requests, navigate }) => {
             <div style={{ fontSize: 14, fontWeight: 600, color: mText2 }}>No requests in this view</div>
           </Card>
         ) : list.map(r => {
-          const exps = r.expIds.map(findExpById).filter(Boolean);
+          // RequestListOut doesn't carry experiment_types (gap §3.7) — the
+          // adapter sets `expIds: []` on list rows, so we render the
+          // experiment chips column as empty space. The chip column stays
+          // in the grid so the layout matches the detail page.
+          const sampleCount = r.sampleCount ?? r.samples.length;
+          const requester = r.requester?.username || r.history[0]?.by || '—';
           return (
             <button key={r.id} onClick={() => navigate({ page: 'mgr_request', id: r.id })} style={{
               display: 'grid',
@@ -372,15 +548,16 @@ const MgrAllRequests = ({ requests, navigate }) => {
                 <div style={{ fontSize: 15, fontWeight: 700, color: mInk }}>{r.title}</div>
                 <div style={{ display: 'inline-flex', alignItems: 'center', gap: 6, marginTop: 6, fontSize: 12.5, color: mMuted, flexWrap: 'wrap', whiteSpace: 'nowrap' }}>
                   <MI.Calendar size={12}/>
-                  <span style={{ fontFamily: 'var(--font-mono)' }}>{(r.submitted || r.created).split(' ')[0]}</span>
+                  <span style={{ fontFamily: 'var(--font-mono)' }}>{((r.submitted || r.created) || '').split(' ')[0] || '—'}</span>
                   <span aria-hidden>·</span>
-                  <span>{r.samples.length} wafer{r.samples.length === 1 ? '' : 's'}</span>
+                  <span>{sampleCount} wafer{sampleCount === 1 ? '' : 's'}</span>
                   <span aria-hidden>·</span>
-                  <span>by <span style={{ fontFamily: 'var(--font-mono)', color: mText2 }}>{r.history[0]?.by || 'fab_user'}</span></span>
+                  <span>by <span style={{ fontFamily: 'var(--font-mono)', color: mText2 }}>{requester}</span></span>
                 </div>
               </div>
+              {/* Experiment chip slot — filled when expIds are populated (offline seed only for now). */}
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
-                {exps.map(e => (
+                {r.expIds.map(findExpById).filter(Boolean).map(e => (
                   <span key={e.id} style={{
                     display: 'inline-flex', alignItems: 'center', gap: 6,
                     padding: '4px 9px 4px 4px', borderRadius: 999,
@@ -443,11 +620,76 @@ const ApprovalModal = ({ open, onClose, action, onSubmit }) => {
 };
 
 // ── Request detail (manager view) ─────────────────────────────
-const MgrRequestDetail = ({ id, requests, navigate, onAction }) => {
-  const r = requests.find(x => x.id === id);
-  const [modal, setModal] = mS(null); // 'APPROVE' | 'RETURN' | 'REJECT' | null
-  if (!r) return <Page title="Request not found"/>;
-  const exps = r.expIds.map(findExpById).filter(Boolean);
+const MgrRequestDetail = ({ id, navigate, showToast }) => {
+  const { data: r, loading, error, refresh } = useMgrRequestDetail(id);
+  const [modal, setModal] = mS(null); // 'RETURN' | 'REJECT' | null
+  const [busy, setBusy] = mS(false);
+  const [actionError, setActionError] = mS(null);
+
+  const runAction = async (op, label) => {
+    setBusy(true);
+    setActionError(null);
+    try {
+      await op();
+      showToast && showToast(label);
+      refresh();
+    } catch (e) {
+      setActionError(e.message || String(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  if (loading && !r) {
+    return (
+      <Page title="Loading request…">
+        <div style={{ padding: '60px 20px', textAlign: 'center', color: mMuted, fontSize: 14 }}>Loading…</div>
+      </Page>
+    );
+  }
+  if (error || !r) {
+    return (
+      <Page
+        breadcrumb={<Breadcrumb items={[
+          { label: 'All Requests', onClick: () => navigate({ page: 'mgr_all_requests' }) },
+          { label: '?' },
+        ]}/>}
+        title="Request not found"
+      >
+        <div style={{ padding: 24, color: '#c0394a', fontSize: 14 }}>
+          {error || 'This request is no longer available.'}
+        </div>
+      </Page>
+    );
+  }
+
+  const onApprove = () => {
+    if (!window.confirm(`Approve "${r.title}"?`)) return;
+    runAction(() => window.api.requests.approve(r.id), `#${r.id} approved`);
+  };
+  const onMarkComplete = () => {
+    if (!window.confirm(`Mark "${r.title}" as complete? This closes the request.`)) return;
+    runAction(() => window.api.requests.close(r.id), `#${r.id} closed`);
+  };
+  const onSubmitModal = async (reason) => {
+    const action = modal;
+    setModal(null);
+    if (action === 'RETURN') {
+      await runAction(() => window.api.requests.returnRequest(r.id, reason), `#${r.id} returned`);
+    } else if (action === 'REJECT') {
+      await runAction(() => window.api.requests.reject(r.id, reason), `#${r.id} rejected`);
+    }
+  };
+
+  // Backend's RequestDetailOut carries `experiment_types: [{id, name, parameters}]`
+  // — no `lab_category`, so the RA/TM chip color falls back to the default for
+  // unknown groups. Names render correctly either way.
+  const exps = (r.experiment_types || []).map(et => ({
+    id: et.id,
+    name: et.name,
+    code: et.name ? et.name.split(/\s+/).map(t => t[0]).join('').slice(0, 4).toUpperCase() : '—',
+    group: 'RA', // unknown without cross-fetch; default to RA palette
+  }));
   const canAct = r.status === 'submitted';
   const canComplete = r.status === 'in_progress';
 
@@ -467,20 +709,29 @@ const MgrRequestDetail = ({ id, requests, navigate, onAction }) => {
           }}>#{String(r.id).padStart(4, '0')}</span>
           <Pill kind={r.status}/>
           <Pill kind={r.urgency} mapping={URGENCY_LABEL}/>
-          <span style={{ color: mText2, fontSize: 13 }}>by <strong style={{ color: mInk, fontFamily: 'var(--font-mono)' }}>{r.history[0]?.by || 'fab_user'}</strong></span>
+          <span style={{ color: mText2, fontSize: 13 }}>by <strong style={{ color: mInk, fontFamily: 'var(--font-mono)' }}>{r.requester?.username || r.history[0]?.by || '—'}</strong></span>
         </span>
       }
       right={<>
         {canAct && <>
-          <SecondaryBtn danger onClick={() => setModal('REJECT')} icon={<MI.X size={14}/>}>Reject</SecondaryBtn>
-          <SecondaryBtn onClick={() => setModal('RETURN')} icon={<MI.Refresh size={14}/>}>Return</SecondaryBtn>
-          <PrimaryBtn success onClick={() => setModal('APPROVE')} icon={<MI.Check size={14}/>}>Approve</PrimaryBtn>
+          <SecondaryBtn danger disabled={busy} onClick={() => setModal('REJECT')} icon={<MI.X size={14}/>}>Reject</SecondaryBtn>
+          <SecondaryBtn disabled={busy} onClick={() => setModal('RETURN')} icon={<MI.Refresh size={14}/>}>Return</SecondaryBtn>
+          <PrimaryBtn success disabled={busy} onClick={onApprove} icon={<MI.Check size={14}/>}>{busy ? '…' : 'Approve'}</PrimaryBtn>
         </>}
         {canComplete && (
-          <PrimaryBtn success onClick={() => onAction(r.id, 'COMPLETE', '')} icon={<MI.Check size={14}/>}>Mark Complete</PrimaryBtn>
+          <PrimaryBtn success disabled={busy} onClick={onMarkComplete} icon={<MI.Check size={14}/>}>{busy ? '…' : 'Mark Complete'}</PrimaryBtn>
         )}
       </>}
     >
+      {actionError && (
+        <div style={{
+          padding: '12px 16px', marginBottom: 14, borderRadius: 10,
+          background: '#fde4e4', color: '#c0394a', fontSize: 13.5, fontWeight: 500,
+          border: '1px solid #f6c4c4',
+        }}>
+          {actionError}
+        </div>
+      )}
       <Card padding={0} style={{ marginBottom: 18 }}>
         <CardHeader>Overview</CardHeader>
         <div style={{
@@ -492,7 +743,7 @@ const MgrRequestDetail = ({ id, requests, navigate, onAction }) => {
             { label: 'Wafers',      value: r.samples.length },
             { label: 'Experiments', value: exps.length },
             { label: 'Submitted',   value: r.submitted?.split(' ')[0] || '—' },
-            { label: 'Requester',   value: r.history[0]?.by || 'fab_user' },
+            { label: 'Requester',   value: r.requester?.username || r.history[0]?.by || '—' },
           ].map(s => (
             <div key={s.label}>
               <div style={{ fontSize: 11, fontWeight: 600, color: mMuted, textTransform: 'uppercase', letterSpacing: '0.08em' }}>{s.label}</div>
@@ -539,7 +790,7 @@ const MgrRequestDetail = ({ id, requests, navigate, onAction }) => {
         <CardHeader>Samples · Experiments</CardHeader>
         <div style={{ padding: 18, display: 'flex', flexDirection: 'column', gap: 10 }}>
           {r.samples.map((s, si) => (
-            <button key={si} onClick={() => navigate({ page: 'lab_wafer', id: s.wafer })} style={{
+            <button key={si} onClick={() => navigate({ page: 'lab_wafer', id: s.id })} style={{
               display: 'grid', gridTemplateColumns: '180px 1fr 20px',
               alignItems: 'center', gap: 18,
               padding: '14px 18px', background: '#fff',
@@ -585,125 +836,283 @@ const MgrRequestDetail = ({ id, requests, navigate, onAction }) => {
         open={!!modal}
         action={modal}
         onClose={() => setModal(null)}
-        onSubmit={(reason) => { onAction(r.id, modal, reason); setModal(null); navigate({ page: 'mgr_all_requests' }); }}
+        onSubmit={onSubmitModal}
       />
     </Page>
   );
 };
 
 // ── Recipes page ──────────────────────────────────────────────
-const RecipeModal = ({ open, onClose, onSubmit, initial }) => {
+// Live-wired recipe modal. New mode → pick experiment_type + params.
+// Edit mode → experiment_type is locked (backend `RecipeUpdate`
+// intentionally doesn't accept it), shown as a read-only chip.
+const RecipeModal = ({ open, onClose, onSaved, initial }) => {
+  const { data: experimentTypes, loading: typesLoading } = useMgrExperimentTypes();
   const [name, setName] = mS('');
-  const [expId, setExpId] = mS('tct');
+  const [experimentTypeId, setExperimentTypeId] = mS('');
   const [desc, setDesc] = mS('');
-  const [params, setParams] = mS({});
+  const [paramsKv, setParamsKv] = mS({});
+  const [paramsJson, setParamsJson] = mS('{}');
+  const [busy, setBusy] = mS(false);
+  const [err, setErr] = mS(null);
+  const isEdit = !!initial;
 
+  // Choose the experiment_type for the schema lookup. In new mode it
+  // follows the dropdown; in edit mode it's whatever the recipe had.
+  const activeExpName = isEdit
+    ? initial.experimentName
+    : experimentTypes.find(t => t.id === experimentTypeId)?.name;
+  const slug = slugForExperimentName(activeExpName);
+  const schema = slug ? (RECIPE_PARAM_SCHEMA[slug] || []) : [];
+
+  // Reset state whenever the modal (re)opens.
   React.useEffect(() => {
     if (!open) return;
+    setErr(null); setBusy(false);
     if (initial) {
       setName(initial.name);
-      setExpId(initial.expId);
+      setExperimentTypeId(initial.experimentId);
       setDesc(initial.description || '');
-      setParams({ ...initial.params });
+      const incomingParams = initial.params || {};
+      setParamsKv({ ...incomingParams });
+      try { setParamsJson(JSON.stringify(incomingParams, null, 2) || '{}'); }
+      catch (_e) { setParamsJson('{}'); }
     } else {
-      setName(''); setExpId('tct'); setDesc(''); setParams({});
+      setName('');
+      setExperimentTypeId(experimentTypes[0]?.id ?? '');
+      setDesc('');
+      setParamsKv({});
+      setParamsJson('{}');
     }
+  // eslint-disable-next-line — only fire on open transition
   }, [open, initial]);
 
-  // When experiment type changes, reset params to the matching schema.
-  const schema = RECIPE_PARAM_SCHEMA[expId] || [];
-
+  // Auto-select the first experiment type once the list resolves (new mode only).
   React.useEffect(() => {
-    if (!open) return;
-    // Initialize any missing schema keys to '' so inputs are controlled.
-    setParams(prev => {
+    if (!open || isEdit) return;
+    if (!experimentTypeId && experimentTypes.length > 0) {
+      setExperimentTypeId(experimentTypes[0].id);
+    }
+  }, [open, isEdit, experimentTypeId, experimentTypes]);
+
+  // Initialize any missing schema keys when the active exp_type changes.
+  React.useEffect(() => {
+    if (!open || schema.length === 0) return;
+    setParamsKv(prev => {
       const next = { ...prev };
       schema.forEach(s => { if (next[s.key] == null) next[s.key] = ''; });
       return next;
     });
-  }, [expId, open]);
+  }, [open, slug, schema]);
 
-  const valid = name.trim().length > 0;
-  const handle = () => {
-    onSubmit({
-      ...(initial || {}),
-      id: initial?.id || `r_${Date.now().toString(36)}`,
-      name: name.trim(),
-      expId,
-      description: desc.trim(),
-      // Keep only schema keys to drop stale fields when exp type changes.
-      params: Object.fromEntries(schema.map(s => [s.key, params[s.key] || ''])),
-    });
+  const valid = name.trim().length > 0 && name.trim().length <= 200 && (isEdit || !!experimentTypeId);
+  const submit = async () => {
+    setBusy(true); setErr(null);
+    // Build the parameters payload. With a schema → only the schema keys
+    // (drop stale fields). Without → parse the JSON textarea.
+    let parameters;
+    if (schema.length > 0) {
+      parameters = Object.fromEntries(schema.map(s => [s.key, paramsKv[s.key] ?? '']));
+    } else {
+      const trimmed = paramsJson.trim();
+      if (!trimmed) {
+        parameters = {};
+      } else {
+        try { parameters = JSON.parse(trimmed); }
+        catch (_e) { setErr('Parameters must be valid JSON.'); setBusy(false); return; }
+        if (parameters === null || typeof parameters !== 'object' || Array.isArray(parameters)) {
+          setErr('Parameters must be a JSON object.'); setBusy(false); return;
+        }
+      }
+    }
+    try {
+      if (isEdit) {
+        await window.api.recipes.update(initial.id, {
+          name: name.trim(), description: desc.trim(), parameters,
+        });
+      } else {
+        await window.api.recipes.create({
+          name: name.trim(), description: desc.trim(),
+          experimentTypeId, parameters,
+        });
+      }
+      onSaved && onSaved();
+    } catch (e) {
+      setErr(e.message || String(e));
+    } finally {
+      setBusy(false);
+    }
   };
+
+  // Edit-mode chip — read-only display of the locked experiment_type.
+  const lockedExpName = isEdit ? (initial.experimentName || '—') : null;
+  const lockedExpCode = lockedExpName
+    ? (slug ? slug.toUpperCase() : lockedExpName.split(/\s+/).map(t => t[0]).join('').slice(0, 4).toUpperCase())
+    : '';
 
   return (
     <Modal
       open={open}
       onClose={onClose}
-      title={initial ? 'Edit Recipe' : 'New Recipe'}
+      title={isEdit ? 'Edit Recipe' : 'New Recipe'}
       width={620}
       footer={<>
-        <SecondaryBtn onClick={onClose}>Cancel</SecondaryBtn>
-        <PrimaryBtn disabled={!valid} onClick={handle}>{initial ? 'Save Changes' : 'Create Recipe'}</PrimaryBtn>
+        <SecondaryBtn onClick={onClose} disabled={busy}>Cancel</SecondaryBtn>
+        <PrimaryBtn disabled={!valid || busy || typesLoading} onClick={submit}>
+          {busy ? (isEdit ? 'Saving…' : 'Creating…') : (isEdit ? 'Save Changes' : 'Create Recipe')}
+        </PrimaryBtn>
       </>}
     >
       <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+        {err && (
+          <div style={{
+            padding: '10px 12px', borderRadius: 8,
+            background: '#fde4e4', color: '#c0394a', fontSize: 13, fontWeight: 500,
+            border: '1px solid #f6c4c4',
+          }}>{err}</div>
+        )}
         <div>
           <FieldLabel required>Name</FieldLabel>
           <TextInput value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. TCT_Standard_Reflow_Simulation_v1"/>
         </div>
         <div>
           <FieldLabel required>Experiment Type</FieldLabel>
-          <SelectInput value={expId} onChange={(e) => setExpId(e.target.value)}>
-            {MGR_EXPERIMENTS.map(x => <option key={x.id} value={x.id}>{x.name} ({x.code})</option>)}
-          </SelectInput>
+          {isEdit ? (
+            <div style={{
+              display: 'inline-flex', alignItems: 'center', gap: 8,
+              padding: '6px 10px 6px 6px', borderRadius: 999,
+              background: '#ecebf3', color: '#4f4a8f',
+            }} title="Experiment type can't be changed after creation.">
+              <span style={{
+                fontSize: 10.5, fontWeight: 700, padding: '3px 8px', borderRadius: 999,
+                background: '#fff', color: '#4f4a8f', letterSpacing: '0.05em',
+              }}>{lockedExpCode}</span>
+              <span style={{ fontSize: 13, fontWeight: 600 }}>{lockedExpName}</span>
+              <span style={{ fontSize: 11, color: mMuted, marginLeft: 4 }}>(locked)</span>
+            </div>
+          ) : (
+            <SelectInput
+              value={experimentTypeId === '' ? '' : String(experimentTypeId)}
+              onChange={(e) => setExperimentTypeId(e.target.value ? Number(e.target.value) : '')}
+            >
+              {typesLoading && <option value="">Loading…</option>}
+              {!typesLoading && experimentTypes.length === 0 && <option value="">No experiment types</option>}
+              {experimentTypes.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
+            </SelectInput>
+          )}
         </div>
         <div>
           <FieldLabel>Description</FieldLabel>
           <TextArea value={desc} onChange={(e) => setDesc(e.target.value)} placeholder="When this recipe is used and why."/>
         </div>
-        {schema.length > 0 && (
-          <div>
-            <FieldLabel>Parameters</FieldLabel>
-            <div style={{
-              padding: '14px 14px 10px', borderRadius: 10,
-              border: `1px solid ${mLine}`, background: mBgSoft,
-              display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 12,
-            }}>
-              {schema.map(s => (
-                <div key={s.key}>
-                  <div style={{ fontSize: 11, fontWeight: 600, color: mMuted, textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 4 }}>{s.label}</div>
-                  <TextInput
-                    value={params[s.key] ?? ''}
-                    onChange={(e) => setParams(p => ({ ...p, [s.key]: e.target.value }))}
-                    placeholder={s.placeholder}
-                    style={{ fontFamily: 'var(--font-mono)', fontSize: 13 }}
-                  />
-                </div>
-              ))}
-            </div>
-            <div style={{ fontSize: 12, color: mMuted, marginTop: 6 }}>
-              Fields update based on the selected experiment type.
-            </div>
-          </div>
-        )}
+        <div>
+          <FieldLabel>Parameters</FieldLabel>
+          {schema.length > 0 ? (
+            <>
+              <div style={{
+                padding: '14px 14px 10px', borderRadius: 10,
+                border: `1px solid ${mLine}`, background: mBgSoft,
+                display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 12,
+              }}>
+                {schema.map(s => (
+                  <div key={s.key}>
+                    <div style={{ fontSize: 11, fontWeight: 600, color: mMuted, textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 4 }}>{s.label}</div>
+                    <TextInput
+                      value={paramsKv[s.key] ?? ''}
+                      onChange={(e) => setParamsKv(p => ({ ...p, [s.key]: e.target.value }))}
+                      placeholder={s.placeholder}
+                      style={{ fontFamily: 'var(--font-mono)', fontSize: 13 }}
+                    />
+                  </div>
+                ))}
+              </div>
+              <div style={{ fontSize: 12, color: mMuted, marginTop: 6 }}>
+                Schema-driven fields for {activeExpName || 'this experiment type'}.
+              </div>
+            </>
+          ) : (
+            <>
+              <TextArea
+                value={paramsJson}
+                onChange={(e) => setParamsJson(e.target.value)}
+                placeholder='{"key": "value"}'
+                style={{ fontFamily: 'var(--font-mono)', fontSize: 12.5, minHeight: 120 }}
+              />
+              <div style={{ fontSize: 12, color: mMuted, marginTop: 6 }}>
+                No schema defined for {activeExpName || 'this experiment type'} — enter a JSON object. Leave as <code>{'{}'}</code> for none.
+              </div>
+            </>
+          )}
+        </div>
       </div>
     </Modal>
   );
 };
 
-const MgrRecipes = ({ recipes, onCreate, onUpdate, onDelete }) => {
+const MgrRecipes = ({ showToast }) => {
+  const { data: recipes, loading, error, refresh } = useMgrRecipes();
   const [modalOpen, setModalOpen] = mS(false);
   const [editing, setEditing] = mS(null);
-  const open = (rec) => { setEditing(rec); setModalOpen(true); };
-  const close = () => { setEditing(null); setModalOpen(false); };
+  const [busyDeleteId, setBusyDeleteId] = mS(null);
+  const [deleteError, setDeleteError] = mS(null);
+
+  const openNew = () => { setEditing(null); setModalOpen(true); };
+  const openEdit = (rec) => { setEditing(rec); setModalOpen(true); };
+  const closeModal = () => { setEditing(null); setModalOpen(false); };
+  const onSaved = () => {
+    const wasEdit = !!editing;
+    closeModal();
+    showToast && showToast(wasEdit ? 'Recipe updated' : 'Recipe created');
+    refresh();
+  };
+  const onDelete = async (rec) => {
+    if (!window.confirm(`Delete recipe "${rec.name}"? This can't be undone.`)) return;
+    setBusyDeleteId(rec.id);
+    setDeleteError(null);
+    try {
+      await window.api.recipes.remove(rec.id);
+      showToast && showToast(`${rec.name} deleted`);
+      refresh();
+    } catch (e) {
+      setDeleteError(e.message || String(e));
+    } finally {
+      setBusyDeleteId(null);
+    }
+  };
+
+  if (loading && recipes.length === 0) {
+    return (
+      <Page title="Recipes" subtitle="Loading…">
+        <div style={{ padding: '60px 20px', textAlign: 'center', color: mMuted, fontSize: 14 }}>Loading…</div>
+      </Page>
+    );
+  }
 
   return (
     <Page
       title="Recipes"
-      subtitle="食譜 — define and edit experiment recipes used by dispatches"
-      right={<PrimaryBtn icon={<MI.Plus size={14}/>} onClick={() => open(null)}>New Recipe</PrimaryBtn>}
+      subtitle="食譜 — experiment recipes referenced by dispatches"
+      right={<PrimaryBtn icon={<MI.Plus size={14}/>} onClick={openNew}>New Recipe</PrimaryBtn>}
     >
+      {deleteError && (
+        <div style={{
+          padding: '12px 16px', marginBottom: 14, borderRadius: 10,
+          background: '#fde4e4', color: '#c0394a', fontSize: 13.5, fontWeight: 500,
+          border: '1px solid #f6c4c4',
+        }}>
+          {deleteError}
+        </div>
+      )}
+      {error && (
+        <div style={{
+          padding: '12px 16px', marginBottom: 14, borderRadius: 10,
+          background: '#fde4e4', color: '#c0394a', fontSize: 13.5, fontWeight: 500,
+          border: '1px solid #f6c4c4',
+        }}>
+          Couldn't load recipes: {error}
+        </div>
+      )}
+
       <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
         {recipes.length === 0 ? (
           <Card padding={48} style={{ textAlign: 'center', color: mMuted }}>
@@ -711,7 +1120,13 @@ const MgrRecipes = ({ recipes, onCreate, onUpdate, onDelete }) => {
             <div style={{ fontSize: 14, fontWeight: 600, color: mText2 }}>No recipes yet</div>
           </Card>
         ) : recipes.map(rec => {
-          const exp = findExpById(rec.expId);
+          // Backend recipe shape: { id, name, description, experimentId,
+          // experimentName, params, active }. The local string-slug
+          // `findExpById` may match for legacy seed rows; otherwise we
+          // derive a chip code from the experiment name's initials.
+          const expCode = (findExpById(rec.experimentId)?.code) || (rec.experimentName ? rec.experimentName.split(/\s+/).map(t => t[0]).join('').slice(0, 4).toUpperCase() : '—');
+          const expName = rec.experimentName || findExpById(rec.experimentId)?.name || '—';
+          const paramEntries = rec.params ? Object.entries(rec.params) : [];
           return (
             <div key={rec.id} style={{
               display: 'grid',
@@ -729,33 +1144,39 @@ const MgrRecipes = ({ recipes, onCreate, onUpdate, onDelete }) => {
               <div style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
                 <span style={{
                   fontSize: 10.5, fontWeight: 700, padding: '3px 8px', borderRadius: 999,
-                  background: exp?.group === 'RA' ? '#e8e7f6' : '#d4eaf0',
-                  color: exp?.group === 'RA' ? '#5550a0' : '#2a7a91',
+                  background: '#e8e7f6', color: '#5550a0',
                   letterSpacing: '0.05em',
-                }}>{exp?.code}</span>
-                <span style={{ fontSize: 13, color: mInk }}>{exp?.name}</span>
+                }}>{expCode}</span>
+                <span style={{ fontSize: 13, color: mInk }}>{expName}</span>
               </div>
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
-                {Object.entries(rec.params).slice(0, 4).map(([k, v]) => (
+                {paramEntries.slice(0, 4).map(([k, v]) => (
                   <span key={k} style={{
                     fontFamily: 'var(--font-mono)', fontSize: 11.5, color: mText2,
                     padding: '2px 8px', borderRadius: 6, background: mBgSoft,
                     border: `1px solid ${mLineSft}`,
-                  }}>{k} <strong style={{ color: mInk }}>{v}</strong></span>
+                  }}>{k} <strong style={{ color: mInk }}>{typeof v === 'object' ? JSON.stringify(v) : String(v)}</strong></span>
                 ))}
-                {Object.entries(rec.params).length > 4 && (
-                  <span style={{ fontSize: 11.5, color: mMuted, alignSelf: 'center' }}>+{Object.entries(rec.params).length - 4} more</span>
+                {paramEntries.length > 4 && (
+                  <span style={{ fontSize: 11.5, color: mMuted, alignSelf: 'center' }}>+{paramEntries.length - 4} more</span>
+                )}
+                {paramEntries.length === 0 && (
+                  <span style={{ fontSize: 12, color: mMuted, fontStyle: 'italic' }}>No parameters</span>
                 )}
               </div>
               <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
-                <button onClick={() => open(rec)} style={{
-                  background: 'transparent', border: 'none', cursor: 'pointer',
+                <button onClick={() => openEdit(rec)} disabled={busyDeleteId === rec.id} style={{
+                  background: 'transparent', border: 'none',
+                  cursor: busyDeleteId === rec.id ? 'not-allowed' : 'pointer',
                   color: mAccent, fontWeight: 600, fontSize: 13, fontFamily: 'inherit', padding: 0,
+                  opacity: busyDeleteId === rec.id ? 0.5 : 1,
                 }}>Edit</button>
-                <button onClick={() => onDelete(rec.id)} style={{
-                  background: 'transparent', border: 'none', cursor: 'pointer',
+                <button onClick={() => onDelete(rec)} disabled={busyDeleteId === rec.id} style={{
+                  background: 'transparent', border: 'none',
+                  cursor: busyDeleteId === rec.id ? 'not-allowed' : 'pointer',
                   color: '#b9384a', fontWeight: 600, fontSize: 13, fontFamily: 'inherit', padding: 0,
-                }}>Delete</button>
+                  opacity: busyDeleteId === rec.id ? 0.5 : 1,
+                }}>{busyDeleteId === rec.id ? 'Deleting…' : 'Delete'}</button>
               </div>
             </div>
           );
@@ -764,28 +1185,38 @@ const MgrRecipes = ({ recipes, onCreate, onUpdate, onDelete }) => {
 
       <RecipeModal
         open={modalOpen}
-        onClose={close}
+        onClose={closeModal}
         initial={editing}
-        onSubmit={(payload) => {
-          if (editing) onUpdate(payload);
-          else onCreate(payload);
-          close();
-        }}
+        onSaved={onSaved}
       />
     </Page>
   );
 };
 
 // ── Reports page ──────────────────────────────────────────────
+// `onGenerate` is async and returns either an array of {label, value}
+// rows (rendered as a 3-up summary) or {error: 'message'} which surfaces
+// in a red banner inside the card.
 const ReportCard = ({ title, subtitle, accent, accentBg, icon, onGenerate }) => {
   const [start, setStart] = mS('');
   const [end, setEnd] = mS('');
   const [generated, setGenerated] = mS(null);
+  const [busy, setBusy] = mS(false);
+  const [err, setErr] = mS(null);
   const valid = start && end;
-  const handle = () => {
-    if (!valid) return;
-    const summary = onGenerate({ start, end });
-    setGenerated(summary);
+  const handle = async () => {
+    if (!valid || busy) return;
+    setBusy(true);
+    setErr(null);
+    try {
+      const summary = await onGenerate({ start, end });
+      setGenerated(summary);
+    } catch (e) {
+      setErr(e.message || String(e));
+      setGenerated(null);
+    } finally {
+      setBusy(false);
+    }
   };
 
   return (
@@ -809,7 +1240,14 @@ const ReportCard = ({ title, subtitle, accent, accentBg, icon, onGenerate }) => 
             <TextInput type="date" value={end} onChange={(e) => setEnd(e.target.value)}/>
           </div>
         </div>
-        <PrimaryBtn disabled={!valid} onClick={handle} icon={<MI.TrendUp size={14}/>}>Generate</PrimaryBtn>
+        <PrimaryBtn disabled={!valid || busy} onClick={handle} icon={<MI.TrendUp size={14}/>}>{busy ? 'Generating…' : 'Generate'}</PrimaryBtn>
+        {err && (
+          <div style={{
+            marginTop: 14, padding: '10px 12px', borderRadius: 8,
+            background: '#fde4e4', color: '#c0394a', fontSize: 13, fontWeight: 500,
+            border: '1px solid #f6c4c4',
+          }}>{err}</div>
+        )}
         {generated && (
           <div style={{
             marginTop: 16, padding: 14, borderRadius: 10,
@@ -831,29 +1269,37 @@ const ReportCard = ({ title, subtitle, accent, accentBg, icon, onGenerate }) => 
   );
 };
 
-const MgrReports = ({ requests, recipes }) => {
-  const equipmentReport = ({ start, end }) => {
-    // Synthetic — produce plausible utilization numbers from the seeds.
-    const days = Math.max(1, (new Date(end) - new Date(start)) / 86400000 + 1);
-    const totalRuns = recipes.length * 6;
+const MgrReports = () => {
+  // Backend `EquipmentUtilizationOut` returns `{period, start_date, end_date,
+  // data: [{equipment: {id, name}, wip_count, sample_count}]}`. Collapse to
+  // the 3-up summary the card layout expects: units covered, total WIPs
+  // recorded across them, total sample-runs through.
+  const equipmentReport = async ({ start, end }) => {
+    const out = await window.api.reports.equipmentUtilization({
+      period: 'custom', start_date: start, end_date: end,
+    });
+    const totalWips = (out.data || []).reduce((s, e) => s + (e.wip_count || 0), 0);
+    const totalSamples = (out.data || []).reduce((s, e) => s + (e.sample_count || 0), 0);
     return [
-      { label: 'Days',          value: Math.round(days) },
-      { label: 'Total runs',    value: totalRuns },
-      { label: 'Avg utilization', value: '64%' },
+      { label: 'Units covered', value: (out.data || []).length },
+      { label: 'Total WIPs',    value: totalWips },
+      { label: 'Sample runs',   value: totalSamples },
     ];
   };
-  const requestReport = ({ start, end }) => {
-    const startD = new Date(start), endD = new Date(end);
-    const inRange = requests.filter(r => {
-      const d = new Date(r.created.split(' ')[0]);
-      return d >= startD && d <= endD;
+  // Backend `RequestStatisticsOut` returns `{period, status_distribution: {...},
+  // average_tat_hours, total_requests}`. The mock surface focused on Submitted
+  // / Approved / Rejected; keep that shape but pull the numbers from the live
+  // status_distribution map.
+  const requestReport = async ({ start, end }) => {
+    const out = await window.api.reports.requestStatistics({
+      start_date: start, end_date: end,
     });
-    const approved = inRange.filter(r => r.status === 'in_progress' || r.status === 'completed').length;
-    const rejected = inRange.filter(r => r.status === 'rejected').length;
+    const dist = out.status_distribution || {};
+    const approvedLike = (dist.approved || 0) + (dist.sample_shipped || 0) + (dist.in_progress || 0) + (dist.completed || 0) + (dist.closed || 0);
     return [
-      { label: 'Submitted', value: inRange.length },
-      { label: 'Approved',  value: approved },
-      { label: 'Rejected',  value: rejected },
+      { label: 'Total',    value: out.total_requests ?? 0 },
+      { label: 'Approved', value: approvedLike },
+      { label: 'Rejected', value: dist.rejected || 0 },
     ];
   };
 
@@ -865,14 +1311,14 @@ const MgrReports = ({ requests, recipes }) => {
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 18 }}>
         <ReportCard
           title="Equipment Utilization"
-          subtitle="Per-equipment usage and idle time across the window."
+          subtitle="Per-equipment WIP + sample counts across the window."
           accent="#2563eb" accentBg="#dbeafe"
           icon={<MI.TrendUp size={14}/>}
           onGenerate={equipmentReport}
         />
         <ReportCard
           title="Request Statistics"
-          subtitle="Submitted, approved, and rejected requests."
+          subtitle="Total / approved / rejected requests in the window."
           accent="#157a4a" accentBg="#c8eedd"
           icon={<MI.ClipboardList size={14}/>}
           onGenerate={requestReport}
@@ -942,37 +1388,50 @@ const smoothPath = (pts) => {
   return d;
 };
 
-const TrendChart = ({ requests }) => {
-  // Default window: 13 days back through today.
-  const [start, setStart] = mS('2026-05-06');
-  const [end, setEnd]   = mS(DEMO_TODAY);
-  const [applied, setApplied] = mS({ start: '2026-05-06', end: DEMO_TODAY });
+const TrendChart = () => {
+  // Backend `/reports/trends` is `days`-based, not range-based — drop the
+  // date pickers in favor of a fixed 30-day rolling window.
+  const { data: trend, loading, error } = useMgrTrend('requests_per_day', 30);
 
-  // Build per-day dispatch volume from request submitted dates; equipment
-  // utilization is a smoothed multiplier of that volume so the two curves
-  // co-move like the screenshot.
+  // Derive the chart series. `days` is an array of {date, dispatches,
+  // utilization}; "utilization" is a smoothed multiplier of the count
+  // (kept from the mock UI for the two-line visual — gap §4's trends
+  // endpoint only ships request volume, not real equipment usage).
   const days = mM(() => {
-    const n = Math.max(1, dayDiff(applied.start, applied.end) + 1);
-    const dispatchedByDay = {};
-    requests.forEach(r => {
-      const d = (r.submitted || r.created)?.split(' ')[0];
-      if (d) dispatchedByDay[d] = (dispatchedByDay[d] || 0) + 1;
-    });
-    const arr = [];
-    for (let i = 0; i < n; i++) {
-      const date = addDays(applied.start, i);
-      const dispatches = dispatchedByDay[date] || 0;
-      // Utilization tracks volume but lingers (smoother).
-      arr.push({ date, dispatches });
-    }
-    // Smooth utilization: each day = average of itself plus the previous one,
-    // scaled so a single dispatch day reads as ~24% (matches the screenshot).
+    const points = trend?.points || [];
+    const arr = points.map(p => ({ date: p.date, dispatches: p.count }));
     for (let i = 0; i < arr.length; i++) {
       const prev = i > 0 ? arr[i - 1].dispatches : 0;
       arr[i].utilization = Math.min(100, (arr[i].dispatches * 0.6 + prev * 0.4) * 24);
     }
     return arr;
-  }, [applied, requests]);
+  }, [trend]);
+
+  if (loading && !trend) {
+    return (
+      <Card padding={22} style={{ marginTop: 18, textAlign: 'center', color: mMuted, fontSize: 13 }}>
+        Loading trend…
+      </Card>
+    );
+  }
+  if (error) {
+    return (
+      <Card padding={22} style={{ marginTop: 18 }}>
+        <div style={{
+          padding: '12px 16px', borderRadius: 10,
+          background: '#fde4e4', color: '#c0394a', fontSize: 13.5, fontWeight: 500,
+          border: '1px solid #f6c4c4',
+        }}>Couldn't load trend: {error}</div>
+      </Card>
+    );
+  }
+  if (days.length === 0) {
+    return (
+      <Card padding={22} style={{ marginTop: 18, textAlign: 'center', color: mMuted, fontSize: 13 }}>
+        No trend data yet.
+      </Card>
+    );
+  }
 
   const maxDispatches = Math.max(1, ...days.map(d => d.dispatches));
   const W = 880, H = 220, PL = 36, PR = 56, PT = 24, PB = 36;
@@ -1007,18 +1466,10 @@ const TrendChart = ({ requests }) => {
           <div style={{ fontSize: 15, fontWeight: 700, color: mInk, letterSpacing: '-0.01em' }}>資源利用 / 產能趨勢</div>
           <div style={{ fontSize: 12, color: mMuted, marginTop: 2 }}>設備稼動率與每日派工量</div>
         </div>
-        <div style={{ marginLeft: 'auto', display: 'inline-flex', alignItems: 'center', gap: 10 }}>
-          <input type="date" value={start} onChange={(e) => setStart(e.target.value)} style={{
-            padding: '8px 10px', borderRadius: 8, border: `1px solid ${mLine}`,
-            fontSize: 12.5, fontFamily: 'var(--font-mono)', color: mInk,
-          }}/>
-          <MI.ArrowRight size={14} color={mMuted}/>
-          <input type="date" value={end} onChange={(e) => setEnd(e.target.value)} style={{
-            padding: '8px 10px', borderRadius: 8, border: `1px solid ${mLine}`,
-            fontSize: 12.5, fontFamily: 'var(--font-mono)', color: mInk,
-          }}/>
-          <PrimaryBtn onClick={() => setApplied({ start, end })} style={{ padding: '8px 14px' }}>套用</PrimaryBtn>
-        </div>
+        <div style={{
+          marginLeft: 'auto', fontSize: 12, color: mMuted, fontWeight: 600,
+          padding: '6px 12px', borderRadius: 999, background: mBgSoft, border: `1px solid ${mLineSft}`,
+        }}>Last {trend?.days ?? 30} days</div>
       </div>
 
       <div style={{ padding: '14px 22px 20px' }}>
@@ -1078,35 +1529,49 @@ const TrendChart = ({ requests }) => {
   );
 };
 
-const MgrDashboard = ({ requests, recipes, navigate }) => {
+const MgrDashboard = ({ navigate }) => {
+  const { requests, equipmentCount, loading: countsLoading, error: countsError } = useMgrDashboardData();
   const pending = requests.filter(r => r.status === 'submitted');
   const inProgress = requests.filter(r => r.status === 'in_progress').length;
   const completed = requests.filter(r => r.status === 'completed').length;
-  const equipmentCount = MGR_EQUIPMENT.length;
+
+  // Show "—" while the initial fetch is in flight rather than the
+  // misleading "0" that an empty filter would produce.
+  const initialLoad = countsLoading && requests.length === 0;
+  const v = (n) => initialLoad ? '—' : n;
 
   return (
     <Page
       title="Dashboard"
       subtitle="Welcome back, lab_manager"
     >
+      {countsError && (
+        <div style={{
+          padding: '12px 16px', marginBottom: 14, borderRadius: 10,
+          background: '#fde4e4', color: '#c0394a', fontSize: 13.5, fontWeight: 500,
+          border: '1px solid #f6c4c4',
+        }}>
+          Couldn't load tile counts: {countsError}
+        </div>
+      )}
       {/* To approve first \u2014 it's the manager's primary action. */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 14, marginBottom: 22 }}>
         <MgrStatTile
-          label="To approve" value={pending.length}
+          label="To approve" value={v(pending.length)}
           icon={<MI.Clock size={16}/>} tint="#fef0d4" accent="#b8720e"
           onClick={() => navigate({ page: 'mgr_all_requests' })}
         />
         <MgrStatTile
-          label="In Progress" value={inProgress}
+          label="In Progress" value={v(inProgress)}
           icon={<MI.Activity size={16}/>} tint="#ecebf3" accent="#5550a0"
           onClick={() => navigate({ page: 'mgr_all_requests' })}
         />
         <MgrStatTile
-          label="Completed" value={completed}
+          label="Completed" value={v(completed)}
           icon={<MI.CircleCheck size={16}/>} tint="#dbeafe" accent="#1d4ed8"
         />
         <MgrStatTile
-          label="Equipment" value={equipmentCount}
+          label="Equipment" value={v(equipmentCount)}
           icon={<MI.Equipment size={16}/>} tint="#ecebf3" accent="#4f4a8f"
           onClick={() => navigate({ page: 'lab_equipment' })}
         />
@@ -1148,11 +1613,11 @@ const MgrDashboard = ({ requests, recipes, navigate }) => {
               <div style={{ fontSize: 14, fontWeight: 700, color: mInk }}>{r.title}</div>
               <div style={{ fontSize: 12, color: mMuted, marginTop: 3, display: 'inline-flex', alignItems: 'center', gap: 6, flexWrap: 'wrap', whiteSpace: 'nowrap' }}>
                 <MI.Calendar size={11}/>
-                <span style={{ fontFamily: 'var(--font-mono)' }}>{r.submitted?.split(' ')[0] || r.created.split(' ')[0]}</span>
+                <span style={{ fontFamily: 'var(--font-mono)' }}>{(r.submitted || r.created || '').split(' ')[0] || '—'}</span>
                 <span aria-hidden>·</span>
-                <span>{r.samples.length} wafer{r.samples.length === 1 ? '' : 's'}</span>
+                <span>{(r.sampleCount ?? r.samples.length)} wafer{(r.sampleCount ?? r.samples.length) === 1 ? '' : 's'}</span>
                 <span aria-hidden>·</span>
-                <span>by <span style={{ fontFamily: 'var(--font-mono)', color: mText2 }}>{r.history[0]?.by || 'fab_user'}</span></span>
+                <span>by <span style={{ fontFamily: 'var(--font-mono)', color: mText2 }}>{r.requester?.username || r.history[0]?.by || '—'}</span></span>
               </div>
             </div>
             <Pill kind={r.urgency} mapping={URGENCY_LABEL}/>
@@ -1164,7 +1629,7 @@ const MgrDashboard = ({ requests, recipes, navigate }) => {
         ))}
       </Card>
 
-      <TrendChart requests={requests}/>
+      <TrendChart/>
     </Page>
   );
 };
@@ -1202,12 +1667,12 @@ const MgrApp = ({ route, navigate }) => {
 
   let page = null;
   const p = route.page;
-  if (p === 'mgr_dashboard')      page = <MgrDashboard requests={requests} recipes={recipes} navigate={navigate}/>;
-  else if (p === 'mgr_all_requests') page = <MgrAllRequests requests={requests} navigate={navigate}/>;
-  else if (p === 'mgr_request')   page = <MgrRequestDetail id={route.id} requests={requests} navigate={navigate} onAction={onAction}/>;
-  else if (p === 'mgr_recipes')   page = <MgrRecipes recipes={recipes} onCreate={createRecipe} onUpdate={updateRecipe} onDelete={deleteRecipe}/>;
-  else if (p === 'mgr_reports')   page = <MgrReports requests={requests} recipes={recipes}/>;
-  else page = <MgrDashboard requests={requests} recipes={recipes} navigate={navigate}/>;
+  if (p === 'mgr_dashboard')      page = <MgrDashboard navigate={navigate}/>;
+  else if (p === 'mgr_all_requests') page = <MgrAllRequests navigate={navigate}/>;
+  else if (p === 'mgr_request')   page = <MgrRequestDetail id={route.id} navigate={navigate} showToast={showToast}/>;
+  else if (p === 'mgr_recipes')   page = <MgrRecipes showToast={showToast}/>;
+  else if (p === 'mgr_reports')   page = <MgrReports/>;
+  else page = <MgrDashboard navigate={navigate}/>;
 
   return (
     <>

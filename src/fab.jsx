@@ -37,6 +37,73 @@ const URGENCY_OPTS = [
   { id: '2w',  label: '2 Weeks', sub: 'Flexible' },
 ];
 
+// Live experiment-type catalogue (TCT, HAST, CP, FT, BTC, …). The id is an
+// integer assigned by the backend; the frontend's old hardcoded list used
+// string slugs which the new-request flow no longer touches.
+const useExperimentTypes = () => {
+  const [data, setData] = uS([]);
+  const [loading, setLoading] = uS(true);
+  const [error, setError] = uS(null);
+  React.useEffect(() => {
+    if (!window.api || !window.api.experimentTypes) {
+      setLoading(false);
+      return;
+    }
+    window.api.experimentTypes.list()
+      .then(rs => { setData(rs); setError(null); })
+      .catch(err => setError(err.message || String(err)))
+      .finally(() => setLoading(false));
+  }, []);
+  return { data, loading, error };
+};
+
+// Live request list fetched from the backend via window.api.requests.list().
+// Dashboard and My Requests each call this independently — sharing the fetch
+// isn't a goal; one fetch on mount per consumer is acceptable for v1.
+const useRequests = () => {
+  const [data, setData] = uS([]);
+  const [loading, setLoading] = uS(true);
+  const [error, setError] = uS(null);
+  const refresh = React.useCallback(() => {
+    if (!window.api || !window.api.requests) {
+      setLoading(false);
+      return;
+    }
+    setLoading(true);
+    window.api.requests.list()
+      .then(rs => { setData(rs); setError(null); })
+      .catch(err => setError(err.message || String(err)))
+      .finally(() => setLoading(false));
+  }, []);
+  React.useEffect(() => { refresh(); }, [refresh]);
+  return { data, loading, error, refresh };
+};
+
+// Detail fetch for a single request (used by FabRequestDetail). Exposes
+// `refresh` so state-machine actions (cancel) can refetch in place rather
+// than navigate away.
+const useRequestDetail = (id) => {
+  const [data, setData] = uS(null);
+  const [loading, setLoading] = uS(true);
+  const [error, setError] = uS(null);
+  const refresh = React.useCallback(() => {
+    if (id == null || !window.api || !window.api.requests) {
+      setLoading(false);
+      return;
+    }
+    setLoading(true);
+    window.api.requests.get(id)
+      .then(r => { setData(r); setError(null); })
+      .catch(err => setError(err.message || String(err)))
+      .finally(() => setLoading(false));
+  }, [id]);
+  React.useEffect(() => { refresh(); }, [refresh]);
+  return { data, loading, error, refresh };
+};
+
+// TODO: drop once offline mode is removed — the standalone single-file demo
+// still consumes this as a fallback dataset. The dev build now uses
+// useRequests() above instead.
 const REQUEST_SEED = [
   // Two fresh submissions waiting on lab_manager approval — show up in the
   // dashboard's "Waiting Approval" tile and in the manager's All Requests view.
@@ -256,16 +323,17 @@ const PrimaryBtn = ({ children, onClick, type = 'button', icon, disabled, style 
     {icon}{children}
   </button>
 );
-const SecondaryBtn = ({ children, onClick, icon, style }) => (
-  <button onClick={onClick} style={{
+const SecondaryBtn = ({ children, onClick, icon, style, disabled }) => (
+  <button onClick={onClick} disabled={disabled} style={{
     display: 'inline-flex', alignItems: 'center', gap: 8,
     padding: '10px 16px', borderRadius: 10,
-    background: '#fff', color: 'var(--text-primary)', fontWeight: 600, fontSize: 14,
-    border: '1px solid rgba(0,0,0,0.16)', transition: 'background 0.12s', cursor: 'pointer',
+    background: '#fff', color: disabled ? 'var(--text-muted)' : 'var(--text-primary)', fontWeight: 600, fontSize: 14,
+    border: '1px solid rgba(0,0,0,0.16)', transition: 'background 0.12s',
+    cursor: disabled ? 'not-allowed' : 'pointer', opacity: disabled ? 0.7 : 1,
     ...style,
   }}
-    onMouseEnter={(e) => e.currentTarget.style.background = '#f8f8fb'}
-    onMouseLeave={(e) => e.currentTarget.style.background = '#fff'}
+    onMouseEnter={(e) => { if (!disabled) e.currentTarget.style.background = '#f8f8fb'; }}
+    onMouseLeave={(e) => { if (!disabled) e.currentTarget.style.background = '#fff'; }}
   >{icon}{children}</button>
 );
 const DangerBtn = ({ children, onClick, style }) => (
@@ -542,7 +610,8 @@ const InProgressRow = ({ request, navigate, defaultExpanded = false }) => {
   );
 };
 
-const FabDashboard = ({ requests, navigate }) => {
+const FabDashboard = ({ navigate }) => {
+  const { data: requests, loading, error } = useRequests();
   const inProgress = requests.filter(r => r.status === 'in_progress').slice(0, 5);
   const drafts = requests.filter(r => r.status === 'draft');
   const attention = requests.filter(r => r.status === 'returned' || r.status === 'rejected').slice(0, 3);
@@ -570,12 +639,35 @@ const FabDashboard = ({ requests, navigate }) => {
     return items.sort((a,b) => b.at.localeCompare(a.at)).slice(0, 5);
   }, [requests]);
 
+  if (loading && requests.length === 0) {
+    return (
+      <FabPage
+        title="Dashboard"
+        subtitle="Welcome back, fab_user"
+        right={<PrimaryBtn icon={<F.Plus size={16}/>} onClick={() => navigate({ page: 'fab_new' })}>New Request</PrimaryBtn>}
+      >
+        <div style={{ padding: '60px 20px', textAlign: 'center', color: 'var(--text-muted)', fontSize: 14 }}>
+          Loading…
+        </div>
+      </FabPage>
+    );
+  }
+
   return (
     <FabPage
       title="Dashboard"
       subtitle="Welcome back, fab_user"
       right={<PrimaryBtn icon={<F.Plus size={16}/>} onClick={() => navigate({ page: 'fab_new' })}>New Request</PrimaryBtn>}
     >
+      {error && (
+        <div style={{
+          padding: '12px 16px', marginBottom: 14, borderRadius: 10,
+          background: '#fde4e4', color: '#c0394a', fontSize: 13.5, fontWeight: 500,
+          border: '1px solid #f6c4c4',
+        }}>
+          Failed to load requests: {error}
+        </div>
+      )}
       {/* Top stat tiles — mirrors the lab dashboard's quick counts */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 14, marginBottom: 18 }}>
         <FabStatTile
@@ -697,7 +789,7 @@ const FabDashboard = ({ requests, navigate }) => {
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--text-primary)' }}>{r.title || 'Untitled draft'}</div>
                   <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 3, fontFamily: 'var(--font-mono)' }}>
-                    #{r.id} · {r.samples.length} wafer{r.samples.length === 1 ? '' : 's'} · {r.created.split(' ')[0]}
+                    #{r.id} · {(r.sampleCount ?? r.samples.length)} wafer{(r.sampleCount ?? r.samples.length) === 1 ? '' : 's'} · {r.created.split(' ')[0]}
                   </div>
                 </div>
                 <span style={{ fontSize: 12.5, fontWeight: 600, color: '#6c67b8' }}>Continue →</span>
@@ -816,7 +908,8 @@ const TABS = [
   { id: 'cancelled',   label: 'Cancelled',   filter: (r) => r.status === 'cancelled' },
 ];
 
-const FabRequestList = ({ requests, navigate, initialTab = 'all', titleOverride, drafts = false }) => {
+const FabRequestList = ({ navigate, initialTab = 'all', titleOverride, drafts = false }) => {
+  const { data: requests, loading, error } = useRequests();
   const [tab, setTab] = uS(initialTab);
   const [search, setSearch] = uS('');
   const [urgency, setUrgency] = uS('all');
@@ -843,6 +936,20 @@ const FabRequestList = ({ requests, navigate, initialTab = 'all', titleOverride,
     drafts ? { page: 'fab_draft_edit', id: r.id } : { page: 'fab_request', id: r.id }
   );
 
+  if (loading && requests.length === 0) {
+    return (
+      <FabPage
+        title={titleOverride || 'My Requests'}
+        subtitle=""
+        right={<PrimaryBtn icon={<F.Plus size={16}/>} onClick={() => navigate({ page: 'fab_new' })}>New Request</PrimaryBtn>}
+      >
+        <div style={{ padding: '60px 20px', textAlign: 'center', color: 'var(--text-muted)', fontSize: 14 }}>
+          Loading…
+        </div>
+      </FabPage>
+    );
+  }
+
   return (
     <FabPage
       title={titleOverride || 'My Requests'}
@@ -851,6 +958,15 @@ const FabRequestList = ({ requests, navigate, initialTab = 'all', titleOverride,
         : `${requests.length} total · ${inProgressCount} in progress`}
       right={<PrimaryBtn icon={<F.Plus size={16}/>} onClick={() => navigate({ page: 'fab_new' })}>New Request</PrimaryBtn>}
     >
+      {error && (
+        <div style={{
+          padding: '12px 16px', marginBottom: 14, borderRadius: 10,
+          background: '#fde4e4', color: '#c0394a', fontSize: 13.5, fontWeight: 500,
+          border: '1px solid #f6c4c4',
+        }}>
+          Failed to load requests: {error}
+        </div>
+      )}
       {/* Tabs */}
       {!drafts && (
         <div style={{ display: 'flex', gap: 22, borderBottom: '1px solid rgba(0,0,0,0.07)', marginBottom: 22 }}>
@@ -969,7 +1085,7 @@ const FabRequestList = ({ requests, navigate, initialTab = 'all', titleOverride,
                 <F.Calendar size={12}/>
                 <span style={{ fontFamily: 'var(--font-mono)' }}>{r.created.split(' ')[0]}</span>
                 <span>·</span>
-                <span>{r.samples.length} wafer{r.samples.length === 1 ? '' : 's'}</span>
+                <span>{(r.sampleCount ?? r.samples.length)} wafer{(r.sampleCount ?? r.samples.length) === 1 ? '' : 's'}</span>
               </div>
             </div>
             <div style={{ display: 'flex', justifyContent: 'flex-start' }}>
@@ -1087,11 +1203,27 @@ const ExpCard = ({ exp, active, onClick }) => (
   </button>
 );
 
-const FabNewRequest = ({ navigate, onSubmit, onSaveDraft, draft, isEdit = false }) => {
+const FabNewRequest = ({ navigate, onSubmit, onSaveDraft, draft, isEdit = false, showToast }) => {
+  // Edit mode still runs on the seed-backed local-state path (FabApp callbacks)
+  // because the backend's RequestUpdateIn only accepts title/note/urgency —
+  // it can't replace experiment_type_ids or samples. New-request creation goes
+  // straight to the live API.
+  const { data: liveExperiments, error: experimentsError } = useExperimentTypes();
+  const experimentChoices = isEdit
+    ? ALL_EXPERIMENTS
+    : liveExperiments.map(e => ({
+        id: e.id,
+        name: e.name,
+        desc: e.description,
+        group: e.labCategory,
+      }));
+
   const [title, setTitle] = uS(draft?.title || '');
   const [note, setNote] = uS(draft?.note || '');
   const [urgency, setUrgency] = uS(draft?.urgency || '1w');
   const [wafers, setWafers] = uS(draft?.samples?.length ? draft.samples.map(s => ({ wafer: s.wafer, size: s.size, expIds: draft.expIds || [] })) : [{ wafer: '', size: '200mm', expIds: [] }]);
+  const [busy, setBusy] = uS(false);
+  const [apiError, setApiError] = uS(null);
 
   const addWafer = () => setWafers(w => [...w, { wafer: '', size: '200mm', expIds: [] }]);
   const removeWafer = (i) => setWafers(w => w.length === 1 ? w : w.filter((_, j) => j !== i));
@@ -1105,12 +1237,45 @@ const FabNewRequest = ({ navigate, onSubmit, onSaveDraft, draft, isEdit = false 
   const samplesValid = wafers.every(w => w.wafer.trim() && w.expIds.length > 0);
   const valid = basicValid && samplesValid;
 
-  const handle = (publish) => {
+  const handle = async (publish) => {
+    if (isEdit) {
+      // Legacy local-state path — backend can't yet replay wafer/experiment
+      // edits on a draft. Keep using FabApp's callbacks for now.
+      const expIdsAll = Array.from(new Set(wafers.flatMap(w => w.expIds)));
+      const samples = wafers.map(w => ({ wafer: w.wafer.trim(), size: w.size, status: 'pending' }));
+      const payload = { title: title.trim(), note: note.trim(), urgency, expIds: expIdsAll, samples };
+      if (publish) onSubmit(payload);
+      else onSaveDraft(payload);
+      return;
+    }
+
     const expIdsAll = Array.from(new Set(wafers.flatMap(w => w.expIds)));
-    const samples = wafers.map(w => ({ wafer: w.wafer.trim(), size: w.size, status: 'pending' }));
-    const payload = { title: title.trim(), note: note.trim(), urgency, expIds: expIdsAll, samples };
-    if (publish) onSubmit(payload);
-    else onSaveDraft(payload);
+    const samples = wafers.map(w => ({ wafer_id: w.wafer.trim(), wafer_size: w.size }));
+    const payload = {
+      title: title.trim(),
+      note: note.trim(),
+      urgency,
+      experiment_type_ids: expIdsAll,
+      samples,
+    };
+
+    setBusy(true);
+    setApiError(null);
+    try {
+      const created = await window.api.requests.create(payload);
+      if (publish) {
+        await window.api.requests.submit(created.id);
+        showToast && showToast(`Request #${created.id} submitted — awaiting approval`);
+        navigate({ page: 'fab_requests' });
+      } else {
+        showToast && showToast(`Draft #${created.id} saved`);
+        navigate({ page: 'fab_drafts' });
+      }
+    } catch (err) {
+      setApiError(err.message || String(err));
+    } finally {
+      setBusy(false);
+    }
   };
 
   return (
@@ -1199,7 +1364,12 @@ const FabNewRequest = ({ navigate, onSubmit, onSaveDraft, draft, isEdit = false 
                       {w.expIds.length === 0 && <span style={{ fontSize: 12, fontWeight: 600, color: '#c0394a' }}>Pick at least one</span>}
                     </div>
                     <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 10 }}>
-                      {ALL_EXPERIMENTS.map(e => (
+                      {experimentChoices.length === 0 && experimentsError && (
+                        <div style={{ gridColumn: '1 / -1', fontSize: 13, color: '#c0394a', padding: '12px 14px', background: '#fde4e4', border: '1px solid #f6c4c4', borderRadius: 10 }}>
+                          Couldn't load experiment types: {experimentsError}
+                        </div>
+                      )}
+                      {experimentChoices.map(e => (
                         <ExpCard key={e.id} exp={e} active={w.expIds.includes(e.id)} onClick={() => toggleExp(i, e.id)}/>
                       ))}
                     </div>
@@ -1253,6 +1423,16 @@ const FabNewRequest = ({ navigate, onSubmit, onSaveDraft, draft, isEdit = false 
         </div>
       </div>
 
+      {apiError && (
+        <div style={{
+          padding: '12px 16px', marginTop: 16, borderRadius: 10,
+          background: '#fde4e4', color: '#c0394a', fontSize: 13.5, fontWeight: 500,
+          border: '1px solid #f6c4c4',
+        }}>
+          {apiError}
+        </div>
+      )}
+
       {/* Bottom action bar */}
       <div style={{
         position: 'sticky', bottom: 0, marginTop: 24, marginLeft: -44, marginRight: -44,
@@ -1267,8 +1447,8 @@ const FabNewRequest = ({ navigate, onSubmit, onSaveDraft, draft, isEdit = false 
         </div>
         <div style={{ display: 'flex', gap: 10 }}>
           <SecondaryBtn onClick={() => navigate(isEdit ? { page: 'fab_drafts' } : { page: 'fab_requests' })}>Cancel</SecondaryBtn>
-          <SecondaryBtn onClick={() => handle(false)}>{isEdit ? 'Save & Stay Draft' : 'Save Draft'}</SecondaryBtn>
-          <PrimaryBtn disabled={!valid} onClick={() => handle(true)}>{isEdit ? 'Submit Draft' : 'Submit Request'}</PrimaryBtn>
+          <SecondaryBtn disabled={busy} onClick={() => handle(false)}>{busy ? 'Saving…' : (isEdit ? 'Save & Stay Draft' : 'Save Draft')}</SecondaryBtn>
+          <PrimaryBtn disabled={!valid || busy} onClick={() => handle(true)}>{busy ? 'Submitting…' : (isEdit ? 'Submit Draft' : 'Submit Request')}</PrimaryBtn>
         </div>
       </div>
     </FabPage>
@@ -1276,17 +1456,6 @@ const FabNewRequest = ({ navigate, onSubmit, onSaveDraft, draft, isEdit = false 
 };
 
 // ── Detail ─────────────────────────────────────────────────────
-// Synthetic result stubs — the fab data model doesn't carry per-experiment
-// readings, so we render a plausible summary when an experiment is "done"
-// to mirror the shape of the lab-side dispatch result.
-const EXPERIMENT_RESULT_STUB = {
-  tct:  { summary: 'All cycles completed nominally — no solder fatigue or TSV crack propagation detected.', verdict: 'pass', note: 'Within spec across the full -55°C / 125°C window.' },
-  hast: { summary: 'Sustained 168 h at 85 °C / 85 %RH with no moisture-induced failure.',                  verdict: 'pass', note: 'Bias held steady at 5 V throughout the run.' },
-  btc:  { summary: 'Bias-temperature cycling complete. Threshold drift within spec on all sites.',         verdict: 'pass', note: '' },
-  cp:   { summary: 'Wafer probe pass — site yield within target on the full die map.',                    verdict: 'pass', note: '1024 sites, 24 touchdowns each.' },
-  ft:   { summary: 'Final functional test pass — all bins within window.',                                verdict: 'pass', note: '' },
-};
-
 // Plain card-header strip — matches the style of the lab dispatch detail
 // (no gradient, just an uppercase eyebrow on a thin border).
 const PlainCardHeader = ({ children, right }) => (
@@ -1333,12 +1502,117 @@ const HistoryDot = ({ action }) => {
   return c;
 };
 
-const FabRequestDetail = ({ id, requests, navigate, onCancel }) => {
-  const r = requests.find(x => x.id === id);
-  if (!r) return <FabPage title="Request not found"/>;
-  const exps = r.expIds.map(e => ALL_EXPERIMENTS.find(x => x.id === e)).filter(Boolean);
+// Modal that prompts for a non-empty cancellation reason. Backend
+// `/requests/:id/cancel` accepts a `reason` field with Ninja min_length=1,
+// so the Confirm button stays disabled until the textarea has content.
+const CancelRequestModal = ({ requestId, onClose, onCancelled, showToast }) => {
+  const [reason, setReason] = uS('');
+  const [busy, setBusy] = uS(false);
+  const [err, setErr] = uS(null);
+  const canConfirm = reason.trim().length > 0 && !busy;
+  const confirm = async () => {
+    setBusy(true);
+    setErr(null);
+    try {
+      await window.api.requests.cancel(requestId, reason.trim());
+      showToast && showToast(`Request #${requestId} cancelled`);
+      onCancelled && onCancelled();
+    } catch (e) {
+      setErr(e.message || String(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <div style={{
+      position: 'fixed', inset: 0, zIndex: 200,
+      background: 'rgba(20,20,28,0.42)', backdropFilter: 'blur(2px)',
+      display: 'flex', alignItems: 'center', justifyContent: 'center',
+      padding: 24,
+    }} onClick={onClose}>
+      <div onClick={(e) => e.stopPropagation()} style={{
+        width: 'min(460px, 100%)', background: '#fff', borderRadius: 14,
+        boxShadow: '0 24px 60px rgba(20,20,28,0.32)', padding: 24,
+      }}>
+        <div style={{ fontSize: 17, fontWeight: 700, color: 'var(--text-primary)', marginBottom: 6 }}>
+          Cancel Request #{String(requestId).padStart(4, '0')}
+        </div>
+        <div style={{ fontSize: 13.5, color: 'var(--text-secondary)', marginBottom: 14, lineHeight: 1.5 }}>
+          Cancellation is permanent. The lab will see your reason in the request history.
+        </div>
+        <label style={{ fontSize: 11.5, fontWeight: 600, color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.06em' }}>
+          Reason <span style={{ color: '#c0394a' }}>*</span>
+        </label>
+        <textarea value={reason} onChange={(e) => setReason(e.target.value)}
+          rows={4} autoFocus
+          placeholder="Why is this request being cancelled?"
+          style={{
+            width: '100%', marginTop: 6, padding: '10px 12px', borderRadius: 8,
+            border: '1px solid rgba(0,0,0,0.16)', fontSize: 13.5, fontFamily: 'inherit',
+            resize: 'vertical', outline: 'none',
+          }}/>
+        {err && (
+          <div style={{ marginTop: 12, padding: '10px 12px', borderRadius: 8,
+            background: '#fde4e4', color: '#c0394a', fontSize: 13, fontWeight: 500,
+            border: '1px solid #f6c4c4' }}>
+            {err}
+          </div>
+        )}
+        <div style={{ marginTop: 18, display: 'flex', justifyContent: 'flex-end', gap: 10 }}>
+          <SecondaryBtn onClick={onClose} disabled={busy}>Keep request</SecondaryBtn>
+          <PrimaryBtn disabled={!canConfirm} onClick={confirm} style={{ background: canConfirm ? '#c0394a' : '#cbcbd6' }}>
+            {busy ? 'Cancelling…' : 'Cancel request'}
+          </PrimaryBtn>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+const FabRequestDetail = ({ id, navigate, showToast }) => {
+  const { data: r, loading, error, refresh } = useRequestDetail(id);
+  const { data: liveTypes } = useExperimentTypes();
+  const [cancelOpen, setCancelOpen] = uS(false);
+
+  if (loading && !r) {
+    return (
+      <FabPage title="Loading request…">
+        <div style={{ padding: '60px 20px', textAlign: 'center', color: 'var(--text-muted)', fontSize: 14 }}>
+          Loading…
+        </div>
+      </FabPage>
+    );
+  }
+  if (error || !r) {
+    return (
+      <FabPage
+        breadcrumb={
+          <button onClick={() => navigate({ page: 'fab_requests' })} style={{
+            display: 'inline-flex', alignItems: 'center', gap: 4,
+            fontSize: 13, fontWeight: 600, color: '#6c67b8', marginBottom: 14, cursor: 'pointer',
+          }}><F.ChevronLeft size={14}/> My Requests</button>
+        }
+        title="Request not found"
+      >
+        <div style={{ padding: '24px', color: '#c0394a', fontSize: 14 }}>
+          {error || 'This request is no longer available.'}
+        </div>
+      </FabPage>
+    );
+  }
+
+  // Backend's RequestDetailOut.experiment_types only carries id + name +
+  // parameters; lab_category lives on the standalone /experiment-types/
+  // endpoint. Join in-place so the experiment chips can still show their
+  // RA/MA/FA/TM group label.
+  const labCategoryById = new Map(liveTypes.map(t => [t.id, t.labCategory]));
+  const exps = (r.experiment_types || []).map(et => ({
+    id: et.id,
+    name: et.name,
+    group: labCategoryById.get(et.id) || '',
+  }));
   const canCancel = r.status === 'in_progress' || r.status === 'submitted';
-  const overallIdx = Math.min(...r.samples.map(s => phaseIndexFor(s, r)));
+  const overallIdx = r.samples.length ? Math.min(...r.samples.map(s => phaseIndexFor(s, r))) : 0;
 
   const completedAt = (r.status === 'completed' && r.history.length)
     ? r.history[r.history.length - 1].at.split(' ')[0]
@@ -1381,7 +1655,7 @@ const FabRequestDetail = ({ id, requests, navigate, onCancel }) => {
         </span>
       }
       right={canCancel && (
-        <button onClick={() => onCancel(r.id)} style={{
+        <button onClick={() => setCancelOpen(true)} style={{
           padding: '9px 15px', borderRadius: 8,
           background: '#fff', color: '#c0394a',
           fontWeight: 600, fontSize: 13, cursor: 'pointer',
@@ -1476,12 +1750,13 @@ const FabRequestDetail = ({ id, requests, navigate, onCancel }) => {
         </PlainCardHeader>
         <div style={{ padding: 18, display: 'flex', flexDirection: 'column', gap: 12, background: '#fafafd' }}>
           {r.samples.map((s, si) => {
-            const idx = phaseIndexFor(s, r);
             const total = exps.length;
-            let doneCount = 0;
-            if (idx >= 4) doneCount = total;
-            else if (idx === 3) doneCount = Math.max(1, Math.floor(total / 2));
-            else doneCount = 0;
+            // Per-experiment done/pending state lives on the wafer's
+            // WIP → Dispatch → ExperimentResult chain — until the §2.8 wafer
+            // rollup endpoint lands, the detail payload can't tell us which
+            // experiments finished. Render every chip as pending and skip
+            // the result block rather than fake data.
+            const doneCount = 0;
             return (
               <div key={si} style={{
                 background: '#fff', borderRadius: 12,
@@ -1532,44 +1807,27 @@ const FabRequestDetail = ({ id, requests, navigate, onCancel }) => {
                     <div style={{ fontSize: 10.5, fontWeight: 600, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.06em', marginTop: 2 }}>done</div>
                   </div>
                 </div>
-                {/* For each done experiment, surface the result/comment like the dispatch detail does */}
-                {doneCount > 0 && (
-                  <div style={{ background: '#fbfbfd', borderTop: '1px solid rgba(0,0,0,0.05)', padding: '14px 18px', display: 'flex', flexDirection: 'column', gap: 10 }}>
-                    {exps.slice(0, doneCount).map((e) => {
-                      const stub = EXPERIMENT_RESULT_STUB[e.id] || { summary: 'Run completed.', verdict: 'pass', note: '' };
-                      const finishedAt = r.history.find(h => h.action === 'APPROVE')?.at || r.submitted || r.created;
-                      return (
-                        <div key={e.id} style={{
-                          padding: '12px 14px', background: '#fff',
-                          border: '1px solid rgba(0,0,0,0.06)', borderRadius: 10,
-                        }}>
-                          <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 8, flexWrap: 'wrap' }}>
-                            <span style={{
-                              fontSize: 10, fontWeight: 700, padding: '3px 7px', borderRadius: 999,
-                              background: '#157a4a', color: '#fff', letterSpacing: '0.05em',
-                            }}>{e.group}</span>
-                            <span style={{ fontSize: 13.5, fontWeight: 700, color: 'var(--text-primary)' }}>{e.name}</span>
-                            <span style={{
-                              padding: '3px 9px', borderRadius: 999,
-                              background: '#c8eedd', color: '#157a4a',
-                              fontSize: 11, fontWeight: 700, letterSpacing: '0.05em',
-                            }}>PASS</span>
-                            <span style={{ marginLeft: 'auto', fontFamily: 'var(--font-mono)', fontSize: 11.5, color: 'var(--text-muted)' }}>{finishedAt}</span>
-                          </div>
-                          <div style={{ fontSize: 13.5, color: 'var(--text-primary)', lineHeight: 1.55 }}>{stub.summary}</div>
-                          {stub.note && (
-                            <div style={{ fontSize: 12.5, color: 'var(--text-secondary)', marginTop: 8, paddingTop: 8, borderTop: '1px dashed rgba(0,0,0,0.06)', fontStyle: 'italic' }}>{stub.note}</div>
-                          )}
-                        </div>
-                      );
-                    })}
-                  </div>
-                )}
+                {/*
+                  Per-experiment result block intentionally removed for v1.
+                  The real summary/verdict/note lives on the wafer's
+                  WIP → Dispatch → ExperimentResult chain, which is not on
+                  RequestDetailOut yet (see INTEGRATION_GAPS.md §2.8 wafer
+                  rollup). Reintroduce once that endpoint lands.
+                */}
               </div>
             );
           })}
         </div>
       </FabCard>
+
+      {cancelOpen && (
+        <CancelRequestModal
+          requestId={r.id}
+          onClose={() => setCancelOpen(false)}
+          onCancelled={() => { setCancelOpen(false); refresh(); }}
+          showToast={showToast}
+        />
+      )}
     </FabPage>
   );
 };
@@ -1613,26 +1871,20 @@ const FabApp = ({ route, navigate }) => {
     showToast(`Draft #${id} saved`);
     navigate({ page: 'fab_drafts' });
   };
-  const cancelRequest = (id) => {
-    const now = new Date().toISOString().slice(0, 16).replace('T', ' ');
-    setRequests(rs => rs.map(r => r.id === id ? { ...r, status: 'cancelled', history: [...r.history, { action: 'CANCEL', by: 'fab_user', at: now }] } : r));
-    showToast(`Request #${id} cancelled`);
-  };
-
   let page = null;
-  if (route.page === 'fab_dashboard') page = <FabDashboard requests={requests} navigate={navigate}/>;
-  else if (route.page === 'fab_requests') page = <FabRequestList requests={requests} navigate={navigate} initialTab={route.tab || 'all'}/>;
-  else if (route.page === 'fab_drafts') page = <FabRequestList requests={requests} navigate={navigate} drafts titleOverride="Drafts"/>;
-  else if (route.page === 'fab_new')      page = <FabNewRequest navigate={navigate} onSubmit={submitNew} onSaveDraft={saveDraft}/>;
+  if (route.page === 'fab_dashboard') page = <FabDashboard navigate={navigate}/>;
+  else if (route.page === 'fab_requests') page = <FabRequestList navigate={navigate} initialTab={route.tab || 'all'}/>;
+  else if (route.page === 'fab_drafts') page = <FabRequestList navigate={navigate} drafts titleOverride="Drafts"/>;
+  else if (route.page === 'fab_new')      page = <FabNewRequest navigate={navigate} onSubmit={submitNew} onSaveDraft={saveDraft} showToast={showToast}/>;
   else if (route.page === 'fab_draft_edit') {
     const d = requests.find(r => r.id === route.id);
     page = d
-      ? <FabNewRequest navigate={navigate} draft={d} isEdit
+      ? <FabNewRequest navigate={navigate} draft={d} isEdit showToast={showToast}
           onSubmit={(p) => submitNew(p, d.id)} onSaveDraft={(p) => saveDraft(p, d.id)}/>
-      : <FabRequestList requests={requests} navigate={navigate} drafts titleOverride="Drafts"/>;
+      : <FabRequestList navigate={navigate} drafts titleOverride="Drafts"/>;
   }
-  else if (route.page === 'fab_request')  page = <FabRequestDetail id={route.id} requests={requests} navigate={navigate} onCancel={cancelRequest}/>;
-  else page = <FabDashboard requests={requests} navigate={navigate}/>;
+  else if (route.page === 'fab_request')  page = <FabRequestDetail id={route.id} navigate={navigate} showToast={showToast}/>;
+  else page = <FabDashboard navigate={navigate}/>;
 
   return (
     <>

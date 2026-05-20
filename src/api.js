@@ -108,6 +108,17 @@
   const wipCode = (id) => `WIP-${String(id).padStart(4, '0')}`;
   const dispatchCode = (id) => `DP-${String(id).padStart(4, '0')}`;
 
+  // Backend returns timestamps as ISO 8601 ("2026-05-09T08:14:00.000Z").
+  // The existing JSX assumes a "YYYY-MM-DD HH:MM" string and does things like
+  // `r.created.split(' ')[0]` to grab the date portion. Normalize at the wire.
+  const formatTimestamp = (iso) => {
+    if (!iso) return iso || null;
+    const d = new Date(iso);
+    if (Number.isNaN(d.getTime())) return iso;
+    const pad = (n) => String(n).padStart(2, '0');
+    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  };
+
   // ---------------------------------------------------------------------------
   // Request normalizers. Each turns a backend payload into the shape the
   // existing JSX expects. Keep these dumb (no business logic).
@@ -118,12 +129,15 @@
       title: r.title,
       status: REQUEST_STATUS_MAP[r.status] || r.status,
       raw_status: r.status,                                  // keep for state-machine calls
-      urgency: r.urgency || null,                            // backend gap: §2.2
+      urgency: r.urgency || '1w',                            // backend default since §2.2
       requester: r.requester,
       note: r.note,
-      created: r.created_at,
-      submitted: r.submitted_at,
-      updated: r.updated_at,
+      created: formatTimestamp(r.created_at),
+      submitted: formatTimestamp(r.submitted_at),
+      updated: formatTimestamp(r.updated_at),
+      // Server-annotated count on RequestListOut so list rows can show a
+      // wafer count without loading each request's detail.
+      sampleCount: r.sample_count ?? 0,
       // these are filled in by the detail endpoint
       expIds: [],
       samples: [],
@@ -146,36 +160,72 @@
       history: (r.approval_logs || []).map(log => ({
         action: log.action.toUpperCase(),
         by: log.reviewer?.username,
-        at: log.created_at,
+        at: formatTimestamp(log.created_at),
         note: log.comment || '',
       })),
-      completed_at: r.completed_at,
-      closed_at: r.closed_at,
+      completed_at: formatTimestamp(r.completed_at),
+      closed_at: formatTimestamp(r.closed_at),
     };
   }
 
   function normalizeSampleRow(s) {
+    // Backend has no `in_wip` status — gap §3.2 calls for the adapter to
+    // derive it. `has_wip` is now annotated on SampleListOut/DetailOut, so
+    // a received sample that's been pulled into a non-terminal WIP renders
+    // as `in_wip` to the rest of the UI. Anything not currently `received`
+    // (split, processing_exception, completed, etc.) keeps its mapped value.
+    const mapped = SAMPLE_STATUS_MAP[s.status] || s.status;
+    const hasWip = s.has_wip ?? false;
+    const status = (mapped === 'received' && hasWip) ? 'in_wip' : mapped;
     return {
       id: s.id,
       wafer: s.wafer_id,
       size: s.wafer_size,
       requestId: s.request_id,
-      status: SAMPLE_STATUS_MAP[s.status] || s.status,
+      status,
       raw_status: s.status,
-      arrivedAt: s.received_at || s.updated_at || null,  // backend gap: §2.5
-      created: s.created_at,
+      hasWip,
+      // received_at is set when the lab confirms receipt (backend §2.5).
+      // Until that transition fires it'll be null — countdowns in the UI
+      // should treat null as "not yet started" rather than "0 time left".
+      receivedAt: formatTimestamp(s.received_at),
+      arrivedAt: formatTimestamp(s.received_at),    // alias kept for existing JSX
+      created: formatTimestamp(s.created_at),
     };
   }
 
   function normalizeWip(w) {
+    // WIPListOut surfaces sample_count; WIPDetailOut surfaces the samples
+    // list inline. Handle both shapes here so callers don't have to care.
+    const samples = (w.samples || []).map(s => ({
+      id: s.id,
+      wafer: s.wafer_id,
+      size: s.wafer_size,
+      status: SAMPLE_STATUS_MAP[s.status] || s.status,
+      raw_status: s.status,
+      requestId: s.request_id,
+    }));
     return {
       id: w.id,
       code: wipCode(w.id),
-      sampleId: w.sample_id,
+      experimentId: w.experiment_type_id,
+      experimentName: w.experiment_type_name,
+      // WIPListOut → sample_count; WIPDetailOut → derive from samples list
+      sampleCount: typeof w.sample_count === 'number' ? w.sample_count : samples.length,
+      // WIPListOut → dispatch_count (just added on the backend);
+      // WIPDetailOut → derive from the inline dispatches array.
+      dispatchCount: typeof w.dispatch_count === 'number'
+        ? w.dispatch_count
+        : (w.dispatches || []).length,
+      samples,           // empty array on list responses; populated on detail
       status: w.status,
       note: w.note,
-      created: w.created_at,
-      completed: w.completed_at,
+      created: formatTimestamp(w.created_at),
+      updated: formatTimestamp(w.updated_at),
+      completed: formatTimestamp(w.completed_at),
+      // Nested dispatches (WIPDetailOut.dispatches) go through normalizeDispatch
+      // which surfaces equipmentId/equipmentName from the newly-added
+      // DispatchBriefOut.equipment_{id,name} fields.
       dispatches: (w.dispatches || []).map(normalizeDispatch),
     };
   }
@@ -191,12 +241,21 @@
       equipmentName: d.equipment_name,
       recipeId: d.recipe_id,
       recipeName: d.recipe_name,
-      operator: d.created_by?.username || null,  // backend gap: §2.6 (created_by not yet exposed)
+      operator: d.created_by?.username || null,    // exposed by backend §2.6
+      operatorId: d.created_by?.id || null,
+      operatorDepartment: d.created_by?.department || null,
       status: DISPATCH_STATUS_MAP[d.status] || d.status,
       raw_status: d.status,
-      dispatchedAt: d.dispatched_at,
-      completedAt: d.completed_at,
-      created: d.created_at,
+      dispatchedAt: formatTimestamp(d.dispatched_at),
+      // Raw ISO timestamp kept alongside the formatted "YYYY-MM-DD HH:MM"
+      // value because the formatted form truncates to minute precision and
+      // breaks the dispatch countdown bar on short estimates (e.g. the 20s
+      // demo). Anyone doing elapsed math should read this one.
+      dispatchedAtIso: d.dispatched_at ?? null,
+      completedAt: formatTimestamp(d.completed_at),
+      completedAtIso: d.completed_at ?? null,
+      created: formatTimestamp(d.created_at),
+      estimatedDurationSeconds: d.estimated_duration_seconds ?? null,
       result: d.result ? {
         summary: d.result.summary,
         verdict: d.result.verdict,
@@ -215,18 +274,20 @@
       status: EQUIPMENT_STATUS_MAP[e.status] || e.status,
       raw_status: e.status,
       capabilities: e.capabilities || [],
+      // Admin-defined schema of dispatch parameters this equipment exposes
+      // (backend §2.4). Shape is open-ended; the UI walks the object to
+      // render input fields.
+      parameters: e.parameters || {},
     };
   }
 
   function normalizeRecipe(r) {
+    // Recipe.equipment was dropped entirely in the chat-design restoration
+    // (backend §2.3). Recipes belong to an experiment_type only now.
     return {
       id: r.id,
       name: r.name,
       description: r.description,
-      // Recipe.equipment is currently required on the backend (see §2.3). For
-      // now we surface it; the UI ignores it once §2.3 lands.
-      equipmentId: r.equipment?.id || null,
-      equipmentName: r.equipment?.name || null,
       experimentId: r.experiment_type?.id || null,
       experimentName: r.experiment_type?.name || null,
       params: r.parameters || {},
@@ -269,7 +330,18 @@
       let detail = `${res.status} ${res.statusText}`;
       try {
         const body = await res.json();
-        if (body && body.detail) detail = body.detail;
+        // Ninja/Pydantic validation errors come back as { detail: [...] };
+        // unwrap to a readable string so the UI banner doesn't render
+        // "[object Object]". Single-message detail strings pass through.
+        if (body && body.detail) {
+          if (typeof body.detail === 'string') {
+            detail = body.detail;
+          } else if (Array.isArray(body.detail)) {
+            detail = body.detail.map(e => e.msg || JSON.stringify(e)).join('; ');
+          } else {
+            detail = JSON.stringify(body.detail);
+          }
+        }
       } catch (_e) { /* non-json error */ }
       const err = new Error(detail);
       err.status = res.status;
@@ -363,13 +435,26 @@
         const out = await call(`/equipment/?${usp}`);
         return out.map(normalizeEquipment);
       },
-      async create(payload) {
-        // payload = { name, model_name, capacity, experiment_type_ids? }
-        const out = await call('/equipment/', { method: 'POST', body: payload });
+      async create({ name, modelName, capacity, status, experimentTypeIds = [], parameters = {} }) {
+        const body = {
+          name, model_name: modelName, capacity,
+          experiment_type_ids: experimentTypeIds,
+          parameters,
+        };
+        if (status !== undefined) body.status = status;
+        const out = await call('/equipment/', { method: 'POST', body });
         return normalizeEquipment(out);
       },
-      async update(id, payload) {
-        const out = await call(`/equipment/${id}`, { method: 'PATCH', body: payload });
+      async update(id, { name, modelName, capacity, status, parameters }) {
+        // `EquipmentUpdate` accepts name/model_name/capacity/status/parameters
+        // — capabilities go through the dedicated endpoint below.
+        const body = {};
+        if (name !== undefined) body.name = name;
+        if (modelName !== undefined) body.model_name = modelName;
+        if (capacity !== undefined) body.capacity = capacity;
+        if (status !== undefined) body.status = status;
+        if (parameters !== undefined) body.parameters = parameters;
+        const out = await call(`/equipment/${id}`, { method: 'PATCH', body });
         return normalizeEquipment(out);
       },
       async setCapabilities(id, experimentTypeIds) {
@@ -386,19 +471,33 @@
         const out = await call(`/recipes/?${usp}`);
         return out.map(normalizeRecipe);
       },
-      async create(payload) {
-        // payload = { name, description?, equipment_id, experiment_type_id, parameters }
-        // §2.3: equipment_id will be optional once backend lands the change.
-        const out = await call('/recipes/', { method: 'POST', body: payload });
+      async create({ name, description = '', experimentTypeId, parameters = {} }) {
+        // camelCase in, snake_case to the backend. Recipe.equipment was
+        // dropped entirely — see backend §2.3.
+        const out = await call('/recipes/', {
+          method: 'POST',
+          body: {
+            name,
+            description,
+            experiment_type_id: experimentTypeId,
+            parameters,
+          },
+        });
         return normalizeRecipe(out);
       },
-      async update(id, payload) {
-        const out = await call(`/recipes/${id}`, { method: 'PATCH', body: payload });
+      async update(id, { name, description, parameters }) {
+        // RecipeUpdate accepts name/description/parameters only — backend
+        // intentionally locks experiment_type after creation.
+        const body = {};
+        if (name !== undefined) body.name = name;
+        if (description !== undefined) body.description = description;
+        if (parameters !== undefined) body.parameters = parameters;
+        const out = await call(`/recipes/${id}`, { method: 'PATCH', body });
         return normalizeRecipe(out);
       },
       async remove(id) {
-        const out = await call(`/recipes/${id}`, { method: 'DELETE' });
-        return normalizeRecipe(out);
+        await call(`/recipes/${id}`, { method: 'DELETE' });
+        return null;
       },
     },
 
@@ -413,8 +512,9 @@
         return normalizeRequestDetail(out);
       },
       async create(payload) {
-        // payload = { title, note?, experiment_type_ids, experiment_parameters?, samples }
-        // urgency goes here once §2.2 lands.
+        // payload = { title, note?, urgency?, experiment_type_ids,
+        //             experiment_parameters?, samples }
+        // urgency: '3d' | '1w' | '2w' (default '1w' server-side, backend §2.2)
         const out = await call('/requests/', { method: 'POST', body: payload });
         return normalizeRequestDetail(out);
       },
@@ -483,28 +583,36 @@
       async list(q = {}) {
         const usp = new URLSearchParams(q);
         const out = await call(`/wips/?${usp}`);
-        return out.map(w => ({
-          id: w.id,
-          code: wipCode(w.id),
-          sampleId: w.sample_id,
-          status: w.status,
-          note: w.note,
-          completed: w.completed_at,
-          created: w.created_at,
-        }));
+        // WIPListOut now carries experiment_type_id/name + sample_count.
+        // Reuse normalizeWip so list rows and detail share the same shape
+        // (samples will be [] on list responses; check sampleCount instead).
+        return out.map(normalizeWip);
       },
       async get(id) {
         return normalizeWip(await call(`/wips/${id}/`));
       },
-      async create(sampleId, note = '') {
+      async create({ experimentTypeId, sampleIds, note = '' }) {
+        // payload = { experiment_type_id, sample_ids: list[int], note }
+        // WIP picks experiment + a batch of samples that all need it.
         return normalizeWip(await call('/wips/', {
-          method: 'POST', body: { sample_id: sampleId, note },
+          method: 'POST',
+          body: {
+            experiment_type_id: experimentTypeId,
+            sample_ids: sampleIds,
+            note,
+          },
         }));
       },
-      async createDispatch(wipId, payload) {
-        // payload = { experiment_type_id, equipment_id, recipe_id, note? }
+      async createDispatch(wipId, { equipmentId, recipeId, estimatedDurationSeconds, note = '' }) {
+        // payload = { equipment_id, recipe_id, estimated_duration_seconds?, note? }
+        // experiment_type is derived server-side from the parent WIP.
+        const body = { equipment_id: equipmentId, recipe_id: recipeId, note };
+        if (estimatedDurationSeconds != null && estimatedDurationSeconds !== '') {
+          body.estimated_duration_seconds = estimatedDurationSeconds;
+        }
         return normalizeWip(await call(`/wips/${wipId}/dispatches/`, {
-          method: 'POST', body: payload,
+          method: 'POST',
+          body,
         }));
       },
       async complete(id) {
@@ -526,11 +634,16 @@
           experimentId: d.experiment_type_id,
           equipmentId: d.equipment_id,
           recipeId: d.recipe_id,
+          operator: d.created_by?.username || null,       // backend §2.6
+          operatorId: d.created_by?.id || null,
           status: DISPATCH_STATUS_MAP[d.status] || d.status,
           raw_status: d.status,
-          dispatchedAt: d.dispatched_at,
-          completedAt: d.completed_at,
-          created: d.created_at,
+          dispatchedAt: formatTimestamp(d.dispatched_at),
+          dispatchedAtIso: d.dispatched_at ?? null,
+          completedAt: formatTimestamp(d.completed_at),
+          completedAtIso: d.completed_at ?? null,
+          created: formatTimestamp(d.created_at),
+          estimatedDurationSeconds: d.estimated_duration_seconds ?? null,
         }));
       },
       async get(id) {
@@ -544,8 +657,22 @@
       },
       async recordResult(id, payload) {
         // payload = { summary, verdict: 'pass'|'fail', data?, note? }
+        // Backend `ExperimentResultIn.data` is a dict — accept either an
+        // object or a JSON string from callers (the existing form UI emits
+        // a raw JSON string), and coerce to an object before POSTing.
+        let normalized = payload;
+        if (payload && typeof payload.data === 'string') {
+          let parsed = {};
+          try { parsed = payload.data.trim() ? JSON.parse(payload.data) : {}; }
+          catch (_e) {
+            const err = new Error('Result data must be valid JSON.');
+            err.status = 400;
+            throw err;
+          }
+          normalized = { ...payload, data: parsed };
+        }
         return normalizeDispatch(await call(`/dispatches/${id}/record-result/`, {
-          method: 'POST', body: payload,
+          method: 'POST', body: normalized,
         }));
       },
       async complete(id) {
@@ -573,6 +700,11 @@
       async requestStatistics(q) {
         const usp = new URLSearchParams(q);
         return call(`/reports/request-statistics?${usp}`);
+      },
+      async trends(q = {}) {
+        // q = { metric: 'requests_per_day', days: 30 }
+        const usp = new URLSearchParams(q);
+        return call(`/reports/trends?${usp}`);
       },
     },
   };
