@@ -62,6 +62,42 @@ const WIP_SEED = [
   { id: 'WIP-7698', equipmentId: 'QA-TCT-02',  experimentId: 'tct',  waferIds: ['W040701'],            note: '',                     status: 'completed',   createdAt: '2026-05-08 10:00', dispatchIds: ['DP-3300'] },
 ];
 
+// Live dispatch list. The /dispatches/ endpoint carries only ids, so the
+// hook co-fetches experiment-types and equipment to populate the per-row
+// experiment chip and equipment label. Three parallel GETs on mount.
+const useLabDispatches = () => {
+  const [dispatches, setDispatches] = lS([]);
+  const [expById, setExpById] = lS(new Map());
+  const [eqById, setEqById] = lS(new Map());
+  const [loading, setLoading] = lS(true);
+  const [error, setError] = lS(null);
+  const refresh = React.useCallback(() => {
+    if (!window.api) { setLoading(false); return; }
+    setLoading(true);
+    Promise.all([
+      window.api.dispatches.list(),
+      window.api.experimentTypes.list().catch(() => []),
+      window.api.equipment.list().catch(() => []),
+    ])
+      .then(([ds, exps, eqs]) => {
+        setDispatches(ds);
+        setExpById(new Map(exps.map(e => [e.id, e])));
+        setEqById(new Map(eqs.map(e => [e.id, e])));
+        setError(null);
+      })
+      .catch(err => setError(err.message || String(err)))
+      .finally(() => setLoading(false));
+  }, []);
+  React.useEffect(() => { refresh(); }, [refresh]);
+  // Join name fields onto each dispatch row.
+  const enriched = dispatches.map(d => ({
+    ...d,
+    experimentName: expById.get(d.experimentId)?.name || null,
+    equipmentName: eqById.get(d.equipmentId)?.name || null,
+  }));
+  return { dispatches: enriched, loading, error, refresh };
+};
+
 // Live WIP detail. Calls /wips/:id/ and returns the normalized payload
 // (samples array + dispatches with equipment names inline). Exposes
 // `refresh` so the Complete / Abort buttons can re-render in place.
@@ -1461,7 +1497,8 @@ const LabWipDetail = ({ id, navigate, showToast }) => {
 };
 
 // ── Dispatch list ───────────────────────────────────────────────
-const LabDispatchList = ({ dispatches, wips, navigate, defaultTab = 'active' }) => {
+const LabDispatchList = ({ navigate, defaultTab = 'active' }) => {
+  const { dispatches, loading, error } = useLabDispatches();
   const [tab, setTab] = lS(defaultTab);
   const groups = {
     active: ['dispatched', 'pending', 'running'],
@@ -1480,8 +1517,25 @@ const LabDispatchList = ({ dispatches, wips, navigate, defaultTab = 'active' }) 
     { id: 'all',    label: 'All' },
   ];
 
+  if (loading && dispatches.length === 0) {
+    return (
+      <Page title="Dispatches" subtitle="Loading…">
+        <div style={{ padding: '60px 20px', textAlign: 'center', color: muted, fontSize: 14 }}>Loading…</div>
+      </Page>
+    );
+  }
+
   return (
     <Page title="Dispatches" subtitle="One experiment run on one piece of equipment, derived from a WIP">
+      {error && (
+        <div style={{
+          padding: '12px 16px', marginBottom: 14, borderRadius: 10,
+          background: '#fde4e4', color: '#c0394a', fontSize: 13.5, fontWeight: 500,
+          border: '1px solid #f6c4c4',
+        }}>
+          Couldn't load dispatches: {error}
+        </div>
+      )}
       <div style={{ display: 'flex', gap: 4, marginBottom: 14, borderBottom: `1px solid ${line}` }}>
         {tabs.map(t => {
           const n = (groups[t.id] === null ? dispatches : dispatches.filter(d => groups[t.id].includes(d.status))).length;
@@ -1515,12 +1569,13 @@ const LabDispatchList = ({ dispatches, wips, navigate, defaultTab = 'active' }) 
             <div style={{ fontSize: 14, fontWeight: 600, color: text2 }}>No dispatches</div>
           </Card>
         ) : filtered.map(d => {
-          const wip = findWip(d.wipId, wips);
-          const eqId = d.equipmentId || wip?.equipmentId;
-          const exp = findExp(d.experimentId);
+          // No `started_at` on the backend yet — fall back to `dispatchedAt`
+          // for the elapsed-since clock on running rows. Backend §2.7 still
+          // open (Recipe.estimated_duration_minutes is the planned source
+          // of the total-window number; we use 24h as a placeholder).
           let pct = 0, remainLabel = null;
-          if (d.status === 'running' && d.startedAt) {
-            const start = new Date(d.startedAt.replace(' ', 'T')).getTime();
+          if (d.status === 'running' && d.dispatchedAt) {
+            const start = new Date(d.dispatchedAt.replace(' ', 'T')).getTime();
             const elapsed = Math.max(0, Date.now() - start);
             const total = 24 * 60 * 60 * 1000;
             pct = Math.max(4, Math.min(96, (elapsed / total) * 100));
@@ -1529,6 +1584,9 @@ const LabDispatchList = ({ dispatches, wips, navigate, defaultTab = 'active' }) 
             const m = Math.floor((remain % 3600000) / 60000);
             remainLabel = `~${h}h ${String(m).padStart(2,'0')}m remaining`;
           }
+          // Experiment chip uses initials when the local string-slug catalogue
+          // can't match the integer id (same pattern as Lab WIP list).
+          const expCode = (findExp(d.experimentId)?.code) || (d.experimentName ? d.experimentName.split(/\s+/).map(t => t[0]).join('').slice(0, 4).toUpperCase() : '—');
           return (
             <button key={d.id} onClick={() => navigate({ page: 'lab_dispatch_detail', id: d.id })} style={{
               display: 'block', width: '100%',
@@ -1546,26 +1604,26 @@ const LabDispatchList = ({ dispatches, wips, navigate, defaultTab = 'active' }) 
                 gridTemplateColumns: '100px minmax(0,1fr) 130px 130px 140px 24px',
                 alignItems: 'center', gap: 18,
               }}>
-                <span style={{ fontFamily: 'var(--font-mono)', fontSize: 13.5, fontWeight: 700, color: ink, letterSpacing: '0.02em' }}>{d.id}</span>
+                <span style={{ fontFamily: 'var(--font-mono)', fontSize: 13.5, fontWeight: 700, color: ink, letterSpacing: '0.02em' }}>{d.code}</span>
                 <div style={{ minWidth: 0, display: 'inline-flex', alignItems: 'center', gap: 10 }}>
                   <span style={{
                     fontSize: 10.5, fontWeight: 700, padding: '3px 8px', borderRadius: 999,
                     background: '#ecebf3', color: '#4f4a8f', letterSpacing: '0.05em', flexShrink: 0,
-                  }}>{exp?.code}</span>
+                  }}>{expCode}</span>
                   <div style={{ minWidth: 0 }}>
-                    <div style={{ fontSize: 14.5, fontWeight: 700, color: ink, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{exp?.name}</div>
-                    <div style={{ fontSize: 12, color: muted, marginTop: 3, fontFamily: 'var(--font-mono)' }}>{d.wipId}</div>
+                    <div style={{ fontSize: 14.5, fontWeight: 700, color: ink, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{d.experimentName || '—'}</div>
+                    <div style={{ fontSize: 12, color: muted, marginTop: 3, fontFamily: 'var(--font-mono)' }}>{`WIP-${String(d.wipId).padStart(4,'0')}`}</div>
                   </div>
                 </div>
                 <span style={{ fontFamily: 'var(--font-mono)', fontSize: 12.5, color: text2, display: 'inline-flex', alignItems: 'center', gap: 6 }}>
                   <LF.User size={12} color={muted}/>
                   {d.operator || '—'}
                 </span>
-                <span style={{ fontFamily: 'var(--font-mono)', fontSize: 12.5, color: text2 }}>{eqId || '—'}</span>
+                <span style={{ fontFamily: 'var(--font-mono)', fontSize: 12.5, color: text2 }}>{d.equipmentName || '—'}</span>
                 <span><Pill kind={d.status} dotted={d.status === 'running'}/></span>
                 <LF.ChevronRight size={15} color="#cbcbd6"/>
               </div>
-              {d.status === 'running' && (
+              {d.status === 'running' && d.dispatchedAt && (
                 <div style={{ marginTop: 14, paddingTop: 14, borderTop: `1px solid ${lineSoft}` }}>
                   <div style={{
                     display: 'flex', alignItems: 'center', justifyContent: 'space-between',
@@ -1576,7 +1634,7 @@ const LabDispatchList = ({ dispatches, wips, navigate, defaultTab = 'active' }) 
                         width: 6, height: 6, borderRadius: 999, background: '#f4a8bf',
                         animation: 'pulse 1.4s ease-in-out infinite',
                       }}/>
-                      Running · started <span style={{ fontFamily: 'var(--font-mono)', color: ink }}>{d.startedAt?.split(' ')[1]}</span>
+                      Running · dispatched <span style={{ fontFamily: 'var(--font-mono)', color: ink }}>{d.dispatchedAt.split(' ')[1]}</span>
                     </span>
                     <span style={{ fontFamily: 'var(--font-mono)', color: accent }}>{remainLabel}</span>
                   </div>
@@ -2290,7 +2348,7 @@ const LabApp = ({ route, navigate, canManage = false }) => {
   else if (p === 'lab_wip_detail')
     page = <LabWipDetail id={route.id} navigate={navigate} showToast={showToast}/>;
   else if (p === 'lab_dispatches' || p === 'dispatches')
-    page = <LabDispatchList dispatches={dispatches} wips={wips} navigate={navigate} defaultTab={route.tab || 'active'}/>;
+    page = <LabDispatchList navigate={navigate} defaultTab={route.tab || 'active'}/>;
   else if (p === 'lab_dispatch_detail')
     page = <LabDispatchDetail id={route.id} dispatches={dispatches} wips={wips} navigate={navigate}
       onAdvance={advanceDispatch} onAbort={abortDispatch} onException={exceptionDispatch} onRecord={recordResult}/>;
