@@ -32,6 +32,8 @@ class DispatchBriefOut(Schema):
     id: int
     experiment_type_id: int
     experiment_type_name: str
+    equipment_id: int
+    equipment_name: str
     recipe_id: int
     recipe_name: str
     status: str
@@ -167,6 +169,8 @@ class WIPDetailOut(Schema):
                     "id": d.pk,
                     "experiment_type_id": d.experiment_type_id,
                     "experiment_type_name": d.experiment_type.name,
+                    "equipment_id": d.equipment_id,
+                    "equipment_name": d.equipment.name,
                     "recipe_id": d.recipe_id,
                     "recipe_name": d.recipe.name,
                     "status": d.status,

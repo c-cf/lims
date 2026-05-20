@@ -307,6 +307,18 @@ class TestWIPDetail:
         resp = client.get(f"/api/wips/{wip.pk}/", **auth_headers(fab_user))
         assert resp.status_code == 403
 
+    def test_wip_detail_nested_dispatch_includes_equipment(
+        self, client, auth_headers, lab_staff, wip_in_progress, dispatch
+    ):
+        """Nested dispatches in WIPDetailOut expose equipment_id + name so
+        the SPA's WIP detail page can render per-dispatch equipment without
+        a second round-trip per dispatch."""
+        resp = client.get(f"/api/wips/{wip_in_progress.pk}/", **auth_headers(lab_staff))
+        assert resp.status_code == 200
+        nested = resp.json()["dispatches"][0]
+        assert nested["equipment_id"] == dispatch.equipment_id
+        assert nested["equipment_name"] == dispatch.equipment.name
+
 
 @pytest.mark.django_db
 class TestWIPCreateDispatch:

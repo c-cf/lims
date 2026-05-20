@@ -63,7 +63,7 @@ def _wip_detail_queryset() -> "models.QuerySet[WIP]":
         Prefetch(
             "dispatches",
             queryset=Dispatch.objects.select_related(
-                "experiment_type", "recipe"
+                "experiment_type", "equipment", "recipe"
             ).order_by("created_at"),
         ),
     )
