@@ -62,6 +62,49 @@ const WIP_SEED = [
   { id: 'WIP-7698', equipmentId: 'QA-TCT-02',  experimentId: 'tct',  waferIds: ['W040701'],            note: '',                     status: 'completed',   createdAt: '2026-05-08 10:00', dispatchIds: ['DP-3300'] },
 ];
 
+// One-shot data fetch for the WIP-creation modal. Pulls the four pieces
+// of context the modal needs in parallel, then resolves per-request
+// `experiment_type_ids` for the eligibility filter (RequestListOut
+// doesn't carry experiment types — gap §3.7 follow-up; until then the
+// modal does an N-fetch over received samples' parent requests).
+const useWipCreationData = () => {
+  const [experimentTypes, setExperimentTypes] = lS([]);
+  const [samples, setSamples] = lS([]);
+  const [equipment, setEquipment] = lS([]);
+  const [requestExpMap, setRequestExpMap] = lS(new Map());
+  const [loading, setLoading] = lS(true);
+  const [error, setError] = lS(null);
+
+  React.useEffect(() => {
+    if (!window.api) { setLoading(false); return; }
+    setLoading(true);
+    Promise.all([
+      window.api.experimentTypes.list(),
+      window.api.samples.list(),
+      window.api.equipment.list(),
+    ])
+      .then(async ([exps, allSamples, equip]) => {
+        // Coarse filter: received at the lab + not yet on a non-terminal WIP.
+        const eligible = allSamples.filter(s => s.raw_status === 'received' && !s.hasWip);
+        const reqIds = Array.from(new Set(eligible.map(s => s.requestId)));
+        const reqDetails = await Promise.all(
+          reqIds.map(id => window.api.requests.get(id).catch(() => null))
+        );
+        const map = new Map();
+        reqDetails.forEach(r => { if (r) map.set(r.id, r.expIds || []); });
+        setExperimentTypes(exps);
+        setSamples(eligible);
+        setEquipment(equip);
+        setRequestExpMap(map);
+        setError(null);
+      })
+      .catch(err => setError(err.message || String(err)))
+      .finally(() => setLoading(false));
+  }, []);
+
+  return { experimentTypes, samples, equipment, requestExpMap, loading, error };
+};
+
 // Live experiment-types catalogue. Both the equipment modal and the
 // WIP-creation modal need this; the fab.jsx version lives behind its
 // own IIFE so we keep an independent copy here.
@@ -1248,19 +1291,22 @@ const LabWaferDetail = ({ id, wafers, wips, dispatches, navigate, onReceive, onR
 
 // ── WIP list ────────────────────────────────────────────────────
 const LabWipList = ({ navigate, showToast }) => {
-  const { wips, loading, error } = useLabWips();
+  const { wips, loading, error, refresh } = useLabWips();
   const [tab, setTab] = lS('active');
+  const [modalOpen, setModalOpen] = lS(false);
   const filtered = tab === 'active'
     ? wips.filter(w => w.status === 'in_progress')
     : tab === 'completed'
       ? wips.filter(w => w.status !== 'in_progress')
       : wips;
 
-  // The new-WIP modal is one of the three redesigned modals waiting on
-  // spec signoff (see CLAUDE.local.md). Until then the button just
-  // surfaces a toast so the entry point stays visible.
-  const handleNewWip = () => {
-    showToast && showToast('Modal redesign pending');
+  const openModal = () => setModalOpen(true);
+  const closeModal = () => setModalOpen(false);
+  const onSaved = (newWip) => {
+    closeModal();
+    showToast && showToast(`${newWip.code} created`);
+    refresh();
+    if (newWip?.id != null) navigate({ page: 'lab_wip_detail', id: newWip.id });
   };
 
   if (loading && wips.length === 0) {
@@ -1277,7 +1323,7 @@ const LabWipList = ({ navigate, showToast }) => {
     <Page
       title="WIP"
       subtitle="Work-in-progress units — each WIP runs one experiment on one piece of equipment"
-      right={<PrimaryBtn icon={<LF.Plus size={14}/>} onClick={handleNewWip}>New WIP</PrimaryBtn>}
+      right={<PrimaryBtn icon={<LF.Plus size={14}/>} onClick={openModal}>New WIP</PrimaryBtn>}
     >
       {error && (
         <div style={{
@@ -1371,11 +1417,172 @@ const LabWipList = ({ navigate, showToast }) => {
           );
         })}
       </div>
+
+      <WipCreationModal open={modalOpen} onClose={closeModal} onSaved={onSaved}/>
     </Page>
   );
 };
 
-// ── WIP detail ──────────────────────────────────────────────────
+// ── WIP creation modal (chat-design v2 shape) ───────────────────
+// Picks experiment_type + a batch of received samples whose parent
+// request includes that experiment + an optional note. The batch cap
+// equals the largest capable equipment's `capacity` — gives the user
+// the room to fill the biggest available chamber, but no further.
+// (See CLAUDE.local.md for the design pivot story.)
+const WipCreationModal = ({ open, onClose, onSaved }) => {
+  if (!open) return null;
+  return <WipCreationModalInner onClose={onClose} onSaved={onSaved}/>;
+};
+const WipCreationModalInner = ({ onClose, onSaved }) => {
+  const { experimentTypes, samples, equipment, requestExpMap, loading, error: loadError } = useWipCreationData();
+  const [experimentTypeId, setExperimentTypeId] = lS('');
+  const [selectedSampleIds, setSelectedSampleIds] = lS([]);
+  const [note, setNote] = lS('');
+  const [busy, setBusy] = lS(false);
+  const [submitErr, setSubmitErr] = lS(null);
+
+  // Samples whose parent request actually needs the chosen experiment.
+  const eligibleSamples = experimentTypeId
+    ? samples.filter(s => (requestExpMap.get(s.requestId) || []).includes(experimentTypeId))
+    : [];
+
+  // Selection cap = max(capacity) across capable equipment (every status,
+  // not just idle — per the user spec, maintenance/disabled still counts
+  // toward planning).
+  const capableEquipment = equipment.filter(e =>
+    (e.capabilities || []).some(c => c.id === experimentTypeId)
+  );
+  const maxBatch = capableEquipment.reduce((m, e) => Math.max(m, e.capacity || 0), 0);
+  const biggest = capableEquipment.reduce(
+    (best, e) => (e.capacity || 0) > (best?.capacity || 0) ? e : best,
+    null,
+  );
+
+  // Drop selections that aren't in the eligible set (e.g. when switching
+  // experiment_type the previous picks may stop matching).
+  React.useEffect(() => {
+    const set = new Set(eligibleSamples.map(s => s.id));
+    setSelectedSampleIds(prev => prev.filter(id => set.has(id)));
+  // eslint-disable-next-line — depend on experiment_type only
+  }, [experimentTypeId]);
+
+  const toggleSample = (id) => {
+    setSelectedSampleIds(prev => {
+      if (prev.includes(id)) return prev.filter(x => x !== id);
+      if (maxBatch && prev.length >= maxBatch) return prev;
+      return [...prev, id];
+    });
+  };
+
+  const valid = !!experimentTypeId && selectedSampleIds.length > 0 && !loading;
+  const submit = async () => {
+    setBusy(true); setSubmitErr(null);
+    try {
+      const created = await window.api.wips.create({
+        experimentTypeId,
+        sampleIds: selectedSampleIds,
+        note: note.trim(),
+      });
+      onSaved && onSaved(created);
+    } catch (e) {
+      setSubmitErr(e.message || String(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <Modal
+      open={true}
+      onClose={onClose}
+      title="New WIP"
+      width={680}
+      footer={<>
+        <SecondaryBtn onClick={onClose} disabled={busy}>Cancel</SecondaryBtn>
+        <PrimaryBtn disabled={!valid || busy} onClick={submit}>
+          {busy ? 'Creating…' : 'Create WIP'}
+        </PrimaryBtn>
+      </>}
+    >
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+        {(loadError || submitErr) && (
+          <div style={{
+            padding: '10px 12px', borderRadius: 8,
+            background: '#fde4e4', color: '#c0394a', fontSize: 13, fontWeight: 500,
+            border: '1px solid #f6c4c4',
+          }}>{loadError || submitErr}</div>
+        )}
+        {loading && (
+          <div style={{ padding: '20px 12px', textAlign: 'center', color: muted, fontSize: 13 }}>Loading…</div>
+        )}
+        <div>
+          <FieldLabel required>Experiment Type</FieldLabel>
+          <SelectInput
+            value={experimentTypeId === '' ? '' : String(experimentTypeId)}
+            onChange={(e) => setExperimentTypeId(e.target.value ? Number(e.target.value) : '')}
+          >
+            <option value="">— pick an experiment type —</option>
+            {experimentTypes.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
+          </SelectInput>
+        </div>
+        <div>
+          <FieldLabel required>Wafers</FieldLabel>
+          {!experimentTypeId ? (
+            <div style={{
+              padding: '14px 16px', borderRadius: 8,
+              border: `1px dashed ${line}`, background: bgSoft,
+              color: muted, fontSize: 13, textAlign: 'center',
+            }}>Pick an experiment type to see eligible wafers.</div>
+          ) : (
+            <>
+              <div style={{ fontSize: 12.5, color: text2, marginBottom: 8 }}>
+                {biggest
+                  ? <>Max <strong style={{ color: ink, fontFamily: 'var(--font-mono)' }}>{maxBatch}</strong> wafers — largest capable equipment is <strong style={{ color: ink, fontFamily: 'var(--font-mono)' }}>{biggest.name}</strong> (capacity {maxBatch}).</>
+                  : <span style={{ color: '#a93445' }}>No equipment can run this experiment yet.</span>
+                }
+              </div>
+              <div style={{
+                border: `1px solid ${line}`, borderRadius: 8,
+                maxHeight: 240, overflow: 'auto',
+              }}>
+                {eligibleSamples.length === 0 ? (
+                  <div style={{ padding: '14px 16px', color: muted, fontSize: 13, textAlign: 'center' }}>
+                    No received wafers whose request needs this experiment.
+                  </div>
+                ) : eligibleSamples.map(s => {
+                  const checked = selectedSampleIds.includes(s.id);
+                  const atCap = maxBatch > 0 && selectedSampleIds.length >= maxBatch && !checked;
+                  return (
+                    <label key={s.id} style={{
+                      display: 'grid', gridTemplateColumns: '20px 1fr auto', gap: 10,
+                      alignItems: 'center', padding: '10px 14px',
+                      borderTop: `1px solid ${lineSoft}`,
+                      cursor: atCap ? 'not-allowed' : 'pointer',
+                      background: checked ? '#f7f6fb' : '#fff',
+                      opacity: atCap ? 0.5 : 1,
+                    }}>
+                      <input type="checkbox" checked={checked} disabled={atCap || maxBatch === 0}
+                        onChange={() => toggleSample(s.id)} style={{ accentColor: accent }}/>
+                      <span style={{ fontFamily: 'var(--font-mono)', fontSize: 13, fontWeight: 600, color: ink }}>{s.wafer}</span>
+                      <span style={{ fontSize: 12, color: muted, whiteSpace: 'nowrap' }}>{s.size} · Req #{String(s.requestId).padStart(4,'0')}</span>
+                    </label>
+                  );
+                })}
+              </div>
+              <div style={{ fontSize: 12, color: muted, marginTop: 6 }}>
+                {selectedSampleIds.length} / {maxBatch || '—'} selected
+              </div>
+            </>
+          )}
+        </div>
+        <div>
+          <FieldLabel>Note (optional)</FieldLabel>
+          <TextArea value={note} onChange={(e) => setNote(e.target.value)} placeholder="Anything the operator should know."/>
+        </div>
+      </div>
+    </Modal>
+  );
+};
 const LabWipDetail = ({ id, navigate, showToast }) => {
   const { wip: w, loading, error, refresh } = useLabWipDetail(id);
   const [busy, setBusy] = lS(false);
@@ -2634,7 +2841,8 @@ const LabApp = ({ route, navigate, canManage = false }) => {
   const [dispatches, setDispatches] = lS(DISPATCH_SEED);
   const [equipment, setEquipment] = lS(EQUIPMENT_SEED);
   const [toast, setToast] = lS(null);
-  const [newWipOpen, setNewWipOpen] = lS(false);
+  // Legacy NewWipModal open-state is gone; WIP creation lives inside
+  // LabWipList (WipCreationModal) and posts to the live API directly.
 
   const showToast = (msg) => {
     setToast({ msg, t: Date.now() });
@@ -2658,17 +2866,8 @@ const LabApp = ({ route, navigate, canManage = false }) => {
     showToast(`${id} rejected`);
   };
 
-  const createWip = ({ waferIds, experimentId, note }) => {
-    const id = nextId('WIP-', wips);
-    // Equipment is assigned per-dispatch, not at WIP creation. Leave equipmentId
-    // unset until the first dispatch picks one.
-    const wip = { id, equipmentId: null, experimentId, waferIds, note, status: 'in_progress', createdAt: now(), dispatchIds: [] };
-    setWips(ws => [wip, ...ws]);
-    setWafers(ws => ws.map(w => waferIds.includes(w.id) ? { ...w, status: 'in_wip', wipId: id } : w));
-    showToast(`${id} created`);
-    setNewWipOpen(false);
-    navigate({ page: 'lab_wip_detail', id });
-  };
+  // Legacy seed-based createWip removed — WipCreationModal posts to
+  // /wips/ directly and triggers a list refetch.
 
   const onCompleteWip = (id) => {
     const wip = findWip(id, wips);
@@ -2751,13 +2950,8 @@ const LabApp = ({ route, navigate, canManage = false }) => {
   return (
     <>
       {page}
-      <NewWipModal
-        open={newWipOpen}
-        onClose={() => setNewWipOpen(false)}
-        wafers={wafers}
-        onSubmit={createWip}
-      />
-      {/* EquipmentModal lives inside LabEquipment now (live API path). */}
+      {/* WipCreationModal lives inside LabWipList; EquipmentModal lives
+          inside LabEquipment. Both POST to the live API directly. */}
       {toast && (
         <div style={{
           position: 'fixed', bottom: 28, left: '50%', transform: 'translateX(-50%)',
