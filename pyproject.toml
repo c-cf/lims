@@ -13,6 +13,7 @@ dependencies = [
     "django-unfold>=0.86.1",
     "whitenoise>=6.12,<7",
     "PyJWT>=2.9.0",
+    "django-cors-headers>=4.6.0",
 ]
 
 [dependency-groups]
