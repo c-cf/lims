@@ -281,6 +281,39 @@ class SampleExperimentStatusOut(Schema):
     dispatch_id: int | None
 
 
+class ExperimentResultBrief(Schema):
+    """Result summary nested in the sample experiments rollup."""
+
+    id: int
+    summary: str
+    verdict: str
+    data: dict[str, Any]
+    data_source: str
+    created_at: datetime
+
+
+class ExperimentTypeBrief(Schema):
+    """Experiment type summary nested in the rollup."""
+
+    id: int
+    name: str
+
+
+class SampleExperimentRollupOut(Schema):
+    """One row of the per-sample experiments rollup.
+
+    Status semantics (computed server-side from the sample's dispatches):
+      - "done": the latest dispatch for this experiment_type is COMPLETED
+      - "in_progress": at least one non-terminal dispatch exists
+      - "pending": no dispatch has been created yet
+    """
+
+    experiment_type: ExperimentTypeBrief
+    status: str
+    dispatch_id: int | None
+    result: ExperimentResultBrief | None
+
+
 class SampleListOut(Schema):
     """Output schema for sample list responses."""
 

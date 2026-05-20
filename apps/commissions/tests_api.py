@@ -738,6 +738,132 @@ class TestSampleList:
 
 
 @pytest.mark.django_db
+class TestSampleExperimentsRollup:
+    """GET /samples/:id/experiments — INTEGRATION_GAPS §2.8 resolution A."""
+
+    URL_TEMPLATE = "/api/samples/{}/experiments"
+
+    def _setup_sample_with_experiments(self):
+        """Build a sample whose request requires three experiment types
+        and return (sample, et_pending, et_in_progress, et_done, equipment,
+        recipe_factory_args). Each test wires its own dispatch state."""
+        from apps.equipment.factories import EquipmentFactory, RecipeFactory
+        from apps.equipment.models import EquipmentCapability
+        from apps.experiments.factories import ExperimentTypeFactory
+        from apps.wip.factories import WIPFactory
+        from apps.wip.models import WIPSample, WIPStatus
+
+        et_pending = ExperimentTypeFactory(name="ET-PENDING")
+        et_in_progress = ExperimentTypeFactory(name="ET-IN-PROGRESS")
+        et_done = ExperimentTypeFactory(name="ET-DONE")
+
+        req = RequestFactory(status=RequestStatus.IN_PROGRESS)
+        for et in (et_pending, et_in_progress, et_done):
+            RequestExperiment.objects.create(request=req, experiment_type=et)
+        sample = SampleFactory(request=req, status=SampleStatus.PROCESSING)
+
+        equipment = EquipmentFactory()
+        for et in (et_pending, et_in_progress, et_done):
+            EquipmentCapability.objects.create(equipment=equipment, experiment_type=et)
+
+        # Build a WIP for the in-progress experiment.
+        wip_in_progress = WIPFactory(
+            experiment_type=et_in_progress, status=WIPStatus.IN_PROGRESS
+        )
+        WIPSample.objects.create(wip=wip_in_progress, sample=sample)
+
+        # And another WIP for the done experiment.
+        wip_done = WIPFactory(experiment_type=et_done, status=WIPStatus.IN_PROGRESS)
+        WIPSample.objects.create(wip=wip_done, sample=sample)
+
+        recipes = {
+            "in_progress": RecipeFactory(experiment_type=et_in_progress),
+            "done": RecipeFactory(experiment_type=et_done),
+        }
+
+        return {
+            "sample": sample,
+            "et_pending": et_pending,
+            "et_in_progress": et_in_progress,
+            "et_done": et_done,
+            "equipment": equipment,
+            "wip_in_progress": wip_in_progress,
+            "wip_done": wip_done,
+            "recipes": recipes,
+        }
+
+    def test_pending_in_progress_done(self, client, auth_headers, lab_staff):
+        """One sample exercises all three states in a single response."""
+        from apps.wip.factories import DispatchFactory, ExperimentResultFactory
+        from apps.wip.models import DispatchStatus, ExperimentResult
+
+        ctx = self._setup_sample_with_experiments()
+        sample = ctx["sample"]
+
+        # in-progress: dispatch in RUNNING
+        DispatchFactory(
+            wip=ctx["wip_in_progress"],
+            experiment_type=ctx["et_in_progress"],
+            equipment=ctx["equipment"],
+            recipe=ctx["recipes"]["in_progress"],
+            status=DispatchStatus.RUNNING,
+        )
+        # done: dispatch COMPLETED with a result
+        done_dispatch = DispatchFactory(
+            wip=ctx["wip_done"],
+            experiment_type=ctx["et_done"],
+            equipment=ctx["equipment"],
+            recipe=ctx["recipes"]["done"],
+            status=DispatchStatus.COMPLETED,
+        )
+        ExperimentResultFactory(
+            dispatch=done_dispatch,
+            verdict=ExperimentResult.Verdict.PASS,
+            summary="OK",
+        )
+
+        resp = client.get(
+            self.URL_TEMPLATE.format(sample.pk), **auth_headers(lab_staff)
+        )
+        assert resp.status_code == 200
+        rows = {row["experiment_type"]["name"]: row for row in resp.json()}
+
+        assert rows["ET-PENDING"]["status"] == "pending"
+        assert rows["ET-PENDING"]["dispatch_id"] is None
+        assert rows["ET-PENDING"]["result"] is None
+
+        assert rows["ET-IN-PROGRESS"]["status"] == "in_progress"
+        assert rows["ET-IN-PROGRESS"]["dispatch_id"] is not None
+        assert rows["ET-IN-PROGRESS"]["result"] is None
+
+        assert rows["ET-DONE"]["status"] == "done"
+        assert rows["ET-DONE"]["dispatch_id"] == done_dispatch.pk
+        assert rows["ET-DONE"]["result"]["verdict"] == "pass"
+        assert rows["ET-DONE"]["result"]["summary"] == "OK"
+
+    def test_not_found(self, client, auth_headers, lab_staff):
+        resp = client.get(self.URL_TEMPLATE.format(99999), **auth_headers(lab_staff))
+        assert resp.status_code == 404
+
+    def test_fab_user_cannot_see_other_users_sample(
+        self, client, auth_headers, fab_user
+    ):
+        """Fab user only sees their own request's samples."""
+        from apps.experiments.factories import ExperimentTypeFactory
+
+        other_req = RequestFactory()  # not fab_user
+        RequestExperiment.objects.create(
+            request=other_req, experiment_type=ExperimentTypeFactory()
+        )
+        other_sample = SampleFactory(request=other_req)
+
+        resp = client.get(
+            self.URL_TEMPLATE.format(other_sample.pk), **auth_headers(fab_user)
+        )
+        assert resp.status_code == 404
+
+
+@pytest.mark.django_db
 class TestSampleDetail:
     def test_get_sample_detail(self, client, auth_headers, lab_staff):
         """Get sample detail includes request info."""

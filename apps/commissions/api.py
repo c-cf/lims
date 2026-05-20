@@ -31,6 +31,7 @@ from apps.commissions.schemas import (
     RequestListOut,
     RequestUpdateIn,
     SampleDetailOut,
+    SampleExperimentRollupOut,
     SampleExperimentStatusOut,
     SampleListOut,
 )
@@ -606,6 +607,95 @@ def get_sample(request: HttpRequest, sample_id: int):
         return 404, {"detail": "Not found"}
 
     return 200, SampleDetailOut.from_sample(sample)
+
+
+@sample_router.get(
+    "/{sample_id}/experiments",
+    response={200: list[SampleExperimentRollupOut], 404: ErrorOut},
+)
+def sample_experiments(request: HttpRequest, sample_id: int):
+    """Per-experiment-type rollup for one sample's wafer detail page.
+
+    For each experiment_type required by the sample's parent request,
+    inspects dispatches across this sample's WIPs and returns the
+    status, dispatch_id, and (when done) the result. INTEGRATION_GAPS
+    §2.8 resolution A — saves the SPA three extra requests per wafer
+    detail open.
+    """
+    # Lazy imports to avoid a top-of-file circular dep: apps.wip
+    # already imports from apps.commissions for state-machine helpers.
+    from apps.wip.models import Dispatch, DispatchStatus
+
+    sample = _get_sample_for_user(sample_id, request)
+    if sample is None:
+        return 404, {"detail": "Not found"}
+
+    request_experiments = sample.request.request_experiments.select_related(
+        "experiment_type"
+    ).order_by("experiment_type__name")
+
+    sample_wip_ids = list(sample.wips.values_list("pk", flat=True))
+    dispatches_by_et: dict[int, list[Dispatch]] = {}
+    if sample_wip_ids:
+        dispatch_qs = (
+            Dispatch.objects.filter(wip_id__in=sample_wip_ids)
+            .select_related("result")
+            .order_by("experiment_type_id", "-created_at")
+        )
+        for d in dispatch_qs:
+            dispatches_by_et.setdefault(d.experiment_type_id, []).append(d)
+
+    rows = []
+    for re in request_experiments:
+        et = re.experiment_type
+        dispatches = dispatches_by_et.get(et.pk, [])
+
+        status = "pending"
+        dispatch_id: int | None = None
+        result_payload: dict | None = None
+
+        if dispatches:
+            # dispatches are ordered newest-first within each ET group.
+            completed = next(
+                (d for d in dispatches if d.status == DispatchStatus.COMPLETED),
+                None,
+            )
+            if completed is not None and hasattr(completed, "result"):
+                status = "done"
+                dispatch_id = completed.pk
+                r = completed.result
+                result_payload = {
+                    "id": r.pk,
+                    "summary": r.summary,
+                    "verdict": r.verdict,
+                    "data": r.data,
+                    "data_source": r.data_source,
+                    "created_at": r.created_at,
+                }
+            else:
+                non_terminal = {
+                    DispatchStatus.PENDING,
+                    DispatchStatus.DISPATCHED,
+                    DispatchStatus.RUNNING,
+                    DispatchStatus.EXECUTION_EXCEPTION,
+                    DispatchStatus.UNLOADED,
+                    DispatchStatus.RESULT_RECORDED,
+                }
+                active = next((d for d in dispatches if d.status in non_terminal), None)
+                if active is not None:
+                    status = "in_progress"
+                    dispatch_id = active.pk
+
+        rows.append(
+            {
+                "experiment_type": {"id": et.pk, "name": et.name},
+                "status": status,
+                "dispatch_id": dispatch_id,
+                "result": result_payload,
+            }
+        )
+
+    return 200, rows
 
 
 @sample_router.post(
