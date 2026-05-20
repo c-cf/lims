@@ -1,16 +1,22 @@
 """Django Ninja routers for reports endpoints (equipment utilization, request statistics)."""
 
-from datetime import date
+from datetime import date, timedelta
 
 from django.db.models import Count
+from django.db.models.functions import TruncDate
 from django.http import HttpRequest
+from django.utils import timezone
 from ninja import Query, Router
 
 from api.schemas import ErrorOut
 from apps.accounts.auth import JWTAuth
 from apps.accounts.models import Role, UserProfile
 from apps.commissions.models import Request, RequestStatus
-from apps.reports.schemas import EquipmentUtilizationOut, RequestStatisticsOut
+from apps.reports.schemas import (
+    EquipmentUtilizationOut,
+    RequestStatisticsOut,
+    TrendsOut,
+)
 from apps.wip.models import Dispatch
 
 router = Router(tags=["Reports"], auth=JWTAuth())
@@ -132,3 +138,48 @@ def request_statistics(
         "average_tat_hours": avg_tat_hours,
         "total_requests": total_requests,
     }
+
+
+# Trend metrics — extend this set as more series are added.
+_TREND_METRICS = {"requests_per_day"}
+
+
+@router.get("/trends", response={200: TrendsOut, 400: ErrorOut, 403: ErrorOut})
+def trends(
+    request: HttpRequest,
+    metric: str = Query(...),  # noqa: B008
+    days: int = Query(30, ge=1, le=365),  # noqa: B008
+):
+    """Return a per-day count series for the requested metric.
+
+    INTEGRATION_GAPS §4: backs the lab manager dashboard trend chart.
+    Currently only ``requests_per_day`` (Request rows grouped by
+    created_at::date) is supported; the metric set is centralised in
+    _TREND_METRICS so adding new series is one-line.
+
+    Zero-fills days with no rows so the SPA can plot a continuous
+    series of length ``days`` without client-side gap filling.
+    """
+    if not _is_lab_manager(request):
+        return 403, {"detail": "Permission denied"}
+
+    if metric not in _TREND_METRICS:
+        return 400, {"detail": f"Unknown metric '{metric}'"}
+
+    end_day = timezone.now().date()
+    start_day = end_day - timedelta(days=days - 1)
+
+    rows = (
+        Request.objects.filter(created_at__date__gte=start_day)
+        .annotate(day=TruncDate("created_at"))
+        .values("day")
+        .annotate(count=Count("id"))
+    )
+    counts_by_day = {row["day"]: row["count"] for row in rows}
+
+    points = []
+    for offset in range(days):
+        d = start_day + timedelta(days=offset)
+        points.append({"date": d.isoformat(), "count": counts_by_day.get(d, 0)})
+
+    return 200, {"metric": metric, "days": days, "points": points}
