@@ -66,6 +66,10 @@ class Recipe(models.Model):
         on_delete=models.CASCADE,
         related_name="recipes",
     )
+    # Nullable so the SPA can fall back to a hardcoded default (24h)
+    # when a recipe hasn't been measured yet; non-null would force
+    # backfilling every legacy recipe.
+    estimated_duration_minutes = models.PositiveIntegerField(null=True, blank=True)
     is_active = models.BooleanField(default=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)

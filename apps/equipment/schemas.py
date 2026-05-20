@@ -104,6 +104,7 @@ class RecipeIn(Schema):
     description: str = ""
     experiment_type_id: int
     parameters: dict[str, Any] = {}
+    estimated_duration_minutes: int | None = Field(None, gt=0)
 
 
 class RecipeUpdate(Schema):
@@ -115,6 +116,7 @@ class RecipeUpdate(Schema):
     name: str | None = Field(None, min_length=1, max_length=200)
     description: str | None = None
     parameters: dict[str, Any] | None = None
+    estimated_duration_minutes: int | None = Field(None, gt=0)
 
 
 class RecipeOut(Schema):
@@ -125,6 +127,7 @@ class RecipeOut(Schema):
     description: str
     experiment_type: RecipeExperimentTypeOut
     parameters: dict[str, Any]
+    estimated_duration_minutes: int | None
     is_active: bool
     created_at: datetime
     updated_at: datetime
@@ -141,6 +144,7 @@ class RecipeOut(Schema):
                 "name": recipe.experiment_type.name,
             },
             "parameters": recipe.parameters,
+            "estimated_duration_minutes": recipe.estimated_duration_minutes,
             "is_active": recipe.is_active,
             "created_at": recipe.created_at,
             "updated_at": recipe.updated_at,
