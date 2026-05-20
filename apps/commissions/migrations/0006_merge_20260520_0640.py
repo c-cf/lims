@@ -4,11 +4,9 @@ from django.db import migrations
 
 
 class Migration(migrations.Migration):
-
     dependencies = [
-        ('commissions', '0004_alter_sample_status'),
-        ('commissions', '0005_sample_received_at'),
+        ("commissions", "0004_alter_sample_status"),
+        ("commissions", "0005_sample_received_at"),
     ]
 
-    operations = [
-    ]
+    operations = []

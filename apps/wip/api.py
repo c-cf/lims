@@ -76,7 +76,7 @@ def _dispatch_detail_queryset() -> "models.QuerySet[Dispatch]":
     can render the operator's department without an extra query.
     """
     return Dispatch.objects.select_related(
-"experiment_type", "recipe", "wip__equipment", "created_by__profile"
+        "experiment_type", "recipe", "wip__equipment", "created_by__profile"
     ).prefetch_related("result")
 
 
