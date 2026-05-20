@@ -62,6 +62,26 @@ const WIP_SEED = [
   { id: 'WIP-7698', equipmentId: 'QA-TCT-02',  experimentId: 'tct',  waferIds: ['W040701'],            note: '',                     status: 'completed',   createdAt: '2026-05-08 10:00', dispatchIds: ['DP-3300'] },
 ];
 
+// Live equipment list. `normalizeEquipment` already maps backend status
+// `available → idle` and `disabled → maintenance` (gap §3.4); the gap
+// doc also notes that a `running` state is computed client-side from
+// the dispatches list — not in scope for this commit.
+const useLabEquipment = () => {
+  const [equipment, setEquipment] = lS([]);
+  const [loading, setLoading] = lS(true);
+  const [error, setError] = lS(null);
+  const refresh = React.useCallback(() => {
+    if (!window.api || !window.api.equipment) { setLoading(false); return; }
+    setLoading(true);
+    window.api.equipment.list()
+      .then(es => { setEquipment(es); setError(null); })
+      .catch(err => setError(err.message || String(err)))
+      .finally(() => setLoading(false));
+  }, []);
+  React.useEffect(() => { refresh(); }, [refresh]);
+  return { equipment, loading, error, refresh };
+};
+
 // Live dispatch detail. `api.dispatches.get(id)` returns
 // experimentName/equipmentName/recipeName inline, but recipe parameters
 // are not on the response — co-fetch `recipes.list()` so the Recipe
@@ -2100,82 +2120,146 @@ const NewWipModal = ({ open, onClose, wafers, onSubmit }) => {
 };
 
 // ── Equipment ───────────────────────────────────────────────────
-const LabEquipment = ({ equipment, wips, navigate, canManage = false, onOpenNew }) => (
-  <Page
-    title="Equipment"
-    subtitle="Each unit accepts one WIP at a time, up to its wafer capacity"
-    right={canManage && <PrimaryBtn icon={<LF.Plus size={14}/>} onClick={onOpenNew}>Add Equipment</PrimaryBtn>}
-  >
-    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 14 }}>
-      {equipment.map(e => {
-        const wip = e.currentWipId ? findWip(e.currentWipId, wips) : null;
-        const used = wip ? wip.waferIds.length : 0;
-        const pct = (used / e.capacity) * 100;
-        const paramEntries = e.params ? Object.entries(e.params) : [];
-        return (
-          <Card key={e.id} padding={0}>
-            <div style={{
-              padding: '16px 20px', borderBottom: `1px solid ${lineSoft}`,
-              display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-            }}>
-              <div>
-                <div style={{ fontFamily: 'var(--font-mono)', fontSize: 14, fontWeight: 700, color: ink }}>{e.id}</div>
-                <div style={{ fontSize: 12, color: muted, marginTop: 2 }}>{e.model} · type {e.type}</div>
-              </div>
-              <Pill kind={e.status} dotted={e.status === 'running'}/>
-            </div>
-            <div style={{ padding: 20 }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 6, fontSize: 12, color: text2 }}>
-                <span>Wafer capacity</span>
-                <span style={{ fontFamily: 'var(--font-mono)', fontWeight: 700, color: ink }}>{used}/{e.capacity}</span>
-              </div>
-              <div style={{ height: 6, borderRadius: 999, background: '#ececf2', overflow: 'hidden' }}>
-                <div style={{ width: `${pct}%`, height: '100%', background: accent, borderRadius: 999, transition: 'width 0.2s' }}/>
-              </div>
-              {e.description && (
-                <div style={{ marginTop: 14, fontSize: 12.5, color: text2, lineHeight: 1.5 }}>{e.description}</div>
-              )}
-              {paramEntries.length > 0 && (
-                <div style={{ marginTop: 14 }}>
-                  <div style={{ fontSize: 11, fontWeight: 700, color: muted, textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 6 }}>Parameters</div>
-                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
-                    {paramEntries.map(([k, v]) => (
-                      <span key={k} style={{
-                        fontFamily: 'var(--font-mono)', fontSize: 11.5, color: text2,
-                        padding: '2px 8px', borderRadius: 6, background: bgSoft,
-                        border: `1px solid ${lineSoft}`,
-                      }}>{k} <strong style={{ color: ink }}>{v}</strong></span>
-                    ))}
+const LabEquipment = ({ navigate, canManage = false, showToast }) => {
+  const { equipment, loading, error } = useLabEquipment();
+  const [tab, setTab] = lS('all');
+
+  // The new-equipment modal is manager-only and waiting on spec signoff
+  // (per CLAUDE.local.md). Wire the button to a placeholder toast so the
+  // entry point stays visible without touching api.equipment.create.
+  const onAddEquipment = () => {
+    showToast && showToast('Modal redesign pending');
+  };
+
+  const counts = {
+    all: equipment.length,
+    idle: equipment.filter(e => e.status === 'idle').length,
+    maintenance: equipment.filter(e => e.status === 'maintenance').length,
+  };
+  const filtered = tab === 'all' ? equipment : equipment.filter(e => e.status === tab);
+  const tabs = [
+    { id: 'all',         label: 'All' },
+    { id: 'idle',        label: 'Idle' },
+    { id: 'maintenance', label: 'Maintenance' },
+  ];
+
+  if (loading && equipment.length === 0) {
+    return (
+      <Page title="Equipment" subtitle="Loading…">
+        <div style={{ padding: '60px 20px', textAlign: 'center', color: muted, fontSize: 14 }}>Loading…</div>
+      </Page>
+    );
+  }
+
+  return (
+    <Page
+      title="Equipment"
+      subtitle="Each unit accepts one WIP at a time, up to its wafer capacity"
+      right={canManage && <PrimaryBtn icon={<LF.Plus size={14}/>} onClick={onAddEquipment}>Add Equipment</PrimaryBtn>}
+    >
+      {error && (
+        <div style={{
+          padding: '12px 16px', marginBottom: 14, borderRadius: 10,
+          background: '#fde4e4', color: '#c0394a', fontSize: 13.5, fontWeight: 500,
+          border: '1px solid #f6c4c4',
+        }}>
+          Couldn't load equipment: {error}
+        </div>
+      )}
+
+      <div style={{ display: 'flex', gap: 4, marginBottom: 14, borderBottom: `1px solid ${line}` }}>
+        {tabs.map(t => (
+          <button key={t.id} onClick={() => setTab(t.id)} style={{
+            display: 'inline-flex', alignItems: 'center', gap: 6,
+            padding: '10px 14px', background: 'transparent', border: 'none',
+            borderBottom: `2px solid ${tab === t.id ? ink : 'transparent'}`,
+            color: tab === t.id ? ink : text2, fontWeight: 600, fontSize: 13,
+            cursor: 'pointer', fontFamily: 'inherit', marginBottom: -1,
+          }}>
+            {t.label}
+            <span style={{
+              padding: '1px 7px', borderRadius: 999, fontSize: 11, fontWeight: 700,
+              background: tab === t.id ? '#ecebf3' : '#f1f1f5',
+              color: tab === t.id ? '#4f4a8f' : muted,
+            }}>{counts[t.id]}</span>
+          </button>
+        ))}
+      </div>
+
+      <div style={{ fontSize: 13, color: muted, marginBottom: 14 }}>
+        Showing <strong style={{ color: ink }}>{filtered.length}</strong> of {equipment.length} unit{equipment.length === 1 ? '' : 's'}
+      </div>
+
+      {filtered.length === 0 ? (
+        <Card padding={48} style={{ textAlign: 'center', color: muted }}>
+          <LF.Equipment size={32} color="#cbcbd6" style={{ marginBottom: 10 }}/>
+          <div style={{ fontSize: 14, fontWeight: 600, color: text2 }}>No equipment in this view</div>
+        </Card>
+      ) : (
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 14 }}>
+          {filtered.map(e => {
+            const paramEntries = e.parameters ? Object.entries(e.parameters) : [];
+            return (
+              <Card key={e.id} padding={0}>
+                <div style={{
+                  padding: '16px 20px', borderBottom: `1px solid ${lineSoft}`,
+                  display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                }}>
+                  <div style={{ minWidth: 0 }}>
+                    <div style={{ fontFamily: 'var(--font-mono)', fontSize: 14, fontWeight: 700, color: ink }}>{e.name}</div>
+                    <div style={{ fontSize: 12, color: muted, marginTop: 2 }}>{e.model || '—'}</div>
                   </div>
+                  <Pill kind={e.status}/>
                 </div>
-              )}
-              <div style={{ marginTop: 16 }}>
-                {wip ? (
-                  <button onClick={() => navigate({ page: 'lab_wip_detail', id: wip.id })} style={{
-                    width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12,
-                    padding: '12px 14px', background: bgSoft, border: `1px solid ${line}`,
-                    borderRadius: 8, cursor: 'pointer', fontFamily: 'inherit', textAlign: 'left',
-                  }}>
-                    <div>
-                      <div style={{ fontSize: 11, fontWeight: 700, color: muted, textTransform: 'uppercase', letterSpacing: '0.06em' }}>Current WIP</div>
-                      <div style={{ fontFamily: 'var(--font-mono)', fontSize: 13, fontWeight: 700, color: ink, marginTop: 2 }}>{wip.id}</div>
-                      <div style={{ fontSize: 12, color: text2, marginTop: 2 }}>{findExp(wip.experimentId)?.name}</div>
-                    </div>
-                    <LF.ChevronRight size={16} color={muted}/>
-                  </button>
-                ) : (
-                  <div style={{ fontSize: 13, color: muted, textAlign: 'center', padding: '10px 0' }}>
-                    {e.status === 'maintenance' ? 'Under maintenance' : 'Available — no WIP assigned'}
+                <div style={{ padding: 20 }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 6, fontSize: 12, color: text2 }}>
+                    <span>Wafer capacity</span>
+                    <span style={{ fontFamily: 'var(--font-mono)', fontWeight: 700, color: ink }}>{e.capacity}</span>
                   </div>
-                )}
-              </div>
-            </div>
-          </Card>
-        );
-      })}
-    </div>
-  </Page>
-);
+                  <div style={{ height: 6, borderRadius: 999, background: '#ececf2', overflow: 'hidden' }}>
+                    <div style={{ width: '0%', height: '100%', background: accent, borderRadius: 999 }}/>
+                  </div>
+
+                  <div style={{ marginTop: 14 }}>
+                    <div style={{ fontSize: 11, fontWeight: 700, color: muted, textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 6 }}>Capabilities</div>
+                    {e.capabilities && e.capabilities.length > 0 ? (
+                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                        {e.capabilities.map(c => (
+                          <span key={c.id} style={{
+                            fontSize: 11.5, fontWeight: 700,
+                            padding: '3px 9px', borderRadius: 999,
+                            background: '#ecebf3', color: '#4f4a8f', letterSpacing: '0.02em',
+                          }}>{c.name}</span>
+                        ))}
+                      </div>
+                    ) : (
+                      <div style={{ fontSize: 12.5, color: muted, fontStyle: 'italic' }}>No experiment types assigned</div>
+                    )}
+                  </div>
+
+                  {paramEntries.length > 0 && (
+                    <div style={{ marginTop: 14 }}>
+                      <div style={{ fontSize: 11, fontWeight: 700, color: muted, textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 6 }}>Parameters</div>
+                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                        {paramEntries.map(([k, v]) => (
+                          <span key={k} style={{
+                            fontFamily: 'var(--font-mono)', fontSize: 11.5, color: text2,
+                            padding: '2px 8px', borderRadius: 6, background: bgSoft,
+                            border: `1px solid ${lineSoft}`,
+                          }}>{k} <strong style={{ color: ink }}>{typeof v === 'object' ? JSON.stringify(v) : String(v)}</strong></span>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </Card>
+            );
+          })}
+        </div>
+      )}
+    </Page>
+  );
+};
 
 // ── New Equipment modal (manager-only) ──────────────────────────
 // Same shape as the New WIP modal — picks experiment type, asks for name +
@@ -2448,7 +2532,7 @@ const LabApp = ({ route, navigate, canManage = false }) => {
   else if (p === 'lab_dispatch_detail')
     page = <LabDispatchDetail id={route.id} navigate={navigate} showToast={showToast}/>;
   else if (p === 'lab_equipment' || p === 'equipment')
-    page = <LabEquipment equipment={equipment} wips={wips} navigate={navigate} canManage={canManage} onOpenNew={() => setNewEquipmentOpen(true)}/>;
+    page = <LabEquipment navigate={navigate} canManage={canManage} showToast={showToast}/>;
   else
     page = <LabDashboard wafers={wafers} wips={wips} dispatches={dispatches} equipment={equipment} navigate={navigate}/>;
 
