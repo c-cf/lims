@@ -127,6 +127,26 @@ class TestWIP:
 
         assert WIP._meta.db_table == "wip"
 
+    def test_wip_experiment_type_optional_for_now(
+        self, lab_user, equipment, experiment_type
+    ):
+        """WIP.experiment_type is a nullable FK during the layered migration.
+
+        The non-null tightening lands in a later commit; until then both
+        a null value and a set value must be accepted at the schema level.
+        """
+        from apps.wip.models import WIP
+
+        wip_without = WIP.objects.create(equipment=equipment, created_by=lab_user)
+        assert wip_without.experiment_type is None
+
+        wip_with = WIP.objects.create(
+            equipment=equipment,
+            experiment_type=experiment_type,
+            created_by=lab_user,
+        )
+        assert wip_with.experiment_type == experiment_type
+
 
 @pytest.mark.django_db
 class TestDispatch:

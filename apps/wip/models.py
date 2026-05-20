@@ -38,6 +38,13 @@ class WIP(models.Model):
         null=True,
         blank=True,
     )
+    experiment_type = models.ForeignKey(
+        "experiments.ExperimentType",
+        on_delete=models.PROTECT,
+        related_name="wips",
+        null=True,
+        blank=True,
+    )
     samples = models.ManyToManyField(
         "commissions.Sample",
         through="WIPSample",
