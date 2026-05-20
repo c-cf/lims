@@ -83,9 +83,40 @@ const useMgrTrend = (metric = 'requests_per_day', days = 30) => {
   return { data, loading, error };
 };
 
-// Manager-side recipe list. Read-only for this commit — the create /
-// edit / delete surface goes through the New Recipe modal which is
-// one of the three deferred redesigns (CLAUDE.local.md).
+// Live experiment-types catalogue, used by the Recipe and Equipment
+// modals to populate their dropdowns. (`fab.jsx` has its own
+// `useExperimentTypes` inside that file's IIFE — not reachable here.)
+const useMgrExperimentTypes = () => {
+  const [data, setData] = mS([]);
+  const [loading, setLoading] = mS(true);
+  const [error, setError] = mS(null);
+  React.useEffect(() => {
+    if (!window.api || !window.api.experimentTypes) { setLoading(false); return; }
+    window.api.experimentTypes.list()
+      .then(rs => { setData(rs); setError(null); })
+      .catch(err => setError(err.message || String(err)))
+      .finally(() => setLoading(false));
+  }, []);
+  return { data, loading, error };
+};
+
+// Best-effort mapping from a live experiment-type name to the local
+// string slug RECIPE_PARAM_SCHEMA is keyed on. Lets us keep the
+// schema-driven UI for the four canonical experiment types while
+// gracefully degrading to a raw-JSON textarea for any custom type.
+const slugForExperimentName = (name) => {
+  if (!name) return null;
+  const l = name.toLowerCase();
+  if (l.includes('temperature cycling')) return 'tct';
+  if (l.includes('hast') || l.includes('highly accelerated')) return 'hast';
+  if (l.includes('bias temperature')) return 'btc';
+  if (l.includes('circuit prob')) return 'cp';
+  if (l.includes('final test')) return 'ft';
+  return null;
+};
+
+// Manager-side recipe list. Wired for create / edit / delete via the
+// RecipeModal redesign (this commit).
 const useMgrRecipes = () => {
   const [data, setData] = mS([]);
   const [loading, setLoading] = mS(true);
@@ -812,111 +843,242 @@ const MgrRequestDetail = ({ id, navigate, showToast }) => {
 };
 
 // ── Recipes page ──────────────────────────────────────────────
-const RecipeModal = ({ open, onClose, onSubmit, initial }) => {
+// Live-wired recipe modal. New mode → pick experiment_type + params.
+// Edit mode → experiment_type is locked (backend `RecipeUpdate`
+// intentionally doesn't accept it), shown as a read-only chip.
+const RecipeModal = ({ open, onClose, onSaved, initial }) => {
+  const { data: experimentTypes, loading: typesLoading } = useMgrExperimentTypes();
   const [name, setName] = mS('');
-  const [expId, setExpId] = mS('tct');
+  const [experimentTypeId, setExperimentTypeId] = mS('');
   const [desc, setDesc] = mS('');
-  const [params, setParams] = mS({});
+  const [paramsKv, setParamsKv] = mS({});
+  const [paramsJson, setParamsJson] = mS('{}');
+  const [busy, setBusy] = mS(false);
+  const [err, setErr] = mS(null);
+  const isEdit = !!initial;
 
+  // Choose the experiment_type for the schema lookup. In new mode it
+  // follows the dropdown; in edit mode it's whatever the recipe had.
+  const activeExpName = isEdit
+    ? initial.experimentName
+    : experimentTypes.find(t => t.id === experimentTypeId)?.name;
+  const slug = slugForExperimentName(activeExpName);
+  const schema = slug ? (RECIPE_PARAM_SCHEMA[slug] || []) : [];
+
+  // Reset state whenever the modal (re)opens.
   React.useEffect(() => {
     if (!open) return;
+    setErr(null); setBusy(false);
     if (initial) {
       setName(initial.name);
-      setExpId(initial.expId);
+      setExperimentTypeId(initial.experimentId);
       setDesc(initial.description || '');
-      setParams({ ...initial.params });
+      const incomingParams = initial.params || {};
+      setParamsKv({ ...incomingParams });
+      try { setParamsJson(JSON.stringify(incomingParams, null, 2) || '{}'); }
+      catch (_e) { setParamsJson('{}'); }
     } else {
-      setName(''); setExpId('tct'); setDesc(''); setParams({});
+      setName('');
+      setExperimentTypeId(experimentTypes[0]?.id ?? '');
+      setDesc('');
+      setParamsKv({});
+      setParamsJson('{}');
     }
+  // eslint-disable-next-line — only fire on open transition
   }, [open, initial]);
 
-  // When experiment type changes, reset params to the matching schema.
-  const schema = RECIPE_PARAM_SCHEMA[expId] || [];
-
+  // Auto-select the first experiment type once the list resolves (new mode only).
   React.useEffect(() => {
-    if (!open) return;
-    // Initialize any missing schema keys to '' so inputs are controlled.
-    setParams(prev => {
+    if (!open || isEdit) return;
+    if (!experimentTypeId && experimentTypes.length > 0) {
+      setExperimentTypeId(experimentTypes[0].id);
+    }
+  }, [open, isEdit, experimentTypeId, experimentTypes]);
+
+  // Initialize any missing schema keys when the active exp_type changes.
+  React.useEffect(() => {
+    if (!open || schema.length === 0) return;
+    setParamsKv(prev => {
       const next = { ...prev };
       schema.forEach(s => { if (next[s.key] == null) next[s.key] = ''; });
       return next;
     });
-  }, [expId, open]);
+  }, [open, slug, schema]);
 
-  const valid = name.trim().length > 0;
-  const handle = () => {
-    onSubmit({
-      ...(initial || {}),
-      id: initial?.id || `r_${Date.now().toString(36)}`,
-      name: name.trim(),
-      expId,
-      description: desc.trim(),
-      // Keep only schema keys to drop stale fields when exp type changes.
-      params: Object.fromEntries(schema.map(s => [s.key, params[s.key] || ''])),
-    });
+  const valid = name.trim().length > 0 && name.trim().length <= 200 && (isEdit || !!experimentTypeId);
+  const submit = async () => {
+    setBusy(true); setErr(null);
+    // Build the parameters payload. With a schema → only the schema keys
+    // (drop stale fields). Without → parse the JSON textarea.
+    let parameters;
+    if (schema.length > 0) {
+      parameters = Object.fromEntries(schema.map(s => [s.key, paramsKv[s.key] ?? '']));
+    } else {
+      const trimmed = paramsJson.trim();
+      if (!trimmed) {
+        parameters = {};
+      } else {
+        try { parameters = JSON.parse(trimmed); }
+        catch (_e) { setErr('Parameters must be valid JSON.'); setBusy(false); return; }
+        if (parameters === null || typeof parameters !== 'object' || Array.isArray(parameters)) {
+          setErr('Parameters must be a JSON object.'); setBusy(false); return;
+        }
+      }
+    }
+    try {
+      if (isEdit) {
+        await window.api.recipes.update(initial.id, {
+          name: name.trim(), description: desc.trim(), parameters,
+        });
+      } else {
+        await window.api.recipes.create({
+          name: name.trim(), description: desc.trim(),
+          experimentTypeId, parameters,
+        });
+      }
+      onSaved && onSaved();
+    } catch (e) {
+      setErr(e.message || String(e));
+    } finally {
+      setBusy(false);
+    }
   };
+
+  // Edit-mode chip — read-only display of the locked experiment_type.
+  const lockedExpName = isEdit ? (initial.experimentName || '—') : null;
+  const lockedExpCode = lockedExpName
+    ? (slug ? slug.toUpperCase() : lockedExpName.split(/\s+/).map(t => t[0]).join('').slice(0, 4).toUpperCase())
+    : '';
 
   return (
     <Modal
       open={open}
       onClose={onClose}
-      title={initial ? 'Edit Recipe' : 'New Recipe'}
+      title={isEdit ? 'Edit Recipe' : 'New Recipe'}
       width={620}
       footer={<>
-        <SecondaryBtn onClick={onClose}>Cancel</SecondaryBtn>
-        <PrimaryBtn disabled={!valid} onClick={handle}>{initial ? 'Save Changes' : 'Create Recipe'}</PrimaryBtn>
+        <SecondaryBtn onClick={onClose} disabled={busy}>Cancel</SecondaryBtn>
+        <PrimaryBtn disabled={!valid || busy || typesLoading} onClick={submit}>
+          {busy ? (isEdit ? 'Saving…' : 'Creating…') : (isEdit ? 'Save Changes' : 'Create Recipe')}
+        </PrimaryBtn>
       </>}
     >
       <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+        {err && (
+          <div style={{
+            padding: '10px 12px', borderRadius: 8,
+            background: '#fde4e4', color: '#c0394a', fontSize: 13, fontWeight: 500,
+            border: '1px solid #f6c4c4',
+          }}>{err}</div>
+        )}
         <div>
           <FieldLabel required>Name</FieldLabel>
           <TextInput value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. TCT_Standard_Reflow_Simulation_v1"/>
         </div>
         <div>
           <FieldLabel required>Experiment Type</FieldLabel>
-          <SelectInput value={expId} onChange={(e) => setExpId(e.target.value)}>
-            {MGR_EXPERIMENTS.map(x => <option key={x.id} value={x.id}>{x.name} ({x.code})</option>)}
-          </SelectInput>
+          {isEdit ? (
+            <div style={{
+              display: 'inline-flex', alignItems: 'center', gap: 8,
+              padding: '6px 10px 6px 6px', borderRadius: 999,
+              background: '#ecebf3', color: '#4f4a8f',
+            }} title="Experiment type can't be changed after creation.">
+              <span style={{
+                fontSize: 10.5, fontWeight: 700, padding: '3px 8px', borderRadius: 999,
+                background: '#fff', color: '#4f4a8f', letterSpacing: '0.05em',
+              }}>{lockedExpCode}</span>
+              <span style={{ fontSize: 13, fontWeight: 600 }}>{lockedExpName}</span>
+              <span style={{ fontSize: 11, color: mMuted, marginLeft: 4 }}>(locked)</span>
+            </div>
+          ) : (
+            <SelectInput
+              value={experimentTypeId === '' ? '' : String(experimentTypeId)}
+              onChange={(e) => setExperimentTypeId(e.target.value ? Number(e.target.value) : '')}
+            >
+              {typesLoading && <option value="">Loading…</option>}
+              {!typesLoading && experimentTypes.length === 0 && <option value="">No experiment types</option>}
+              {experimentTypes.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
+            </SelectInput>
+          )}
         </div>
         <div>
           <FieldLabel>Description</FieldLabel>
           <TextArea value={desc} onChange={(e) => setDesc(e.target.value)} placeholder="When this recipe is used and why."/>
         </div>
-        {schema.length > 0 && (
-          <div>
-            <FieldLabel>Parameters</FieldLabel>
-            <div style={{
-              padding: '14px 14px 10px', borderRadius: 10,
-              border: `1px solid ${mLine}`, background: mBgSoft,
-              display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 12,
-            }}>
-              {schema.map(s => (
-                <div key={s.key}>
-                  <div style={{ fontSize: 11, fontWeight: 600, color: mMuted, textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 4 }}>{s.label}</div>
-                  <TextInput
-                    value={params[s.key] ?? ''}
-                    onChange={(e) => setParams(p => ({ ...p, [s.key]: e.target.value }))}
-                    placeholder={s.placeholder}
-                    style={{ fontFamily: 'var(--font-mono)', fontSize: 13 }}
-                  />
-                </div>
-              ))}
-            </div>
-            <div style={{ fontSize: 12, color: mMuted, marginTop: 6 }}>
-              Fields update based on the selected experiment type.
-            </div>
-          </div>
-        )}
+        <div>
+          <FieldLabel>Parameters</FieldLabel>
+          {schema.length > 0 ? (
+            <>
+              <div style={{
+                padding: '14px 14px 10px', borderRadius: 10,
+                border: `1px solid ${mLine}`, background: mBgSoft,
+                display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 12,
+              }}>
+                {schema.map(s => (
+                  <div key={s.key}>
+                    <div style={{ fontSize: 11, fontWeight: 600, color: mMuted, textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 4 }}>{s.label}</div>
+                    <TextInput
+                      value={paramsKv[s.key] ?? ''}
+                      onChange={(e) => setParamsKv(p => ({ ...p, [s.key]: e.target.value }))}
+                      placeholder={s.placeholder}
+                      style={{ fontFamily: 'var(--font-mono)', fontSize: 13 }}
+                    />
+                  </div>
+                ))}
+              </div>
+              <div style={{ fontSize: 12, color: mMuted, marginTop: 6 }}>
+                Schema-driven fields for {activeExpName || 'this experiment type'}.
+              </div>
+            </>
+          ) : (
+            <>
+              <TextArea
+                value={paramsJson}
+                onChange={(e) => setParamsJson(e.target.value)}
+                placeholder='{"key": "value"}'
+                style={{ fontFamily: 'var(--font-mono)', fontSize: 12.5, minHeight: 120 }}
+              />
+              <div style={{ fontSize: 12, color: mMuted, marginTop: 6 }}>
+                No schema defined for {activeExpName || 'this experiment type'} — enter a JSON object. Leave as <code>{'{}'}</code> for none.
+              </div>
+            </>
+          )}
+        </div>
       </div>
     </Modal>
   );
 };
 
 const MgrRecipes = ({ showToast }) => {
-  const { data: recipes, loading, error } = useMgrRecipes();
-  // New / Edit / Delete all hang on the deferred Recipes modal redesign,
-  // so every write button on this page fires a placeholder toast.
-  const placeholder = () => showToast && showToast('Modal redesign pending');
+  const { data: recipes, loading, error, refresh } = useMgrRecipes();
+  const [modalOpen, setModalOpen] = mS(false);
+  const [editing, setEditing] = mS(null);
+  const [busyDeleteId, setBusyDeleteId] = mS(null);
+  const [deleteError, setDeleteError] = mS(null);
+
+  const openNew = () => { setEditing(null); setModalOpen(true); };
+  const openEdit = (rec) => { setEditing(rec); setModalOpen(true); };
+  const closeModal = () => { setEditing(null); setModalOpen(false); };
+  const onSaved = () => {
+    const wasEdit = !!editing;
+    closeModal();
+    showToast && showToast(wasEdit ? 'Recipe updated' : 'Recipe created');
+    refresh();
+  };
+  const onDelete = async (rec) => {
+    if (!window.confirm(`Delete recipe "${rec.name}"? This can't be undone.`)) return;
+    setBusyDeleteId(rec.id);
+    setDeleteError(null);
+    try {
+      await window.api.recipes.remove(rec.id);
+      showToast && showToast(`${rec.name} deleted`);
+      refresh();
+    } catch (e) {
+      setDeleteError(e.message || String(e));
+    } finally {
+      setBusyDeleteId(null);
+    }
+  };
 
   if (loading && recipes.length === 0) {
     return (
@@ -930,8 +1092,17 @@ const MgrRecipes = ({ showToast }) => {
     <Page
       title="Recipes"
       subtitle="食譜 — experiment recipes referenced by dispatches"
-      right={<PrimaryBtn icon={<MI.Plus size={14}/>} onClick={placeholder}>New Recipe</PrimaryBtn>}
+      right={<PrimaryBtn icon={<MI.Plus size={14}/>} onClick={openNew}>New Recipe</PrimaryBtn>}
     >
+      {deleteError && (
+        <div style={{
+          padding: '12px 16px', marginBottom: 14, borderRadius: 10,
+          background: '#fde4e4', color: '#c0394a', fontSize: 13.5, fontWeight: 500,
+          border: '1px solid #f6c4c4',
+        }}>
+          {deleteError}
+        </div>
+      )}
       {error && (
         <div style={{
           padding: '12px 16px', marginBottom: 14, borderRadius: 10,
@@ -994,19 +1165,30 @@ const MgrRecipes = ({ showToast }) => {
                 )}
               </div>
               <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
-                <button onClick={placeholder} style={{
-                  background: 'transparent', border: 'none', cursor: 'pointer',
+                <button onClick={() => openEdit(rec)} disabled={busyDeleteId === rec.id} style={{
+                  background: 'transparent', border: 'none',
+                  cursor: busyDeleteId === rec.id ? 'not-allowed' : 'pointer',
                   color: mAccent, fontWeight: 600, fontSize: 13, fontFamily: 'inherit', padding: 0,
+                  opacity: busyDeleteId === rec.id ? 0.5 : 1,
                 }}>Edit</button>
-                <button onClick={placeholder} style={{
-                  background: 'transparent', border: 'none', cursor: 'pointer',
+                <button onClick={() => onDelete(rec)} disabled={busyDeleteId === rec.id} style={{
+                  background: 'transparent', border: 'none',
+                  cursor: busyDeleteId === rec.id ? 'not-allowed' : 'pointer',
                   color: '#b9384a', fontWeight: 600, fontSize: 13, fontFamily: 'inherit', padding: 0,
-                }}>Delete</button>
+                  opacity: busyDeleteId === rec.id ? 0.5 : 1,
+                }}>{busyDeleteId === rec.id ? 'Deleting…' : 'Delete'}</button>
               </div>
             </div>
           );
         })}
       </div>
+
+      <RecipeModal
+        open={modalOpen}
+        onClose={closeModal}
+        initial={editing}
+        onSaved={onSaved}
+      />
     </Page>
   );
 };

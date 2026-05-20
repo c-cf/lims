@@ -451,19 +451,33 @@
         const out = await call(`/recipes/?${usp}`);
         return out.map(normalizeRecipe);
       },
-      async create(payload) {
-        // payload = { name, description?, experiment_type_id, parameters }
-        // Recipe.equipment was dropped entirely — see backend §2.3.
-        const out = await call('/recipes/', { method: 'POST', body: payload });
+      async create({ name, description = '', experimentTypeId, parameters = {} }) {
+        // camelCase in, snake_case to the backend. Recipe.equipment was
+        // dropped entirely — see backend §2.3.
+        const out = await call('/recipes/', {
+          method: 'POST',
+          body: {
+            name,
+            description,
+            experiment_type_id: experimentTypeId,
+            parameters,
+          },
+        });
         return normalizeRecipe(out);
       },
-      async update(id, payload) {
-        const out = await call(`/recipes/${id}`, { method: 'PATCH', body: payload });
+      async update(id, { name, description, parameters }) {
+        // RecipeUpdate accepts name/description/parameters only — backend
+        // intentionally locks experiment_type after creation.
+        const body = {};
+        if (name !== undefined) body.name = name;
+        if (description !== undefined) body.description = description;
+        if (parameters !== undefined) body.parameters = parameters;
+        const out = await call(`/recipes/${id}`, { method: 'PATCH', body });
         return normalizeRecipe(out);
       },
       async remove(id) {
-        const out = await call(`/recipes/${id}`, { method: 'DELETE' });
-        return normalizeRecipe(out);
+        await call(`/recipes/${id}`, { method: 'DELETE' });
+        return null;
       },
     },
 
