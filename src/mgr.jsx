@@ -967,15 +967,29 @@ const MgrRecipes = ({ showToast }) => {
 };
 
 // ── Reports page ──────────────────────────────────────────────
+// `onGenerate` is async and returns either an array of {label, value}
+// rows (rendered as a 3-up summary) or {error: 'message'} which surfaces
+// in a red banner inside the card.
 const ReportCard = ({ title, subtitle, accent, accentBg, icon, onGenerate }) => {
   const [start, setStart] = mS('');
   const [end, setEnd] = mS('');
   const [generated, setGenerated] = mS(null);
+  const [busy, setBusy] = mS(false);
+  const [err, setErr] = mS(null);
   const valid = start && end;
-  const handle = () => {
-    if (!valid) return;
-    const summary = onGenerate({ start, end });
-    setGenerated(summary);
+  const handle = async () => {
+    if (!valid || busy) return;
+    setBusy(true);
+    setErr(null);
+    try {
+      const summary = await onGenerate({ start, end });
+      setGenerated(summary);
+    } catch (e) {
+      setErr(e.message || String(e));
+      setGenerated(null);
+    } finally {
+      setBusy(false);
+    }
   };
 
   return (
@@ -999,7 +1013,14 @@ const ReportCard = ({ title, subtitle, accent, accentBg, icon, onGenerate }) => 
             <TextInput type="date" value={end} onChange={(e) => setEnd(e.target.value)}/>
           </div>
         </div>
-        <PrimaryBtn disabled={!valid} onClick={handle} icon={<MI.TrendUp size={14}/>}>Generate</PrimaryBtn>
+        <PrimaryBtn disabled={!valid || busy} onClick={handle} icon={<MI.TrendUp size={14}/>}>{busy ? 'Generating…' : 'Generate'}</PrimaryBtn>
+        {err && (
+          <div style={{
+            marginTop: 14, padding: '10px 12px', borderRadius: 8,
+            background: '#fde4e4', color: '#c0394a', fontSize: 13, fontWeight: 500,
+            border: '1px solid #f6c4c4',
+          }}>{err}</div>
+        )}
         {generated && (
           <div style={{
             marginTop: 16, padding: 14, borderRadius: 10,
@@ -1021,29 +1042,37 @@ const ReportCard = ({ title, subtitle, accent, accentBg, icon, onGenerate }) => 
   );
 };
 
-const MgrReports = ({ requests, recipes }) => {
-  const equipmentReport = ({ start, end }) => {
-    // Synthetic — produce plausible utilization numbers from the seeds.
-    const days = Math.max(1, (new Date(end) - new Date(start)) / 86400000 + 1);
-    const totalRuns = recipes.length * 6;
+const MgrReports = () => {
+  // Backend `EquipmentUtilizationOut` returns `{period, start_date, end_date,
+  // data: [{equipment: {id, name}, wip_count, sample_count}]}`. Collapse to
+  // the 3-up summary the card layout expects: units covered, total WIPs
+  // recorded across them, total sample-runs through.
+  const equipmentReport = async ({ start, end }) => {
+    const out = await window.api.reports.equipmentUtilization({
+      period: 'custom', start_date: start, end_date: end,
+    });
+    const totalWips = (out.data || []).reduce((s, e) => s + (e.wip_count || 0), 0);
+    const totalSamples = (out.data || []).reduce((s, e) => s + (e.sample_count || 0), 0);
     return [
-      { label: 'Days',          value: Math.round(days) },
-      { label: 'Total runs',    value: totalRuns },
-      { label: 'Avg utilization', value: '64%' },
+      { label: 'Units covered', value: (out.data || []).length },
+      { label: 'Total WIPs',    value: totalWips },
+      { label: 'Sample runs',   value: totalSamples },
     ];
   };
-  const requestReport = ({ start, end }) => {
-    const startD = new Date(start), endD = new Date(end);
-    const inRange = requests.filter(r => {
-      const d = new Date(r.created.split(' ')[0]);
-      return d >= startD && d <= endD;
+  // Backend `RequestStatisticsOut` returns `{period, status_distribution: {...},
+  // average_tat_hours, total_requests}`. The mock surface focused on Submitted
+  // / Approved / Rejected; keep that shape but pull the numbers from the live
+  // status_distribution map.
+  const requestReport = async ({ start, end }) => {
+    const out = await window.api.reports.requestStatistics({
+      start_date: start, end_date: end,
     });
-    const approved = inRange.filter(r => r.status === 'in_progress' || r.status === 'completed').length;
-    const rejected = inRange.filter(r => r.status === 'rejected').length;
+    const dist = out.status_distribution || {};
+    const approvedLike = (dist.approved || 0) + (dist.sample_shipped || 0) + (dist.in_progress || 0) + (dist.completed || 0) + (dist.closed || 0);
     return [
-      { label: 'Submitted', value: inRange.length },
-      { label: 'Approved',  value: approved },
-      { label: 'Rejected',  value: rejected },
+      { label: 'Total',    value: out.total_requests ?? 0 },
+      { label: 'Approved', value: approvedLike },
+      { label: 'Rejected', value: dist.rejected || 0 },
     ];
   };
 
@@ -1055,14 +1084,14 @@ const MgrReports = ({ requests, recipes }) => {
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 18 }}>
         <ReportCard
           title="Equipment Utilization"
-          subtitle="Per-equipment usage and idle time across the window."
+          subtitle="Per-equipment WIP + sample counts across the window."
           accent="#2563eb" accentBg="#dbeafe"
           icon={<MI.TrendUp size={14}/>}
           onGenerate={equipmentReport}
         />
         <ReportCard
           title="Request Statistics"
-          subtitle="Submitted, approved, and rejected requests."
+          subtitle="Total / approved / rejected requests in the window."
           accent="#157a4a" accentBg="#c8eedd"
           icon={<MI.ClipboardList size={14}/>}
           onGenerate={requestReport}
@@ -1396,7 +1425,7 @@ const MgrApp = ({ route, navigate }) => {
   else if (p === 'mgr_all_requests') page = <MgrAllRequests navigate={navigate}/>;
   else if (p === 'mgr_request')   page = <MgrRequestDetail id={route.id} navigate={navigate} showToast={showToast}/>;
   else if (p === 'mgr_recipes')   page = <MgrRecipes showToast={showToast}/>;
-  else if (p === 'mgr_reports')   page = <MgrReports requests={requests} recipes={recipes}/>;
+  else if (p === 'mgr_reports')   page = <MgrReports/>;
   else page = <MgrDashboard requests={requests} recipes={recipes} navigate={navigate}/>;
 
   return (

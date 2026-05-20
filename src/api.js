@@ -660,6 +660,11 @@
         const usp = new URLSearchParams(q);
         return call(`/reports/request-statistics?${usp}`);
       },
+      async trends(q = {}) {
+        // q = { metric: 'requests_per_day', days: 30 }
+        const usp = new URLSearchParams(q);
+        return call(`/reports/trends?${usp}`);
+      },
     },
   };
 
