@@ -79,6 +79,28 @@ const useRequests = () => {
   return { data, loading, error, refresh };
 };
 
+// Detail fetch for a single request (used by FabRequestDetail). Exposes
+// `refresh` so state-machine actions (cancel) can refetch in place rather
+// than navigate away.
+const useRequestDetail = (id) => {
+  const [data, setData] = uS(null);
+  const [loading, setLoading] = uS(true);
+  const [error, setError] = uS(null);
+  const refresh = React.useCallback(() => {
+    if (id == null || !window.api || !window.api.requests) {
+      setLoading(false);
+      return;
+    }
+    setLoading(true);
+    window.api.requests.get(id)
+      .then(r => { setData(r); setError(null); })
+      .catch(err => setError(err.message || String(err)))
+      .finally(() => setLoading(false));
+  }, [id]);
+  React.useEffect(() => { refresh(); }, [refresh]);
+  return { data, loading, error, refresh };
+};
+
 // TODO: drop once offline mode is removed — the standalone single-file demo
 // still consumes this as a fallback dataset. The dev build now uses
 // useRequests() above instead.
@@ -1434,17 +1456,6 @@ const FabNewRequest = ({ navigate, onSubmit, onSaveDraft, draft, isEdit = false,
 };
 
 // ── Detail ─────────────────────────────────────────────────────
-// Synthetic result stubs — the fab data model doesn't carry per-experiment
-// readings, so we render a plausible summary when an experiment is "done"
-// to mirror the shape of the lab-side dispatch result.
-const EXPERIMENT_RESULT_STUB = {
-  tct:  { summary: 'All cycles completed nominally — no solder fatigue or TSV crack propagation detected.', verdict: 'pass', note: 'Within spec across the full -55°C / 125°C window.' },
-  hast: { summary: 'Sustained 168 h at 85 °C / 85 %RH with no moisture-induced failure.',                  verdict: 'pass', note: 'Bias held steady at 5 V throughout the run.' },
-  btc:  { summary: 'Bias-temperature cycling complete. Threshold drift within spec on all sites.',         verdict: 'pass', note: '' },
-  cp:   { summary: 'Wafer probe pass — site yield within target on the full die map.',                    verdict: 'pass', note: '1024 sites, 24 touchdowns each.' },
-  ft:   { summary: 'Final functional test pass — all bins within window.',                                verdict: 'pass', note: '' },
-};
-
 // Plain card-header strip — matches the style of the lab dispatch detail
 // (no gradient, just an uppercase eyebrow on a thin border).
 const PlainCardHeader = ({ children, right }) => (
@@ -1491,12 +1502,117 @@ const HistoryDot = ({ action }) => {
   return c;
 };
 
-const FabRequestDetail = ({ id, requests, navigate, onCancel }) => {
-  const r = requests.find(x => x.id === id);
-  if (!r) return <FabPage title="Request not found"/>;
-  const exps = r.expIds.map(e => ALL_EXPERIMENTS.find(x => x.id === e)).filter(Boolean);
+// Modal that prompts for a non-empty cancellation reason. Backend
+// `/requests/:id/cancel` accepts a `reason` field with Ninja min_length=1,
+// so the Confirm button stays disabled until the textarea has content.
+const CancelRequestModal = ({ requestId, onClose, onCancelled, showToast }) => {
+  const [reason, setReason] = uS('');
+  const [busy, setBusy] = uS(false);
+  const [err, setErr] = uS(null);
+  const canConfirm = reason.trim().length > 0 && !busy;
+  const confirm = async () => {
+    setBusy(true);
+    setErr(null);
+    try {
+      await window.api.requests.cancel(requestId, reason.trim());
+      showToast && showToast(`Request #${requestId} cancelled`);
+      onCancelled && onCancelled();
+    } catch (e) {
+      setErr(e.message || String(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <div style={{
+      position: 'fixed', inset: 0, zIndex: 200,
+      background: 'rgba(20,20,28,0.42)', backdropFilter: 'blur(2px)',
+      display: 'flex', alignItems: 'center', justifyContent: 'center',
+      padding: 24,
+    }} onClick={onClose}>
+      <div onClick={(e) => e.stopPropagation()} style={{
+        width: 'min(460px, 100%)', background: '#fff', borderRadius: 14,
+        boxShadow: '0 24px 60px rgba(20,20,28,0.32)', padding: 24,
+      }}>
+        <div style={{ fontSize: 17, fontWeight: 700, color: 'var(--text-primary)', marginBottom: 6 }}>
+          Cancel Request #{String(requestId).padStart(4, '0')}
+        </div>
+        <div style={{ fontSize: 13.5, color: 'var(--text-secondary)', marginBottom: 14, lineHeight: 1.5 }}>
+          Cancellation is permanent. The lab will see your reason in the request history.
+        </div>
+        <label style={{ fontSize: 11.5, fontWeight: 600, color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.06em' }}>
+          Reason <span style={{ color: '#c0394a' }}>*</span>
+        </label>
+        <textarea value={reason} onChange={(e) => setReason(e.target.value)}
+          rows={4} autoFocus
+          placeholder="Why is this request being cancelled?"
+          style={{
+            width: '100%', marginTop: 6, padding: '10px 12px', borderRadius: 8,
+            border: '1px solid rgba(0,0,0,0.16)', fontSize: 13.5, fontFamily: 'inherit',
+            resize: 'vertical', outline: 'none',
+          }}/>
+        {err && (
+          <div style={{ marginTop: 12, padding: '10px 12px', borderRadius: 8,
+            background: '#fde4e4', color: '#c0394a', fontSize: 13, fontWeight: 500,
+            border: '1px solid #f6c4c4' }}>
+            {err}
+          </div>
+        )}
+        <div style={{ marginTop: 18, display: 'flex', justifyContent: 'flex-end', gap: 10 }}>
+          <SecondaryBtn onClick={onClose} disabled={busy}>Keep request</SecondaryBtn>
+          <PrimaryBtn disabled={!canConfirm} onClick={confirm} style={{ background: canConfirm ? '#c0394a' : '#cbcbd6' }}>
+            {busy ? 'Cancelling…' : 'Cancel request'}
+          </PrimaryBtn>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+const FabRequestDetail = ({ id, navigate, showToast }) => {
+  const { data: r, loading, error, refresh } = useRequestDetail(id);
+  const { data: liveTypes } = useExperimentTypes();
+  const [cancelOpen, setCancelOpen] = uS(false);
+
+  if (loading && !r) {
+    return (
+      <FabPage title="Loading request…">
+        <div style={{ padding: '60px 20px', textAlign: 'center', color: 'var(--text-muted)', fontSize: 14 }}>
+          Loading…
+        </div>
+      </FabPage>
+    );
+  }
+  if (error || !r) {
+    return (
+      <FabPage
+        breadcrumb={
+          <button onClick={() => navigate({ page: 'fab_requests' })} style={{
+            display: 'inline-flex', alignItems: 'center', gap: 4,
+            fontSize: 13, fontWeight: 600, color: '#6c67b8', marginBottom: 14, cursor: 'pointer',
+          }}><F.ChevronLeft size={14}/> My Requests</button>
+        }
+        title="Request not found"
+      >
+        <div style={{ padding: '24px', color: '#c0394a', fontSize: 14 }}>
+          {error || 'This request is no longer available.'}
+        </div>
+      </FabPage>
+    );
+  }
+
+  // Backend's RequestDetailOut.experiment_types only carries id + name +
+  // parameters; lab_category lives on the standalone /experiment-types/
+  // endpoint. Join in-place so the experiment chips can still show their
+  // RA/MA/FA/TM group label.
+  const labCategoryById = new Map(liveTypes.map(t => [t.id, t.labCategory]));
+  const exps = (r.experiment_types || []).map(et => ({
+    id: et.id,
+    name: et.name,
+    group: labCategoryById.get(et.id) || '',
+  }));
   const canCancel = r.status === 'in_progress' || r.status === 'submitted';
-  const overallIdx = Math.min(...r.samples.map(s => phaseIndexFor(s, r)));
+  const overallIdx = r.samples.length ? Math.min(...r.samples.map(s => phaseIndexFor(s, r))) : 0;
 
   const completedAt = (r.status === 'completed' && r.history.length)
     ? r.history[r.history.length - 1].at.split(' ')[0]
@@ -1539,7 +1655,7 @@ const FabRequestDetail = ({ id, requests, navigate, onCancel }) => {
         </span>
       }
       right={canCancel && (
-        <button onClick={() => onCancel(r.id)} style={{
+        <button onClick={() => setCancelOpen(true)} style={{
           padding: '9px 15px', borderRadius: 8,
           background: '#fff', color: '#c0394a',
           fontWeight: 600, fontSize: 13, cursor: 'pointer',
@@ -1634,12 +1750,13 @@ const FabRequestDetail = ({ id, requests, navigate, onCancel }) => {
         </PlainCardHeader>
         <div style={{ padding: 18, display: 'flex', flexDirection: 'column', gap: 12, background: '#fafafd' }}>
           {r.samples.map((s, si) => {
-            const idx = phaseIndexFor(s, r);
             const total = exps.length;
-            let doneCount = 0;
-            if (idx >= 4) doneCount = total;
-            else if (idx === 3) doneCount = Math.max(1, Math.floor(total / 2));
-            else doneCount = 0;
+            // Per-experiment done/pending state lives on the wafer's
+            // WIP → Dispatch → ExperimentResult chain — until the §2.8 wafer
+            // rollup endpoint lands, the detail payload can't tell us which
+            // experiments finished. Render every chip as pending and skip
+            // the result block rather than fake data.
+            const doneCount = 0;
             return (
               <div key={si} style={{
                 background: '#fff', borderRadius: 12,
@@ -1690,44 +1807,27 @@ const FabRequestDetail = ({ id, requests, navigate, onCancel }) => {
                     <div style={{ fontSize: 10.5, fontWeight: 600, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.06em', marginTop: 2 }}>done</div>
                   </div>
                 </div>
-                {/* For each done experiment, surface the result/comment like the dispatch detail does */}
-                {doneCount > 0 && (
-                  <div style={{ background: '#fbfbfd', borderTop: '1px solid rgba(0,0,0,0.05)', padding: '14px 18px', display: 'flex', flexDirection: 'column', gap: 10 }}>
-                    {exps.slice(0, doneCount).map((e) => {
-                      const stub = EXPERIMENT_RESULT_STUB[e.id] || { summary: 'Run completed.', verdict: 'pass', note: '' };
-                      const finishedAt = r.history.find(h => h.action === 'APPROVE')?.at || r.submitted || r.created;
-                      return (
-                        <div key={e.id} style={{
-                          padding: '12px 14px', background: '#fff',
-                          border: '1px solid rgba(0,0,0,0.06)', borderRadius: 10,
-                        }}>
-                          <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 8, flexWrap: 'wrap' }}>
-                            <span style={{
-                              fontSize: 10, fontWeight: 700, padding: '3px 7px', borderRadius: 999,
-                              background: '#157a4a', color: '#fff', letterSpacing: '0.05em',
-                            }}>{e.group}</span>
-                            <span style={{ fontSize: 13.5, fontWeight: 700, color: 'var(--text-primary)' }}>{e.name}</span>
-                            <span style={{
-                              padding: '3px 9px', borderRadius: 999,
-                              background: '#c8eedd', color: '#157a4a',
-                              fontSize: 11, fontWeight: 700, letterSpacing: '0.05em',
-                            }}>PASS</span>
-                            <span style={{ marginLeft: 'auto', fontFamily: 'var(--font-mono)', fontSize: 11.5, color: 'var(--text-muted)' }}>{finishedAt}</span>
-                          </div>
-                          <div style={{ fontSize: 13.5, color: 'var(--text-primary)', lineHeight: 1.55 }}>{stub.summary}</div>
-                          {stub.note && (
-                            <div style={{ fontSize: 12.5, color: 'var(--text-secondary)', marginTop: 8, paddingTop: 8, borderTop: '1px dashed rgba(0,0,0,0.06)', fontStyle: 'italic' }}>{stub.note}</div>
-                          )}
-                        </div>
-                      );
-                    })}
-                  </div>
-                )}
+                {/*
+                  Per-experiment result block intentionally removed for v1.
+                  The real summary/verdict/note lives on the wafer's
+                  WIP → Dispatch → ExperimentResult chain, which is not on
+                  RequestDetailOut yet (see INTEGRATION_GAPS.md §2.8 wafer
+                  rollup). Reintroduce once that endpoint lands.
+                */}
               </div>
             );
           })}
         </div>
       </FabCard>
+
+      {cancelOpen && (
+        <CancelRequestModal
+          requestId={r.id}
+          onClose={() => setCancelOpen(false)}
+          onCancelled={() => { setCancelOpen(false); refresh(); }}
+          showToast={showToast}
+        />
+      )}
     </FabPage>
   );
 };
@@ -1771,12 +1871,6 @@ const FabApp = ({ route, navigate }) => {
     showToast(`Draft #${id} saved`);
     navigate({ page: 'fab_drafts' });
   };
-  const cancelRequest = (id) => {
-    const now = new Date().toISOString().slice(0, 16).replace('T', ' ');
-    setRequests(rs => rs.map(r => r.id === id ? { ...r, status: 'cancelled', history: [...r.history, { action: 'CANCEL', by: 'fab_user', at: now }] } : r));
-    showToast(`Request #${id} cancelled`);
-  };
-
   let page = null;
   if (route.page === 'fab_dashboard') page = <FabDashboard navigate={navigate}/>;
   else if (route.page === 'fab_requests') page = <FabRequestList navigate={navigate} initialTab={route.tab || 'all'}/>;
@@ -1789,7 +1883,7 @@ const FabApp = ({ route, navigate }) => {
           onSubmit={(p) => submitNew(p, d.id)} onSaveDraft={(p) => saveDraft(p, d.id)}/>
       : <FabRequestList navigate={navigate} drafts titleOverride="Drafts"/>;
   }
-  else if (route.page === 'fab_request')  page = <FabRequestDetail id={route.id} requests={requests} navigate={navigate} onCancel={cancelRequest}/>;
+  else if (route.page === 'fab_request')  page = <FabRequestDetail id={route.id} navigate={navigate} showToast={showToast}/>;
   else page = <FabDashboard navigate={navigate}/>;
 
   return (

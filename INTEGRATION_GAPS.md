@@ -81,6 +81,30 @@ All routes mounted on `/api/`. Auth: JWT bearer, `Authorization: Bearer <access_
 - **Resolution A (preferred):** add `GET /samples/:id/experiments` returning `[{experiment_type, status, dispatch_id, result}]` computed server-side.
 - **Resolution B:** assemble client-side by joining `samples`, `wips`, `dispatches` — costs three extra requests per wafer detail open.
 
+### 2.9 `RequestUpdateIn` is too narrow for the draft-edit flow  `[BE]` _small_
+- Frontend's "Continue editing" on a draft card needs to replay
+  `experiment_type_ids` + `samples`, not just title/note. Backend
+  `RequestUpdateIn` (`apps/commissions/schemas.py`) only accepts
+  `title`, `note`, `urgency`.
+- **Surfaced during Fab New Request wiring smoke-test 2026-05-19.** The
+  current commit (8d440bf) keeps draft-edit on the legacy local-state path
+  to avoid a crash; it cannot round-trip wafer/experiment changes against
+  the live API yet.
+- **Resolution:** widen `RequestUpdateIn`:
+  ```python
+  experiment_type_ids: list[int] | None = None
+  experiment_parameters: dict[str, dict[str, Any]] | None = None
+  samples: list[SampleIn] | None = None
+  ```
+  View `update_request` already guards on `status in (DRAFT, RETURNED)`, so
+  the state-machine invariant holds. The view body needs to replace (not
+  patch) the through-table rows and samples when the new fields are
+  provided — wrap in `transaction.atomic` (already done), delete existing
+  `RequestExperiment` + `Sample` rows for the request, recreate from
+  payload. Same pattern as `create_request`.
+- Lower priority than the count-rollup fields in §4 (those are visible on
+  every list page); batch this with §4 in the next backend mini-PR.
+
 ---
 
 ## 3. Soft mismatches (cosmetic / adapter-fixable in frontend)
