@@ -123,6 +123,7 @@ class WIPListOut(Schema):
     experiment_type_id: int
     experiment_type_name: str
     sample_count: int
+    dispatch_count: int
     status: str
     note: str
     completed_at: datetime | None
@@ -131,12 +132,20 @@ class WIPListOut(Schema):
 
     @staticmethod
     def from_wip(wip: WIP) -> dict:
-        """Build a dict from a WIP instance."""
+        """Build a dict from a WIP instance.
+
+        Expects the queryset to annotate ``dispatch_count`` (see
+        list_wips in apps/wip/api.py) so the list endpoint doesn't
+        incur a per-row COUNT(*). sample_count comes from a count on
+        the M2M; we don't annotate it because WIP detail / state
+        transition paths reuse this builder without the annotation.
+        """
         return {
             "id": wip.pk,
             "experiment_type_id": wip.experiment_type_id,
             "experiment_type_name": wip.experiment_type.name,
             "sample_count": wip.samples.count(),
+            "dispatch_count": getattr(wip, "dispatch_count", wip.dispatches.count()),
             "status": wip.status,
             "note": wip.note,
             "completed_at": wip.completed_at,

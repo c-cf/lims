@@ -241,7 +241,11 @@ def list_wips(
     if not has_lab_role(request):
         return 403, {"detail": "Permission denied"}
 
-    qs = WIP.objects.select_related("experiment_type").order_by("-created_at")
+    qs = (
+        WIP.objects.select_related("experiment_type")
+        .annotate(dispatch_count=models.Count("dispatches"))
+        .order_by("-created_at")
+    )
     if status:
         qs = qs.filter(status=status)
 

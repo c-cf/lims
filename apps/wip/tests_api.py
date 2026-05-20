@@ -198,6 +198,38 @@ class TestWIPList:
         data = resp.json()
         assert all(w["status"] == WIPStatus.IN_PROGRESS for w in data)
 
+    def test_list_wips_includes_dispatch_count(
+        self,
+        client,
+        auth_headers,
+        lab_staff,
+        wip_in_progress,
+        wip,
+        experiment_type,
+        equipment,
+        recipe,
+    ):
+        """Each list row exposes dispatch_count so the SPA Lab WIP list
+        can render the per-WIP dispatch count without N round-trips."""
+        DispatchFactory(
+            wip=wip_in_progress,
+            experiment_type=experiment_type,
+            equipment=equipment,
+            recipe=recipe,
+        )
+        DispatchFactory(
+            wip=wip_in_progress,
+            experiment_type=experiment_type,
+            equipment=equipment,
+            recipe=recipe,
+        )
+
+        resp = client.get("/api/wips/", **auth_headers(lab_staff))
+        assert resp.status_code == 200
+        rows = {row["id"]: row for row in resp.json()}
+        assert rows[wip_in_progress.pk]["dispatch_count"] == 2
+        assert rows[wip.pk]["dispatch_count"] == 0
+
 
 @pytest.mark.django_db
 class TestWIPCreate:
