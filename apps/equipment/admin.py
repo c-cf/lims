@@ -24,13 +24,12 @@ class EquipmentAdmin(ModelAdmin):
 class RecipeAdmin(ModelAdmin):
     list_display = (
         "name",
-        "equipment",
         "experiment_type",
         "is_active",
         "created_at",
     )
-    list_filter = ("is_active", "equipment", "experiment_type")
+    list_filter = ("is_active", "experiment_type")
     search_fields = ("name", "description")
     readonly_fields = ("created_at", "updated_at")
-    list_select_related = ("equipment", "experiment_type")
+    list_select_related = ("experiment_type",)
     list_per_page = 25

@@ -71,7 +71,7 @@ def equipment(experiment_type):
 @pytest.fixture
 def recipe(equipment, experiment_type):
     """Recipe for the given equipment and experiment type."""
-    return RecipeFactory(equipment=equipment, experiment_type=experiment_type)
+    return RecipeFactory(experiment_type=experiment_type)
 
 
 @pytest.fixture
@@ -337,7 +337,7 @@ class TestWIPCreateDispatch:
     ):
         """Returns 400 if recipe.experiment_type != wip.experiment_type."""
         other_et = ExperimentTypeFactory()
-        other_recipe = RecipeFactory(equipment=equipment, experiment_type=other_et)
+        other_recipe = RecipeFactory(experiment_type=other_et)
         resp = client.post(
             f"/api/wips/{wip.pk}/dispatches/",
             data={

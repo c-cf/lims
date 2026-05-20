@@ -1605,10 +1605,9 @@ def equipment_set_capabilities(request: HttpRequest, equipment_id: int) -> HttpR
 
 @role_required("lab_manager")
 def recipes_list(request: HttpRequest) -> HttpResponse:
-    qs = Recipe.objects.select_related("equipment", "experiment_type").order_by(
-        "equipment__name", "name"
+    qs = Recipe.objects.select_related("experiment_type").order_by(
+        "experiment_type__name", "name"
     )
-    equipment_all = Equipment.objects.order_by("name")
     exp_types_all = ExperimentType.objects.filter(is_active=True).order_by(
         "lab_category", "name"
     )
@@ -1618,7 +1617,6 @@ def recipes_list(request: HttpRequest) -> HttpResponse:
         {
             "title": "Recipes",
             "recipes": qs,
-            "equipment_all": equipment_all,
             "exp_types_all": exp_types_all,
         },
     )
@@ -1629,14 +1627,8 @@ def recipes_list(request: HttpRequest) -> HttpResponse:
 def recipe_create(request: HttpRequest) -> HttpResponse:
     name = request.POST.get("name", "").strip()
     description = request.POST.get("description", "").strip()
-    equipment_id = request.POST.get("equipment_id", "").strip()
     exp_type_id = request.POST.get("experiment_type_id", "").strip()
     params_raw = request.POST.get("parameters", "{}").strip()
-
-    try:
-        equipment = Equipment.objects.get(pk=equipment_id)
-    except (Equipment.DoesNotExist, ValueError):
-        return redirect("web:recipes")
 
     try:
         exp_type = ExperimentType.objects.get(pk=exp_type_id, is_active=True)
@@ -1651,7 +1643,6 @@ def recipe_create(request: HttpRequest) -> HttpResponse:
     Recipe.objects.create(
         name=name,
         description=description,
-        equipment=equipment,
         experiment_type=exp_type,
         parameters=params,
     )

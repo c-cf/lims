@@ -87,13 +87,6 @@ class CapabilitySetIn(Schema):
 # ---------------------------------------------------------------------------
 
 
-class RecipeEquipmentOut(Schema):
-    """Nested equipment summary for recipe responses."""
-
-    id: int
-    name: str
-
-
 class RecipeExperimentTypeOut(Schema):
     """Nested experiment type summary for recipe responses."""
 
@@ -102,11 +95,13 @@ class RecipeExperimentTypeOut(Schema):
 
 
 class RecipeIn(Schema):
-    """Input schema for creating a recipe."""
+    """Input schema for creating a recipe.
+
+    Chat-design: no equipment_id — recipes are equipment-agnostic.
+    """
 
     name: str = Field(..., min_length=1, max_length=200)
     description: str = ""
-    equipment_id: int
     experiment_type_id: int
     parameters: dict[str, Any] = {}
 
@@ -128,7 +123,6 @@ class RecipeOut(Schema):
     id: int
     name: str
     description: str
-    equipment: RecipeEquipmentOut
     experiment_type: RecipeExperimentTypeOut
     parameters: dict[str, Any]
     is_active: bool
@@ -142,7 +136,6 @@ class RecipeOut(Schema):
             "id": recipe.pk,
             "name": recipe.name,
             "description": recipe.description,
-            "equipment": {"id": recipe.equipment_id, "name": recipe.equipment.name},
             "experiment_type": {
                 "id": recipe.experiment_type_id,
                 "name": recipe.experiment_type.name,

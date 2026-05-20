@@ -118,50 +118,39 @@ class TestEquipment:
 @pytest.mark.django_db
 class TestRecipe:
     def test_create_recipe(self, experiment_type):
-        """Recipe can be created and linked to Equipment and ExperimentType."""
-        from apps.equipment.models import Equipment, Recipe
+        """Recipe can be created and linked to ExperimentType.
 
-        equip = Equipment.objects.create(
-            name="烤箱 D-04", model_name="OV-9000", capacity=20
-        )
+        Chat-design: recipes are equipment-agnostic.
+        """
+        from apps.equipment.models import Recipe
+
         recipe = Recipe.objects.create(
             name="RA-OV9000-HTSL-300H",
-            equipment=equip,
             experiment_type=experiment_type,
             parameters={"temperature_celsius": 150, "duration_hours": 300},
         )
 
         assert recipe.name == "RA-OV9000-HTSL-300H"
-        assert recipe.equipment == equip
         assert recipe.experiment_type == experiment_type
         assert recipe.is_active is True
 
     def test_recipe_fk_relations(self, experiment_type):
-        """Recipe FK fields correctly reference Equipment and ExperimentType."""
-        from apps.equipment.models import Equipment, Recipe
+        """Recipe FK field correctly references ExperimentType."""
+        from apps.equipment.models import Recipe
 
-        equip = Equipment.objects.create(
-            name="設備 E-05", model_name="EQ-100", capacity=15
-        )
         recipe = Recipe.objects.create(
             name="測試 Recipe",
-            equipment=equip,
             experiment_type=experiment_type,
         )
 
-        assert recipe.equipment_id == equip.pk
         assert recipe.experiment_type_id == experiment_type.pk
 
     def test_recipe_soft_delete(self, experiment_type):
         """Setting is_active=False soft-deletes the record while keeping it in the DB."""
-        from apps.equipment.models import Equipment, Recipe
+        from apps.equipment.models import Recipe
 
-        equip = Equipment.objects.create(
-            name="設備 F-06", model_name="EQ-200", capacity=8
-        )
         recipe = Recipe.objects.create(
             name="停用 Recipe",
-            equipment=equip,
             experiment_type=experiment_type,
         )
         recipe.is_active = False
@@ -172,15 +161,11 @@ class TestRecipe:
 
     def test_recipe_json_parameters(self, experiment_type):
         """parameters JSONField can be written and read back correctly."""
-        from apps.equipment.models import Equipment, Recipe
+        from apps.equipment.models import Recipe
 
-        equip = Equipment.objects.create(
-            name="設備 G-07", model_name="EQ-300", capacity=12
-        )
         params = {"temperature_celsius": 200, "humidity_percent": None}
         recipe = Recipe.objects.create(
             name="JSON 測試 Recipe",
-            equipment=equip,
             experiment_type=experiment_type,
             parameters=params,
         )
@@ -223,7 +208,6 @@ class TestRecipeFactory:
         """RecipeFactory creates a valid Recipe with related objects."""
         recipe = RecipeFactory()
         assert recipe.pk is not None
-        assert recipe.equipment is not None
         assert recipe.experiment_type is not None
         assert recipe.is_active is True
 

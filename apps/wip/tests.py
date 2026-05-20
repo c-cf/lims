@@ -27,12 +27,11 @@ def equipment(experiment_type):
 
 
 @pytest.fixture
-def recipe(equipment, experiment_type):
+def recipe(experiment_type):
     from apps.equipment.models import Recipe
 
     return Recipe.objects.create(
         name="測試 Recipe",
-        equipment=equipment,
         experiment_type=experiment_type,
     )
 
@@ -185,9 +184,7 @@ class TestDispatch:
             name="材料分析", lab_category=LabCategory.MA
         )
         EquipmentCapability.objects.create(equipment=equipment, experiment_type=et2)
-        recipe2 = Recipe.objects.create(
-            name="Recipe 2", equipment=equipment, experiment_type=et2
-        )
+        recipe2 = Recipe.objects.create(name="Recipe 2", experiment_type=et2)
         Dispatch.objects.create(
             wip=wip,
             experiment_type=et2,

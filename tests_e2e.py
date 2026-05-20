@@ -55,7 +55,7 @@ def equipment(experiment_type):
 
 @pytest.fixture
 def recipe(equipment, experiment_type):
-    return RecipeFactory(equipment=equipment, experiment_type=experiment_type)
+    return RecipeFactory(experiment_type=experiment_type)
 
 
 # =============================================================================
