@@ -60,7 +60,7 @@ class TestEquipmentUtilization:
     def test_lab_manager_can_access(self, client, auth_headers, lab_manager):
         """Lab manager can access the endpoint and get valid utilization data."""
         equipment = EquipmentFactory()
-        wip = WIPFactory(equipment=equipment)
+        wip = WIPFactory()
         DispatchFactory(wip=wip, equipment=equipment, status=DispatchStatus.COMPLETED)
         DispatchFactory(wip=wip, equipment=equipment, status=DispatchStatus.COMPLETED)
 
@@ -108,8 +108,8 @@ class TestEquipmentUtilization:
         equipment_a = EquipmentFactory()
         equipment_b = EquipmentFactory()
 
-        wip_a = WIPFactory(equipment=equipment_a)
-        wip_b = WIPFactory(equipment=equipment_b)
+        wip_a = WIPFactory()
+        wip_b = WIPFactory()
         DispatchFactory(
             wip=wip_a, equipment=equipment_a, status=DispatchStatus.COMPLETED
         )
@@ -147,8 +147,8 @@ class TestEquipmentUtilization:
     def test_sample_count_counts_distinct_wips(self, client, auth_headers, lab_manager):
         """sample_count reflects the number of distinct WIPs (each WIP = 1 sample)."""
         equipment = EquipmentFactory()
-        wip_a = WIPFactory(equipment=equipment)
-        wip_b = WIPFactory(equipment=equipment)
+        wip_a = WIPFactory()
+        wip_b = WIPFactory()
         # Two dispatches on the same WIP — should count as 1 unique WIP/sample
         DispatchFactory(wip=wip_a, equipment=equipment, status=DispatchStatus.COMPLETED)
         DispatchFactory(wip=wip_a, equipment=equipment, status=DispatchStatus.COMPLETED)

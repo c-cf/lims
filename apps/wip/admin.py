@@ -50,7 +50,7 @@ class ExperimentResultInline(TabularInline):
 class WIPAdmin(ModelAdmin):
     list_display = (
         "id",
-        "equipment",
+        "experiment_type",
         "sample_count",
         "status",
         "created_by",
@@ -58,9 +58,13 @@ class WIPAdmin(ModelAdmin):
         "created_at",
     )
     list_filter = ("status",)
-    search_fields = ("samples__wafer_id", "equipment__name", "created_by__username")
+    search_fields = (
+        "samples__wafer_id",
+        "experiment_type__name",
+        "created_by__username",
+    )
     readonly_fields = ("completed_at", "created_at", "updated_at")
-    list_select_related = ("equipment", "created_by")
+    list_select_related = ("experiment_type", "created_by")
     list_per_page = 25
     inlines = (WIPSampleInline, DispatchInline)
 
@@ -75,18 +79,20 @@ class DispatchAdmin(ModelAdmin):
         "id",
         "wip",
         "experiment_type",
+        "equipment",
         "status",
         "dispatched_at",
         "completed_at",
         "created_at",
     )
-    list_filter = ("status", "experiment_type")
+    list_filter = ("status", "experiment_type", "equipment")
     search_fields = (
         "experiment_type__name",
+        "equipment__name",
         "created_by__username",
     )
     readonly_fields = ("dispatched_at", "completed_at", "created_at", "updated_at")
-    list_select_related = ("wip", "experiment_type", "recipe")
+    list_select_related = ("wip", "experiment_type", "equipment", "recipe")
     list_per_page = 25
     inlines = (ExperimentResultInline,)
 

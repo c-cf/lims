@@ -24,7 +24,6 @@ class WIPFactory(DjangoModelFactory):
     class Meta:
         model = WIP
 
-    equipment = factory.SubFactory(EquipmentFactory)
     experiment_type = factory.SubFactory(ExperimentTypeFactory)
     status = WIPStatus.CREATED
     note = ""

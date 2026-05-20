@@ -318,7 +318,7 @@ class TestLabManagerCapacityChart:
         EquipmentFactory()  # unused
         # Use a recipe tied to eq1 so DispatchFactory doesn't create a 3rd equipment
         recipe = RecipeFactory(equipment=eq1)
-        wip = WIPFactory(equipment=eq1)
+        wip = WIPFactory()
         d = DispatchFactory(
             status=DispatchStatus.DISPATCHED, wip=wip, equipment=eq1, recipe=recipe
         )

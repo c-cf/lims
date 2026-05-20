@@ -29,15 +29,12 @@ class SampleExperimentProgress(models.TextChoices):
 
 
 class WIP(models.Model):
-    """Work In Progress: tracks batch processing of samples on a single equipment."""
+    """Work In Progress: a batch of samples bound to one experiment_type.
 
-    equipment = models.ForeignKey(
-        "equipment.Equipment",
-        on_delete=models.PROTECT,
-        related_name="wips",
-        null=True,
-        blank=True,
-    )
+    Chat-design: equipment is no longer a property of the WIP — it's
+    chosen per-dispatch (see Dispatch.equipment).
+    """
+
     experiment_type = models.ForeignKey(
         "experiments.ExperimentType",
         on_delete=models.PROTECT,

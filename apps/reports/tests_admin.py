@@ -46,7 +46,7 @@ class TestEquipmentUtilizationAdmin:
 
     def test_query_aggregates_dispatch_data(self, admin_client):
         equipment = EquipmentFactory()
-        wip = WIPFactory(equipment=equipment)
+        wip = WIPFactory()
         DispatchFactory(wip=wip, equipment=equipment)
         url = reverse("admin:reports_equipmentutilizationreport_changelist")
         start = (date.today() - timedelta(days=1)).isoformat()
@@ -60,8 +60,8 @@ class TestEquipmentUtilizationAdmin:
     def test_equipment_filter_narrows_results(self, admin_client):
         eq1 = EquipmentFactory()
         eq2 = EquipmentFactory()
-        wip1 = WIPFactory(equipment=eq1)
-        wip2 = WIPFactory(equipment=eq2)
+        wip1 = WIPFactory()
+        wip2 = WIPFactory()
         DispatchFactory(wip=wip1, equipment=eq1)
         DispatchFactory(wip=wip2, equipment=eq2)
         url = reverse("admin:reports_equipmentutilizationreport_changelist")
