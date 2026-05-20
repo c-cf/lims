@@ -57,6 +57,9 @@ from apps.wip.models import (
     WIPSample,
     WIPStatus,
 )
+from apps.wip.state_machine import (
+    InvalidTransitionError as WIPInvalidTransitionError,
+)
 from apps.wip.state_machine import validate_dispatch_transition, validate_wip_transition
 
 from .decorators import role_required
@@ -1018,9 +1021,15 @@ def wip_create(request: HttpRequest) -> HttpResponse:
         for sample in samples:
             WIPSample.objects.create(wip=wip, sample=sample)
             if sample.status == SampleStatus.RECEIVED:
-                sample.status = validate_sample_transition(
-                    sample.status, "start_processing"
-                )
+                # Skip silently if the state-machine call fails — upstream
+                # checks ensure RECEIVED → PROCESSING is valid, but a hard
+                # raise here would 500 the entire WIP-create flow.
+                try:
+                    sample.status = validate_sample_transition(
+                        sample.status, "start_processing"
+                    )
+                except InvalidTransitionError:
+                    continue
                 sample.save(update_fields=["status", "updated_at"])
 
     return redirect("web:wip-detail", wip_id=wip.pk)
@@ -1084,7 +1093,7 @@ def wip_complete(request: HttpRequest, wip_id: int) -> HttpResponse:
             )
         try:
             target = validate_wip_transition(wip.status, "complete")
-        except InvalidTransitionError as e:
+        except WIPInvalidTransitionError as e:
             return _action_error(request, str(e), redirect_url=f"/wips/{wip_id}/")
         wip.status = target
         wip.completed_at = timezone.now()
@@ -1137,7 +1146,7 @@ def wip_abort(request: HttpRequest, wip_id: int) -> HttpResponse:
         wip = get_object_or_404(WIP.objects.select_for_update(), pk=wip_id)
         try:
             target = validate_wip_transition(wip.status, "abort")
-        except InvalidTransitionError as e:
+        except WIPInvalidTransitionError as e:
             return _action_error(request, str(e), redirect_url=f"/wips/{wip_id}/")
         wip.status = target
         wip.save()
@@ -1298,7 +1307,7 @@ def _dispatch_action(
             dispatch.dispatched_at = timezone.now()
         try:
             target = validate_dispatch_transition(dispatch.status, action)
-        except InvalidTransitionError as e:
+        except WIPInvalidTransitionError as e:
             return _action_error(
                 request,
                 str(e),
@@ -1354,7 +1363,7 @@ def dispatch_record_result(request: HttpRequest, dispatch_id: int) -> HttpRespon
         )
         try:
             target = validate_dispatch_transition(dispatch.status, "record_result")
-        except InvalidTransitionError as e:
+        except WIPInvalidTransitionError as e:
             return _action_error(
                 request, str(e), redirect_url=f"/dispatches/{dispatch_id}/"
             )
@@ -1388,7 +1397,7 @@ def dispatch_report_exception(request: HttpRequest, dispatch_id: int) -> HttpRes
         )
         try:
             target = validate_dispatch_transition(dispatch.status, "report_exception")
-        except InvalidTransitionError as e:
+        except WIPInvalidTransitionError as e:
             return _action_error(
                 request, str(e), redirect_url=f"/dispatches/{dispatch_id}/"
             )
@@ -1408,7 +1417,7 @@ def dispatch_redispatch(request: HttpRequest, dispatch_id: int) -> HttpResponse:
         )
         try:
             target = validate_dispatch_transition(old_dispatch.status, "redispatch")
-        except InvalidTransitionError as e:
+        except WIPInvalidTransitionError as e:
             return _action_error(
                 request, str(e), redirect_url=f"/dispatches/{dispatch_id}/"
             )

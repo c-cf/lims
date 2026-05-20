@@ -10,6 +10,9 @@ from api.schemas import ErrorOut
 from apps.accounts.auth import JWTAuth
 from apps.accounts.permissions import has_lab_role
 from apps.commissions.models import Request, RequestStatus, Sample, SampleStatus
+from apps.commissions.state_machine import (
+    InvalidTransitionError as SampleInvalidTransitionError,
+)
 from apps.commissions.state_machine import validate_sample_transition
 from apps.equipment.models import (
     Equipment,
@@ -162,10 +165,20 @@ def _validate_samples_for_wip(
 
 
 def _transition_samples_to_processing(samples: list[Sample]) -> None:
-    """Transition RECEIVED samples to PROCESSING status."""
+    """Transition RECEIVED samples to PROCESSING status.
+
+    Wrapped in try/except defensively: callers always pre-validate via
+    _validate_samples_for_wip so the transition is valid in practice,
+    but skipping silently is the consistent state-machine pattern used
+    by abort_wip / complete_wip — never let a state-machine failure
+    inside an auto-transition bubble out as a 500.
+    """
     for sample in samples:
         if sample.status == SampleStatus.RECEIVED:
-            target = validate_sample_transition(sample.status, "start_processing")
+            try:
+                target = validate_sample_transition(sample.status, "start_processing")
+            except SampleInvalidTransitionError:
+                continue
             sample.status = target
             sample.save(update_fields=["status", "updated_at"])
 
@@ -203,7 +216,7 @@ def _update_experiment_statuses_on_dispatch_complete(dispatch: Dispatch) -> None
         if total > 0 and completed >= total:
             try:
                 target = validate_sample_transition(sample.status, "complete")
-            except InvalidTransitionError:
+            except SampleInvalidTransitionError:
                 continue
             sample.status = target
             sample.save(update_fields=["status", "updated_at"])
@@ -497,7 +510,7 @@ def complete_wip(request: HttpRequest, wip_id: int):
                     sample_target = validate_sample_transition(
                         sample.status, "complete"
                     )
-                except InvalidTransitionError:
+                except SampleInvalidTransitionError:
                     continue
                 sample.status = sample_target
                 sample.save(update_fields=["status", "updated_at"])
@@ -548,7 +561,14 @@ def abort_wip(request: HttpRequest, wip_id: int):
         wip.status = target
         wip.save(update_fields=["status", "updated_at"])
 
-        # Mark PROCESSING samples as processing_exception.
+        # Mark PROCESSING samples as processing_exception. Samples in
+        # other states (e.g. RECEIVED if no dispatch ever started) are
+        # skipped silently — the abort applies at the WIP level and we
+        # don't want sample-side state-machine failures to crash it.
+        # Critical: catch SampleInvalidTransitionError, not WIP's
+        # InvalidTransitionError — the two classes are distinct (one
+        # per app's state_machine module) and confusing them was the
+        # bug that surfaced as a 500 on abort_wip during smoke testing.
         for sample in Sample.objects.select_for_update().filter(
             pk__in=wip.samples.values_list("pk", flat=True)
         ):
@@ -558,7 +578,7 @@ def abort_wip(request: HttpRequest, wip_id: int):
                 )
                 sample.status = sample_target
                 sample.save(update_fields=["status", "updated_at"])
-            except InvalidTransitionError:
+            except SampleInvalidTransitionError:
                 pass
 
     wip = _wip_detail_queryset().get(pk=wip_id)

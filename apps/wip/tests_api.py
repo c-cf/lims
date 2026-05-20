@@ -530,7 +530,8 @@ class TestWIPAbort:
     def test_abort_wip_completed_fails(
         self, client, auth_headers, lab_staff, wip_in_progress
     ):
-        """Cannot abort an already completed WIP."""
+        """Cannot abort an already completed WIP — must return 400 with
+        a state-machine detail string, not 500."""
         wip_in_progress.status = WIPStatus.COMPLETED
         wip_in_progress.save()
         resp = client.post(
@@ -538,6 +539,55 @@ class TestWIPAbort:
             **auth_headers(lab_staff),
         )
         assert resp.status_code == 400
+        detail = resp.json()["detail"]
+        # The detail string is the InvalidTransitionError's message; it
+        # should mention both the disallowed action and the source state.
+        assert "abort" in detail.lower()
+        assert "completed" in detail.lower()
+
+    def test_abort_wip_from_aborted_state_returns_400(
+        self, client, auth_headers, lab_staff, wip_in_progress
+    ):
+        """Aborting an already-aborted WIP is a no-op error, not a 500."""
+        wip_in_progress.status = WIPStatus.ABORTED
+        wip_in_progress.save()
+        resp = client.post(
+            f"/api/wips/{wip_in_progress.pk}/abort/",
+            **auth_headers(lab_staff),
+        )
+        assert resp.status_code == 400
+        assert "detail" in resp.json()
+
+    def test_abort_wip_with_received_sample_succeeds(
+        self, client, auth_headers, lab_staff, equipment, experiment_type
+    ):
+        """Reproducer for the smoke-test 500: abort_wip on a WIP whose
+        sample is still in RECEIVED state (not yet PROCESSING) must NOT
+        raise InvalidTransitionError from the sample-side
+        processing_exception transition. The sample is skipped silently
+        and the WIP transitions to aborted with a 200 response.
+        """
+        from apps.commissions.factories import RequestFactory, SampleFactory
+
+        req = RequestFactory(status=RequestStatus.IN_PROGRESS, requester=lab_staff)
+        RequestExperiment.objects.create(request=req, experiment_type=experiment_type)
+        # Sample stays in RECEIVED — never advanced to PROCESSING because
+        # no dispatch was ever created on this WIP.
+        received_sample = SampleFactory(request=req, status=SampleStatus.RECEIVED)
+        wip = WIPFactory(
+            experiment_type=experiment_type,
+            status=WIPStatus.IN_PROGRESS,
+            created_by=lab_staff,
+        )
+        WIPSample.objects.create(wip=wip, sample=received_sample)
+
+        resp = client.post(f"/api/wips/{wip.pk}/abort/", **auth_headers(lab_staff))
+        assert resp.status_code == 200, resp.content
+        assert resp.json()["status"] == WIPStatus.ABORTED
+        received_sample.refresh_from_db()
+        # processing_exception is not a valid transition from RECEIVED,
+        # so the sample is left untouched rather than crashing the abort.
+        assert received_sample.status == SampleStatus.RECEIVED
 
     def test_abort_wip_fab_user_forbidden(self, client, auth_headers, fab_user, wip):
         """Fab user cannot abort WIPs."""
