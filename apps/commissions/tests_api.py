@@ -126,6 +126,20 @@ class TestRequestList:
         assert len(data) == 1
         assert data[0]["urgency"] == "3d"
 
+    def test_list_requests_includes_sample_count(self, client, auth_headers, lab_staff):
+        """Each list row exposes sample_count so the SPA's Fab Dashboard
+        can render the wafers-per-row count without a second round-trip."""
+        req_with = RequestFactory()
+        SampleFactory(request=req_with)
+        SampleFactory(request=req_with)
+        req_empty = RequestFactory()
+
+        resp = client.get("/api/requests/", **auth_headers(lab_staff))
+        assert resp.status_code == 200
+        rows = {row["id"]: row for row in resp.json()}
+        assert rows[req_with.pk]["sample_count"] == 2
+        assert rows[req_empty.pk]["sample_count"] == 0
+
 
 @pytest.mark.django_db
 class TestRequestCreate:

@@ -122,13 +122,19 @@ class RequestListOut(Schema):
     status: str
     urgency: str
     note: str
+    sample_count: int
     submitted_at: datetime | None
     created_at: datetime
     updated_at: datetime
 
     @staticmethod
     def from_request(req: Request) -> dict:
-        """Build a dict from a Request instance."""
+        """Build a dict from a Request instance.
+
+        Expects the queryset to annotate ``sample_count`` (see
+        list_requests in apps/commissions/api.py) so the list endpoint
+        doesn't incur a per-row COUNT(*).
+        """
         profile = getattr(req.requester, "profile", None)
         return {
             "id": req.pk,
@@ -141,6 +147,7 @@ class RequestListOut(Schema):
             "status": req.status,
             "urgency": req.urgency,
             "note": req.note,
+            "sample_count": getattr(req, "sample_count", req.samples.count()),
             "submitted_at": req.submitted_at,
             "created_at": req.created_at,
             "updated_at": req.updated_at,

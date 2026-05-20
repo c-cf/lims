@@ -4,7 +4,7 @@ from collections.abc import Callable
 
 from django.contrib.auth.models import User
 from django.db import models, transaction
-from django.db.models import Prefetch
+from django.db.models import Count, Prefetch
 from django.http import HttpRequest
 from django.utils import timezone
 from ninja import Query, Router
@@ -229,7 +229,11 @@ def list_requests(
     urgency: RequestUrgency | None = Query(None),  # noqa: B008
 ):
     """List commission requests. Fab users see only their own."""
-    qs = Request.objects.select_related("requester__profile").order_by("-created_at")
+    qs = (
+        Request.objects.select_related("requester__profile")
+        .annotate(sample_count=Count("samples"))
+        .order_by("-created_at")
+    )
 
     if _is_fab_user(request):
         qs = qs.filter(requester=request.auth)
