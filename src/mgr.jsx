@@ -38,6 +38,44 @@ const useMgrRequests = () => {
   return { data, loading, error, refresh };
 };
 
+// Manager-side recipe list. Read-only for this commit — the create /
+// edit / delete surface goes through the New Recipe modal which is
+// one of the three deferred redesigns (CLAUDE.local.md).
+const useMgrRecipes = () => {
+  const [data, setData] = mS([]);
+  const [loading, setLoading] = mS(true);
+  const [error, setError] = mS(null);
+  const refresh = React.useCallback(() => {
+    if (!window.api || !window.api.recipes) { setLoading(false); return; }
+    setLoading(true);
+    window.api.recipes.list()
+      .then(rs => { setData(rs); setError(null); })
+      .catch(err => setError(err.message || String(err)))
+      .finally(() => setLoading(false));
+  }, []);
+  React.useEffect(() => { refresh(); }, [refresh]);
+  return { data, loading, error, refresh };
+};
+
+// Manager-side equipment list. Same /equipment/ endpoint as Lab
+// Equipment; both pages stay independent so the manager surface can
+// add maintenance controls later without coupling lab + manager.
+const useMgrEquipment = () => {
+  const [data, setData] = mS([]);
+  const [loading, setLoading] = mS(true);
+  const [error, setError] = mS(null);
+  const refresh = React.useCallback(() => {
+    if (!window.api || !window.api.equipment) { setLoading(false); return; }
+    setLoading(true);
+    window.api.equipment.list()
+      .then(es => { setData(es); setError(null); })
+      .catch(err => setError(err.message || String(err)))
+      .finally(() => setLoading(false));
+  }, []);
+  React.useEffect(() => { refresh(); }, [refresh]);
+  return { data, loading, error, refresh };
+};
+
 // Manager-side single-request detail (samples + approval_logs inline).
 // `refresh` is exposed so approve/return/reject can re-render in place.
 const useMgrRequestDetail = (id) => {
@@ -829,18 +867,36 @@ const RecipeModal = ({ open, onClose, onSubmit, initial }) => {
   );
 };
 
-const MgrRecipes = ({ recipes, onCreate, onUpdate, onDelete }) => {
-  const [modalOpen, setModalOpen] = mS(false);
-  const [editing, setEditing] = mS(null);
-  const open = (rec) => { setEditing(rec); setModalOpen(true); };
-  const close = () => { setEditing(null); setModalOpen(false); };
+const MgrRecipes = ({ showToast }) => {
+  const { data: recipes, loading, error } = useMgrRecipes();
+  // New / Edit / Delete all hang on the deferred Recipes modal redesign,
+  // so every write button on this page fires a placeholder toast.
+  const placeholder = () => showToast && showToast('Modal redesign pending');
+
+  if (loading && recipes.length === 0) {
+    return (
+      <Page title="Recipes" subtitle="Loading…">
+        <div style={{ padding: '60px 20px', textAlign: 'center', color: mMuted, fontSize: 14 }}>Loading…</div>
+      </Page>
+    );
+  }
 
   return (
     <Page
       title="Recipes"
-      subtitle="食譜 — define and edit experiment recipes used by dispatches"
-      right={<PrimaryBtn icon={<MI.Plus size={14}/>} onClick={() => open(null)}>New Recipe</PrimaryBtn>}
+      subtitle="食譜 — experiment recipes referenced by dispatches"
+      right={<PrimaryBtn icon={<MI.Plus size={14}/>} onClick={placeholder}>New Recipe</PrimaryBtn>}
     >
+      {error && (
+        <div style={{
+          padding: '12px 16px', marginBottom: 14, borderRadius: 10,
+          background: '#fde4e4', color: '#c0394a', fontSize: 13.5, fontWeight: 500,
+          border: '1px solid #f6c4c4',
+        }}>
+          Couldn't load recipes: {error}
+        </div>
+      )}
+
       <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
         {recipes.length === 0 ? (
           <Card padding={48} style={{ textAlign: 'center', color: mMuted }}>
@@ -848,7 +904,13 @@ const MgrRecipes = ({ recipes, onCreate, onUpdate, onDelete }) => {
             <div style={{ fontSize: 14, fontWeight: 600, color: mText2 }}>No recipes yet</div>
           </Card>
         ) : recipes.map(rec => {
-          const exp = findExpById(rec.expId);
+          // Backend recipe shape: { id, name, description, experimentId,
+          // experimentName, params, active }. The local string-slug
+          // `findExpById` may match for legacy seed rows; otherwise we
+          // derive a chip code from the experiment name's initials.
+          const expCode = (findExpById(rec.experimentId)?.code) || (rec.experimentName ? rec.experimentName.split(/\s+/).map(t => t[0]).join('').slice(0, 4).toUpperCase() : '—');
+          const expName = rec.experimentName || findExpById(rec.experimentId)?.name || '—';
+          const paramEntries = rec.params ? Object.entries(rec.params) : [];
           return (
             <div key={rec.id} style={{
               display: 'grid',
@@ -866,30 +928,32 @@ const MgrRecipes = ({ recipes, onCreate, onUpdate, onDelete }) => {
               <div style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
                 <span style={{
                   fontSize: 10.5, fontWeight: 700, padding: '3px 8px', borderRadius: 999,
-                  background: exp?.group === 'RA' ? '#e8e7f6' : '#d4eaf0',
-                  color: exp?.group === 'RA' ? '#5550a0' : '#2a7a91',
+                  background: '#e8e7f6', color: '#5550a0',
                   letterSpacing: '0.05em',
-                }}>{exp?.code}</span>
-                <span style={{ fontSize: 13, color: mInk }}>{exp?.name}</span>
+                }}>{expCode}</span>
+                <span style={{ fontSize: 13, color: mInk }}>{expName}</span>
               </div>
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
-                {Object.entries(rec.params).slice(0, 4).map(([k, v]) => (
+                {paramEntries.slice(0, 4).map(([k, v]) => (
                   <span key={k} style={{
                     fontFamily: 'var(--font-mono)', fontSize: 11.5, color: mText2,
                     padding: '2px 8px', borderRadius: 6, background: mBgSoft,
                     border: `1px solid ${mLineSft}`,
-                  }}>{k} <strong style={{ color: mInk }}>{v}</strong></span>
+                  }}>{k} <strong style={{ color: mInk }}>{typeof v === 'object' ? JSON.stringify(v) : String(v)}</strong></span>
                 ))}
-                {Object.entries(rec.params).length > 4 && (
-                  <span style={{ fontSize: 11.5, color: mMuted, alignSelf: 'center' }}>+{Object.entries(rec.params).length - 4} more</span>
+                {paramEntries.length > 4 && (
+                  <span style={{ fontSize: 11.5, color: mMuted, alignSelf: 'center' }}>+{paramEntries.length - 4} more</span>
+                )}
+                {paramEntries.length === 0 && (
+                  <span style={{ fontSize: 12, color: mMuted, fontStyle: 'italic' }}>No parameters</span>
                 )}
               </div>
               <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
-                <button onClick={() => open(rec)} style={{
+                <button onClick={placeholder} style={{
                   background: 'transparent', border: 'none', cursor: 'pointer',
                   color: mAccent, fontWeight: 600, fontSize: 13, fontFamily: 'inherit', padding: 0,
                 }}>Edit</button>
-                <button onClick={() => onDelete(rec.id)} style={{
+                <button onClick={placeholder} style={{
                   background: 'transparent', border: 'none', cursor: 'pointer',
                   color: '#b9384a', fontWeight: 600, fontSize: 13, fontFamily: 'inherit', padding: 0,
                 }}>Delete</button>
@@ -898,17 +962,6 @@ const MgrRecipes = ({ recipes, onCreate, onUpdate, onDelete }) => {
           );
         })}
       </div>
-
-      <RecipeModal
-        open={modalOpen}
-        onClose={close}
-        initial={editing}
-        onSubmit={(payload) => {
-          if (editing) onUpdate(payload);
-          else onCreate(payload);
-          close();
-        }}
-      />
     </Page>
   );
 };
@@ -1342,7 +1395,7 @@ const MgrApp = ({ route, navigate }) => {
   if (p === 'mgr_dashboard')      page = <MgrDashboard requests={requests} recipes={recipes} navigate={navigate}/>;
   else if (p === 'mgr_all_requests') page = <MgrAllRequests navigate={navigate}/>;
   else if (p === 'mgr_request')   page = <MgrRequestDetail id={route.id} navigate={navigate} showToast={showToast}/>;
-  else if (p === 'mgr_recipes')   page = <MgrRecipes recipes={recipes} onCreate={createRecipe} onUpdate={updateRecipe} onDelete={deleteRecipe}/>;
+  else if (p === 'mgr_recipes')   page = <MgrRecipes showToast={showToast}/>;
   else if (p === 'mgr_reports')   page = <MgrReports requests={requests} recipes={recipes}/>;
   else page = <MgrDashboard requests={requests} recipes={recipes} navigate={navigate}/>;
 
