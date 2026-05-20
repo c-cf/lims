@@ -38,6 +38,51 @@ const useMgrRequests = () => {
   return { data, loading, error, refresh };
 };
 
+// Manager Dashboard data — tile counts come from a single requests
+// fetch + an equipment count fetch, both in parallel (mirrors the Lab
+// Dashboard's `useLabDashboardData` pattern).
+const useMgrDashboardData = () => {
+  const [requests, setRequests] = mS([]);
+  const [equipmentCount, setEquipmentCount] = mS(0);
+  const [loading, setLoading] = mS(true);
+  const [error, setError] = mS(null);
+  const refresh = React.useCallback(() => {
+    if (!window.api) { setLoading(false); return; }
+    setLoading(true);
+    Promise.all([
+      window.api.requests.list(),
+      window.api.equipment.list().catch(() => []),
+    ])
+      .then(([rs, eqs]) => {
+        setRequests(rs);
+        setEquipmentCount(eqs.length);
+        setError(null);
+      })
+      .catch(err => setError(err.message || String(err)))
+      .finally(() => setLoading(false));
+  }, []);
+  React.useEffect(() => { refresh(); }, [refresh]);
+  return { requests, equipmentCount, loading, error, refresh };
+};
+
+// Live trend points for the dashboard chart. The backend `/reports/trends`
+// endpoint takes a metric + window in days and returns
+// `{metric, days, points: [{date, count}]}`.
+const useMgrTrend = (metric = 'requests_per_day', days = 30) => {
+  const [data, setData] = mS(null);
+  const [loading, setLoading] = mS(true);
+  const [error, setError] = mS(null);
+  React.useEffect(() => {
+    if (!window.api || !window.api.reports) { setLoading(false); return; }
+    setLoading(true);
+    window.api.reports.trends({ metric, days })
+      .then(d => { setData(d); setError(null); })
+      .catch(err => setError(err.message || String(err)))
+      .finally(() => setLoading(false));
+  }, [metric, days]);
+  return { data, loading, error };
+};
+
 // Manager-side recipe list. Read-only for this commit — the create /
 // edit / delete surface goes through the New Recipe modal which is
 // one of the three deferred redesigns (CLAUDE.local.md).
@@ -1161,37 +1206,50 @@ const smoothPath = (pts) => {
   return d;
 };
 
-const TrendChart = ({ requests }) => {
-  // Default window: 13 days back through today.
-  const [start, setStart] = mS('2026-05-06');
-  const [end, setEnd]   = mS(DEMO_TODAY);
-  const [applied, setApplied] = mS({ start: '2026-05-06', end: DEMO_TODAY });
+const TrendChart = () => {
+  // Backend `/reports/trends` is `days`-based, not range-based — drop the
+  // date pickers in favor of a fixed 30-day rolling window.
+  const { data: trend, loading, error } = useMgrTrend('requests_per_day', 30);
 
-  // Build per-day dispatch volume from request submitted dates; equipment
-  // utilization is a smoothed multiplier of that volume so the two curves
-  // co-move like the screenshot.
+  // Derive the chart series. `days` is an array of {date, dispatches,
+  // utilization}; "utilization" is a smoothed multiplier of the count
+  // (kept from the mock UI for the two-line visual — gap §4's trends
+  // endpoint only ships request volume, not real equipment usage).
   const days = mM(() => {
-    const n = Math.max(1, dayDiff(applied.start, applied.end) + 1);
-    const dispatchedByDay = {};
-    requests.forEach(r => {
-      const d = (r.submitted || r.created)?.split(' ')[0];
-      if (d) dispatchedByDay[d] = (dispatchedByDay[d] || 0) + 1;
-    });
-    const arr = [];
-    for (let i = 0; i < n; i++) {
-      const date = addDays(applied.start, i);
-      const dispatches = dispatchedByDay[date] || 0;
-      // Utilization tracks volume but lingers (smoother).
-      arr.push({ date, dispatches });
-    }
-    // Smooth utilization: each day = average of itself plus the previous one,
-    // scaled so a single dispatch day reads as ~24% (matches the screenshot).
+    const points = trend?.points || [];
+    const arr = points.map(p => ({ date: p.date, dispatches: p.count }));
     for (let i = 0; i < arr.length; i++) {
       const prev = i > 0 ? arr[i - 1].dispatches : 0;
       arr[i].utilization = Math.min(100, (arr[i].dispatches * 0.6 + prev * 0.4) * 24);
     }
     return arr;
-  }, [applied, requests]);
+  }, [trend]);
+
+  if (loading && !trend) {
+    return (
+      <Card padding={22} style={{ marginTop: 18, textAlign: 'center', color: mMuted, fontSize: 13 }}>
+        Loading trend…
+      </Card>
+    );
+  }
+  if (error) {
+    return (
+      <Card padding={22} style={{ marginTop: 18 }}>
+        <div style={{
+          padding: '12px 16px', borderRadius: 10,
+          background: '#fde4e4', color: '#c0394a', fontSize: 13.5, fontWeight: 500,
+          border: '1px solid #f6c4c4',
+        }}>Couldn't load trend: {error}</div>
+      </Card>
+    );
+  }
+  if (days.length === 0) {
+    return (
+      <Card padding={22} style={{ marginTop: 18, textAlign: 'center', color: mMuted, fontSize: 13 }}>
+        No trend data yet.
+      </Card>
+    );
+  }
 
   const maxDispatches = Math.max(1, ...days.map(d => d.dispatches));
   const W = 880, H = 220, PL = 36, PR = 56, PT = 24, PB = 36;
@@ -1226,18 +1284,10 @@ const TrendChart = ({ requests }) => {
           <div style={{ fontSize: 15, fontWeight: 700, color: mInk, letterSpacing: '-0.01em' }}>資源利用 / 產能趨勢</div>
           <div style={{ fontSize: 12, color: mMuted, marginTop: 2 }}>設備稼動率與每日派工量</div>
         </div>
-        <div style={{ marginLeft: 'auto', display: 'inline-flex', alignItems: 'center', gap: 10 }}>
-          <input type="date" value={start} onChange={(e) => setStart(e.target.value)} style={{
-            padding: '8px 10px', borderRadius: 8, border: `1px solid ${mLine}`,
-            fontSize: 12.5, fontFamily: 'var(--font-mono)', color: mInk,
-          }}/>
-          <MI.ArrowRight size={14} color={mMuted}/>
-          <input type="date" value={end} onChange={(e) => setEnd(e.target.value)} style={{
-            padding: '8px 10px', borderRadius: 8, border: `1px solid ${mLine}`,
-            fontSize: 12.5, fontFamily: 'var(--font-mono)', color: mInk,
-          }}/>
-          <PrimaryBtn onClick={() => setApplied({ start, end })} style={{ padding: '8px 14px' }}>套用</PrimaryBtn>
-        </div>
+        <div style={{
+          marginLeft: 'auto', fontSize: 12, color: mMuted, fontWeight: 600,
+          padding: '6px 12px', borderRadius: 999, background: mBgSoft, border: `1px solid ${mLineSft}`,
+        }}>Last {trend?.days ?? 30} days</div>
       </div>
 
       <div style={{ padding: '14px 22px 20px' }}>
@@ -1297,35 +1347,49 @@ const TrendChart = ({ requests }) => {
   );
 };
 
-const MgrDashboard = ({ requests, recipes, navigate }) => {
+const MgrDashboard = ({ navigate }) => {
+  const { requests, equipmentCount, loading: countsLoading, error: countsError } = useMgrDashboardData();
   const pending = requests.filter(r => r.status === 'submitted');
   const inProgress = requests.filter(r => r.status === 'in_progress').length;
   const completed = requests.filter(r => r.status === 'completed').length;
-  const equipmentCount = MGR_EQUIPMENT.length;
+
+  // Show "—" while the initial fetch is in flight rather than the
+  // misleading "0" that an empty filter would produce.
+  const initialLoad = countsLoading && requests.length === 0;
+  const v = (n) => initialLoad ? '—' : n;
 
   return (
     <Page
       title="Dashboard"
       subtitle="Welcome back, lab_manager"
     >
+      {countsError && (
+        <div style={{
+          padding: '12px 16px', marginBottom: 14, borderRadius: 10,
+          background: '#fde4e4', color: '#c0394a', fontSize: 13.5, fontWeight: 500,
+          border: '1px solid #f6c4c4',
+        }}>
+          Couldn't load tile counts: {countsError}
+        </div>
+      )}
       {/* To approve first \u2014 it's the manager's primary action. */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 14, marginBottom: 22 }}>
         <MgrStatTile
-          label="To approve" value={pending.length}
+          label="To approve" value={v(pending.length)}
           icon={<MI.Clock size={16}/>} tint="#fef0d4" accent="#b8720e"
           onClick={() => navigate({ page: 'mgr_all_requests' })}
         />
         <MgrStatTile
-          label="In Progress" value={inProgress}
+          label="In Progress" value={v(inProgress)}
           icon={<MI.Activity size={16}/>} tint="#ecebf3" accent="#5550a0"
           onClick={() => navigate({ page: 'mgr_all_requests' })}
         />
         <MgrStatTile
-          label="Completed" value={completed}
+          label="Completed" value={v(completed)}
           icon={<MI.CircleCheck size={16}/>} tint="#dbeafe" accent="#1d4ed8"
         />
         <MgrStatTile
-          label="Equipment" value={equipmentCount}
+          label="Equipment" value={v(equipmentCount)}
           icon={<MI.Equipment size={16}/>} tint="#ecebf3" accent="#4f4a8f"
           onClick={() => navigate({ page: 'lab_equipment' })}
         />
@@ -1367,11 +1431,11 @@ const MgrDashboard = ({ requests, recipes, navigate }) => {
               <div style={{ fontSize: 14, fontWeight: 700, color: mInk }}>{r.title}</div>
               <div style={{ fontSize: 12, color: mMuted, marginTop: 3, display: 'inline-flex', alignItems: 'center', gap: 6, flexWrap: 'wrap', whiteSpace: 'nowrap' }}>
                 <MI.Calendar size={11}/>
-                <span style={{ fontFamily: 'var(--font-mono)' }}>{r.submitted?.split(' ')[0] || r.created.split(' ')[0]}</span>
+                <span style={{ fontFamily: 'var(--font-mono)' }}>{(r.submitted || r.created || '').split(' ')[0] || '—'}</span>
                 <span aria-hidden>·</span>
-                <span>{r.samples.length} wafer{r.samples.length === 1 ? '' : 's'}</span>
+                <span>{(r.sampleCount ?? r.samples.length)} wafer{(r.sampleCount ?? r.samples.length) === 1 ? '' : 's'}</span>
                 <span aria-hidden>·</span>
-                <span>by <span style={{ fontFamily: 'var(--font-mono)', color: mText2 }}>{r.history[0]?.by || 'fab_user'}</span></span>
+                <span>by <span style={{ fontFamily: 'var(--font-mono)', color: mText2 }}>{r.requester?.username || r.history[0]?.by || '—'}</span></span>
               </div>
             </div>
             <Pill kind={r.urgency} mapping={URGENCY_LABEL}/>
@@ -1383,7 +1447,7 @@ const MgrDashboard = ({ requests, recipes, navigate }) => {
         ))}
       </Card>
 
-      <TrendChart requests={requests}/>
+      <TrendChart/>
     </Page>
   );
 };
@@ -1421,12 +1485,12 @@ const MgrApp = ({ route, navigate }) => {
 
   let page = null;
   const p = route.page;
-  if (p === 'mgr_dashboard')      page = <MgrDashboard requests={requests} recipes={recipes} navigate={navigate}/>;
+  if (p === 'mgr_dashboard')      page = <MgrDashboard navigate={navigate}/>;
   else if (p === 'mgr_all_requests') page = <MgrAllRequests navigate={navigate}/>;
   else if (p === 'mgr_request')   page = <MgrRequestDetail id={route.id} navigate={navigate} showToast={showToast}/>;
   else if (p === 'mgr_recipes')   page = <MgrRecipes showToast={showToast}/>;
   else if (p === 'mgr_reports')   page = <MgrReports/>;
-  else page = <MgrDashboard requests={requests} recipes={recipes} navigate={navigate}/>;
+  else page = <MgrDashboard navigate={navigate}/>;
 
   return (
     <>
