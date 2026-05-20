@@ -289,6 +289,7 @@ class SampleListOut(Schema):
     wafer_size: str
     status: str
     request_id: int
+    has_wip: bool = False
     received_at: datetime | None
     created_at: datetime
     updated_at: datetime

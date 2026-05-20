@@ -705,6 +705,37 @@ class TestSampleList:
         assert len(data) == 1
         assert data[0]["status"] == "shipped"
 
+    def test_list_samples_exposes_has_wip(self, client, auth_headers, lab_staff):
+        """has_wip is True iff the sample is in at least one non-terminal
+        WIP (CREATED or IN_PROGRESS); terminal WIPs (COMPLETED, ABORTED)
+        don't count. Lets the SPA's Lab Samples page derive the in_wip
+        pill without a second round-trip."""
+        from apps.experiments.factories import ExperimentTypeFactory
+        from apps.wip.factories import WIPFactory
+        from apps.wip.models import WIPSample, WIPStatus
+
+        req = RequestFactory()
+        et = ExperimentTypeFactory()
+        s_active = SampleFactory(request=req, wafer_id="WF-ACTIVE")
+        s_terminal = SampleFactory(request=req, wafer_id="WF-DONE")
+        s_idle = SampleFactory(request=req, wafer_id="WF-IDLE")
+
+        WIPSample.objects.create(
+            wip=WIPFactory(experiment_type=et, status=WIPStatus.IN_PROGRESS),
+            sample=s_active,
+        )
+        WIPSample.objects.create(
+            wip=WIPFactory(experiment_type=et, status=WIPStatus.COMPLETED),
+            sample=s_terminal,
+        )
+
+        resp = client.get("/api/samples/", **auth_headers(lab_staff))
+        assert resp.status_code == 200
+        by_id = {row["id"]: row for row in resp.json()}
+        assert by_id[s_active.pk]["has_wip"] is True
+        assert by_id[s_terminal.pk]["has_wip"] is False
+        assert by_id[s_idle.pk]["has_wip"] is False
+
 
 @pytest.mark.django_db
 class TestSampleDetail:

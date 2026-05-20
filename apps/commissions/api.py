@@ -4,7 +4,7 @@ from collections.abc import Callable
 
 from django.contrib.auth.models import User
 from django.db import models, transaction
-from django.db.models import Count, Prefetch
+from django.db.models import Count, Exists, OuterRef, Prefetch
 from django.http import HttpRequest
 from django.utils import timezone
 from ninja import Query, Router
@@ -568,8 +568,24 @@ def list_samples(
     request_id: int | None = Query(None),
     status: SampleStatus | None = Query(None),  # noqa: B008
 ):
-    """List samples with optional filters. Fab users see only their own."""
-    qs = Sample.objects.order_by("-created_at")
+    """List samples with optional filters. Fab users see only their own.
+
+    Annotates ``has_wip`` (True when the sample is in at least one
+    non-terminal WIP) so the SPA's Lab Samples page can derive its
+    ``in_wip`` pill without a second round-trip — see
+    INTEGRATION_GAPS §3.2 (sample status enum) and §4.
+    """
+    # Imported lazily to avoid a top-of-file circular import: apps.wip
+    # imports from apps.commissions for state-machine helpers.
+    from apps.wip.models import WIPSample, WIPStatus
+
+    active_wip_for_sample = WIPSample.objects.filter(
+        sample=OuterRef("pk"),
+        wip__status__in=[WIPStatus.CREATED, WIPStatus.IN_PROGRESS],
+    )
+    qs = Sample.objects.annotate(has_wip=Exists(active_wip_for_sample)).order_by(
+        "-created_at"
+    )
 
     if _is_fab_user(request):
         qs = qs.filter(request__requester=request.auth)
