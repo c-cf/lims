@@ -428,13 +428,26 @@
         const out = await call(`/equipment/?${usp}`);
         return out.map(normalizeEquipment);
       },
-      async create(payload) {
-        // payload = { name, model_name, capacity, experiment_type_ids? }
-        const out = await call('/equipment/', { method: 'POST', body: payload });
+      async create({ name, modelName, capacity, status, experimentTypeIds = [], parameters = {} }) {
+        const body = {
+          name, model_name: modelName, capacity,
+          experiment_type_ids: experimentTypeIds,
+          parameters,
+        };
+        if (status !== undefined) body.status = status;
+        const out = await call('/equipment/', { method: 'POST', body });
         return normalizeEquipment(out);
       },
-      async update(id, payload) {
-        const out = await call(`/equipment/${id}`, { method: 'PATCH', body: payload });
+      async update(id, { name, modelName, capacity, status, parameters }) {
+        // `EquipmentUpdate` accepts name/model_name/capacity/status/parameters
+        // — capabilities go through the dedicated endpoint below.
+        const body = {};
+        if (name !== undefined) body.name = name;
+        if (modelName !== undefined) body.model_name = modelName;
+        if (capacity !== undefined) body.capacity = capacity;
+        if (status !== undefined) body.status = status;
+        if (parameters !== undefined) body.parameters = parameters;
+        const out = await call(`/equipment/${id}`, { method: 'PATCH', body });
         return normalizeEquipment(out);
       },
       async setCapabilities(id, experimentTypeIds) {

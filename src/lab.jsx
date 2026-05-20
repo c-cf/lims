@@ -62,6 +62,23 @@ const WIP_SEED = [
   { id: 'WIP-7698', equipmentId: 'QA-TCT-02',  experimentId: 'tct',  waferIds: ['W040701'],            note: '',                     status: 'completed',   createdAt: '2026-05-08 10:00', dispatchIds: ['DP-3300'] },
 ];
 
+// Live experiment-types catalogue. Both the equipment modal and the
+// WIP-creation modal need this; the fab.jsx version lives behind its
+// own IIFE so we keep an independent copy here.
+const useLabExperimentTypes = () => {
+  const [data, setData] = lS([]);
+  const [loading, setLoading] = lS(true);
+  const [error, setError] = lS(null);
+  React.useEffect(() => {
+    if (!window.api || !window.api.experimentTypes) { setLoading(false); return; }
+    window.api.experimentTypes.list()
+      .then(rs => { setData(rs); setError(null); })
+      .catch(err => setError(err.message || String(err)))
+      .finally(() => setLoading(false));
+  }, []);
+  return { data, loading, error };
+};
+
 // Live equipment list. `normalizeEquipment` already maps backend status
 // `available → idle` and `disabled → maintenance` (gap §3.4); the gap
 // doc also notes that a `running` state is computed client-side from
@@ -2121,14 +2138,19 @@ const NewWipModal = ({ open, onClose, wafers, onSubmit }) => {
 
 // ── Equipment ───────────────────────────────────────────────────
 const LabEquipment = ({ navigate, canManage = false, showToast }) => {
-  const { equipment, loading, error } = useLabEquipment();
+  const { equipment, loading, error, refresh } = useLabEquipment();
   const [tab, setTab] = lS('all');
+  const [modalOpen, setModalOpen] = lS(false);
+  const [editing, setEditing] = lS(null);
 
-  // The new-equipment modal is manager-only and waiting on spec signoff
-  // (per CLAUDE.local.md). Wire the button to a placeholder toast so the
-  // entry point stays visible without touching api.equipment.create.
-  const onAddEquipment = () => {
-    showToast && showToast('Modal redesign pending');
+  const openNew = () => { setEditing(null); setModalOpen(true); };
+  const openEdit = (e) => { setEditing(e); setModalOpen(true); };
+  const closeModal = () => { setEditing(null); setModalOpen(false); };
+  const onSaved = () => {
+    const wasEdit = !!editing;
+    closeModal();
+    showToast && showToast(wasEdit ? 'Equipment updated' : 'Equipment created');
+    refresh();
   };
 
   const counts = {
@@ -2155,7 +2177,7 @@ const LabEquipment = ({ navigate, canManage = false, showToast }) => {
     <Page
       title="Equipment"
       subtitle="Each unit accepts one WIP at a time, up to its wafer capacity"
-      right={canManage && <PrimaryBtn icon={<LF.Plus size={14}/>} onClick={onAddEquipment}>Add Equipment</PrimaryBtn>}
+      right={canManage && <PrimaryBtn icon={<LF.Plus size={14}/>} onClick={openNew}>Add Equipment</PrimaryBtn>}
     >
       {error && (
         <div style={{
@@ -2203,13 +2225,21 @@ const LabEquipment = ({ navigate, canManage = false, showToast }) => {
               <Card key={e.id} padding={0}>
                 <div style={{
                   padding: '16px 20px', borderBottom: `1px solid ${lineSoft}`,
-                  display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                  display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10,
                 }}>
                   <div style={{ minWidth: 0 }}>
                     <div style={{ fontFamily: 'var(--font-mono)', fontSize: 14, fontWeight: 700, color: ink }}>{e.name}</div>
                     <div style={{ fontSize: 12, color: muted, marginTop: 2 }}>{e.model || '—'}</div>
                   </div>
-                  <Pill kind={e.status}/>
+                  <div style={{ display: 'inline-flex', alignItems: 'center', gap: 10 }}>
+                    <Pill kind={e.status}/>
+                    {canManage && (
+                      <button onClick={() => openEdit(e)} style={{
+                        background: 'transparent', border: 'none', cursor: 'pointer',
+                        color: accent, fontWeight: 600, fontSize: 12.5, fontFamily: 'inherit', padding: 0,
+                      }}>Edit</button>
+                    )}
+                  </div>
                 </div>
                 <div style={{ padding: 20 }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 6, fontSize: 12, color: text2 }}>
@@ -2257,13 +2287,202 @@ const LabEquipment = ({ navigate, canManage = false, showToast }) => {
           })}
         </div>
       )}
+
+      <EquipmentModal
+        open={modalOpen}
+        onClose={closeModal}
+        initial={editing}
+        onSaved={onSaved}
+      />
     </Page>
   );
 };
 
-// ── New Equipment modal (manager-only) ──────────────────────────
-// Same shape as the New WIP modal — picks experiment type, asks for name +
-// model/description, capacity, and an editable parameter list.
+// ── Equipment new / edit modal (manager-only) ───────────────────
+// Backend split: PATCH /equipment/:id covers name/model/capacity/status/
+// parameters, while capabilities live behind a dedicated
+// POST /equipment/:id/capabilities. The modal handles both in submit.
+const EquipmentModal = ({ open, onClose, onSaved, initial }) => {
+  const { data: experimentTypes, loading: typesLoading } = useLabExperimentTypes();
+  const [name, setName] = lS('');
+  const [modelName, setModelName] = lS('');
+  const [capacity, setCapacity] = lS('1');
+  const [status, setStatus] = lS('available');
+  const [capIds, setCapIds] = lS([]);
+  const [paramsJson, setParamsJson] = lS('{}');
+  const [busy, setBusy] = lS(false);
+  const [err, setErr] = lS(null);
+  const isEdit = !!initial;
+  const initialCapIds = (initial?.capabilities || []).map(c => c.id);
+  const capsChanged = isEdit && (
+    capIds.length !== initialCapIds.length
+    || capIds.some(id => !initialCapIds.includes(id))
+    || initialCapIds.some(id => !capIds.includes(id))
+  );
+
+  React.useEffect(() => {
+    if (!open) return;
+    setErr(null); setBusy(false);
+    if (initial) {
+      setName(initial.name || '');
+      setModelName(initial.model || '');
+      setCapacity(String(initial.capacity ?? 1));
+      setStatus(initial.raw_status || 'available');
+      setCapIds(initialCapIds);
+      try { setParamsJson(JSON.stringify(initial.parameters || {}, null, 2) || '{}'); }
+      catch (_e) { setParamsJson('{}'); }
+    } else {
+      setName(''); setModelName(''); setCapacity('1');
+      setStatus('available');
+      setCapIds([]);
+      setParamsJson('{}');
+    }
+  // eslint-disable-next-line — only fire on open transition
+  }, [open, initial]);
+
+  const toggleCap = (id) => {
+    setCapIds(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]);
+  };
+
+  const capacityNum = parseInt(capacity, 10);
+  const valid =
+    name.trim().length > 0 && name.trim().length <= 200 &&
+    modelName.trim().length > 0 && modelName.trim().length <= 200 &&
+    Number.isFinite(capacityNum) && capacityNum > 0;
+
+  const submit = async () => {
+    setBusy(true); setErr(null);
+    // Parse parameters JSON.
+    let parameters;
+    const trimmed = paramsJson.trim();
+    if (!trimmed) parameters = {};
+    else {
+      try { parameters = JSON.parse(trimmed); }
+      catch (_e) { setErr('Parameters must be valid JSON.'); setBusy(false); return; }
+      if (parameters === null || typeof parameters !== 'object' || Array.isArray(parameters)) {
+        setErr('Parameters must be a JSON object.'); setBusy(false); return;
+      }
+    }
+    try {
+      if (isEdit) {
+        await window.api.equipment.update(initial.id, {
+          name: name.trim(),
+          modelName: modelName.trim(),
+          capacity: capacityNum,
+          status,
+          parameters,
+        });
+        if (capsChanged) {
+          await window.api.equipment.setCapabilities(initial.id, capIds);
+        }
+      } else {
+        await window.api.equipment.create({
+          name: name.trim(),
+          modelName: modelName.trim(),
+          capacity: capacityNum,
+          experimentTypeIds: capIds,
+          parameters,
+        });
+      }
+      onSaved && onSaved();
+    } catch (e) {
+      setErr(e.message || String(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <Modal
+      open={open}
+      onClose={onClose}
+      title={isEdit ? `Edit Equipment ${initial?.name || ''}` : 'New Equipment'}
+      width={620}
+      footer={<>
+        <SecondaryBtn onClick={onClose} disabled={busy}>Cancel</SecondaryBtn>
+        <PrimaryBtn disabled={!valid || busy} onClick={submit}>
+          {busy ? (isEdit ? 'Saving…' : 'Creating…') : (isEdit ? 'Save Changes' : 'Create Equipment')}
+        </PrimaryBtn>
+      </>}
+    >
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+        {err && (
+          <div style={{
+            padding: '10px 12px', borderRadius: 8,
+            background: '#fde4e4', color: '#c0394a', fontSize: 13, fontWeight: 500,
+            border: '1px solid #f6c4c4',
+          }}>{err}</div>
+        )}
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+          <div>
+            <FieldLabel required>Name</FieldLabel>
+            <TextInput value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. QA-TCT-03"/>
+          </div>
+          <div>
+            <FieldLabel required>Model</FieldLabel>
+            <TextInput value={modelName} onChange={(e) => setModelName(e.target.value)} placeholder="e.g. ESPEC ARS-1100"/>
+          </div>
+        </div>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+          <div>
+            <FieldLabel required>Capacity</FieldLabel>
+            <TextInput type="number" min="1" value={capacity} onChange={(e) => setCapacity(e.target.value)}/>
+            <div style={{ fontSize: 12, color: muted, marginTop: 4 }}>Wafers per batch.</div>
+          </div>
+          {isEdit && (
+            <div>
+              <FieldLabel required>Status</FieldLabel>
+              <SelectInput value={status} onChange={(e) => setStatus(e.target.value)}>
+                <option value="available">Available</option>
+                <option value="maintenance">Maintenance</option>
+                <option value="disabled">Disabled</option>
+              </SelectInput>
+            </div>
+          )}
+        </div>
+        <div>
+          <FieldLabel>Capabilities</FieldLabel>
+          <div style={{
+            border: `1px solid ${line}`, borderRadius: 8,
+            maxHeight: 180, overflow: 'auto',
+          }}>
+            {typesLoading ? (
+              <div style={{ padding: 14, color: muted, fontSize: 13, textAlign: 'center' }}>Loading…</div>
+            ) : experimentTypes.length === 0 ? (
+              <div style={{ padding: 14, color: muted, fontSize: 13, textAlign: 'center' }}>No experiment types defined yet.</div>
+            ) : experimentTypes.map(t => (
+              <label key={t.id} style={{
+                display: 'grid', gridTemplateColumns: '20px 1fr', gap: 10,
+                alignItems: 'center', padding: '10px 14px',
+                borderTop: `1px solid ${lineSoft}`, cursor: 'pointer',
+                background: capIds.includes(t.id) ? '#f7f6fb' : '#fff',
+              }}>
+                <input type="checkbox" checked={capIds.includes(t.id)} onChange={() => toggleCap(t.id)} style={{ accentColor: accent }}/>
+                <span style={{ fontSize: 13, color: ink }}>{t.name}</span>
+              </label>
+            ))}
+          </div>
+          <div style={{ fontSize: 12, color: muted, marginTop: 6 }}>
+            Experiment types this unit can run. {isEdit && capsChanged ? 'Changes will save via a separate request after the equipment update.' : ''}
+          </div>
+        </div>
+        <div>
+          <FieldLabel>Parameters (JSON)</FieldLabel>
+          <TextArea value={paramsJson} onChange={(e) => setParamsJson(e.target.value)}
+            placeholder='{"key": "value"}'
+            style={{ fontFamily: 'var(--font-mono)', fontSize: 12.5, minHeight: 100 }}/>
+          <div style={{ fontSize: 12, color: muted, marginTop: 6 }}>
+            Dispatch-time tweakable parameters this equipment exposes. JSON object format.
+          </div>
+        </div>
+      </div>
+    </Modal>
+  );
+};
+
+// ── (legacy) New Equipment modal — kept for the offline single-file build
+// only. The live page uses EquipmentModal above; this seed-based component
+// no longer mounts in the dev path.
 const NewEquipmentModal = ({ open, onClose, onSubmit, existingIds }) => {
   const [name, setName] = lS('');
   const [type, setType] = lS(EXPERIMENTS[0].code);
@@ -2416,7 +2635,6 @@ const LabApp = ({ route, navigate, canManage = false }) => {
   const [equipment, setEquipment] = lS(EQUIPMENT_SEED);
   const [toast, setToast] = lS(null);
   const [newWipOpen, setNewWipOpen] = lS(false);
-  const [newEquipmentOpen, setNewEquipmentOpen] = lS(false);
 
   const showToast = (msg) => {
     setToast({ msg, t: Date.now() });
@@ -2469,14 +2687,8 @@ const LabApp = ({ route, navigate, canManage = false }) => {
     showToast(`${id} aborted`);
   };
 
-  // Manager-only: append a freshly-defined equipment unit. Starts idle and
-  // unassigned; the regular Add Dispatch flow picks it up automatically.
-  const createEquipment = (payload) => {
-    setEquipment(es => [...es, payload]);
-    setNewEquipmentOpen(false);
-    showToast(`${payload.id} added`);
-    navigate({ page: 'lab_equipment' });
-  };
+  // Manager equipment create/edit now lives in the live EquipmentModal
+  // (lab.jsx). LabApp no longer owns that flow.
 
   const createDispatch = (wipId, { experimentId, equipmentId, recipeId }) => {
     const id = nextId('DP-', dispatches);
@@ -2545,12 +2757,7 @@ const LabApp = ({ route, navigate, canManage = false }) => {
         wafers={wafers}
         onSubmit={createWip}
       />
-      <NewEquipmentModal
-        open={newEquipmentOpen}
-        onClose={() => setNewEquipmentOpen(false)}
-        existingIds={equipment.map(e => e.id)}
-        onSubmit={createEquipment}
-      />
+      {/* EquipmentModal lives inside LabEquipment now (live API path). */}
       {toast && (
         <div style={{
           position: 'fixed', bottom: 28, left: '50%', transform: 'translateX(-50%)',
