@@ -789,7 +789,7 @@ const FabDashboard = ({ navigate }) => {
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--text-primary)' }}>{r.title || 'Untitled draft'}</div>
                   <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 3, fontFamily: 'var(--font-mono)' }}>
-                    #{r.id} · {r.samples.length} wafer{r.samples.length === 1 ? '' : 's'} · {r.created.split(' ')[0]}
+                    #{r.id} · {(r.sampleCount ?? r.samples.length)} wafer{(r.sampleCount ?? r.samples.length) === 1 ? '' : 's'} · {r.created.split(' ')[0]}
                   </div>
                 </div>
                 <span style={{ fontSize: 12.5, fontWeight: 600, color: '#6c67b8' }}>Continue →</span>
@@ -1085,7 +1085,7 @@ const FabRequestList = ({ navigate, initialTab = 'all', titleOverride, drafts = 
                 <F.Calendar size={12}/>
                 <span style={{ fontFamily: 'var(--font-mono)' }}>{r.created.split(' ')[0]}</span>
                 <span>·</span>
-                <span>{r.samples.length} wafer{r.samples.length === 1 ? '' : 's'}</span>
+                <span>{(r.sampleCount ?? r.samples.length)} wafer{(r.sampleCount ?? r.samples.length) === 1 ? '' : 's'}</span>
               </div>
             </div>
             <div style={{ display: 'flex', justifyContent: 'flex-start' }}>

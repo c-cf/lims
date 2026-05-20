@@ -51,7 +51,7 @@ All routes mounted on `/api/`. Auth: JWT bearer, `Authorization: Bearer <access_
 
 ### 2.3 ✅ Recipes are equipment-agnostic  `[BE]` **major** — _completed on `feat/frontend-integration-v2`_
 
-The chat-design model is fully restored on the backend across 5 commits (`6960d4a`, `94de543`, `dafa466`, `87e4410`, `d4c1690`). 477 tests passing, ruff clean. `src/api.js` adapter is in sync. **One follow-up:** `DispatchBriefOut` (nested inside `WIPDetailOut.dispatches`) doesn't include `equipment_id`/`equipment_name`. The WIP detail page needs equipment per dispatch row, so either: (a) add those two fields to the schema (1-line change in `apps/wip/schemas.py` + `from_wip` builder), or (b) frontend makes N extra `/dispatches/:id` calls. Option (a) is the right answer — flag it for the next backend session.
+The chat-design model is fully restored on the backend across 5 commits (`6960d4a`, `94de543`, `dafa466`, `87e4410`, `d4c1690`). 477 tests passing, ruff clean. `src/api.js` adapter is in sync. ✅ `DispatchBriefOut` (nested inside `WIPDetailOut.dispatches`) now also includes `equipment_id`/`equipment_name`, so the WIP detail page can render equipment per dispatch row without N extra `/dispatches/:id` calls.
 
 
 
@@ -198,9 +198,9 @@ Frontend: `{ id, size, requestId, urgency, arrivedAt, status, wipId, expIds }`. 
 
 | Frontend usage | Suggested endpoint | Notes |
 |---|---|---|
-| **Sample count on `RequestListOut`** | annotate `Count('samples')` on the queryset, add `sample_count: int` to `RequestListOut` | **Surfaced during Fab Dashboard wiring smoke-test 2026-05-19.** Every list row currently shows "0 wafers" because the list endpoint omits samples. One-line backend change. |
-| Dispatch count on `WIPListOut` | same pattern — annotate `Count('dispatches')` | Lab WIP list will hit the same issue once wired. |
-| WIP count on `SampleListOut` | annotate `Exists` subquery or `Count('wips')` | Lab Samples list will need this to compute the derived `in_wip` status without a second round-trip. |
+| ✅ **Sample count on `RequestListOut`** | `sample_count: int` annotated server-side | _Landed_ — adapter exposes as `r.sampleCount`, consumed by Drafts panel and My Requests list. |
+| ✅ Dispatch count on `WIPListOut` | `dispatch_count: int` annotated server-side | _Landed_ — adapter exposes as `w.dispatchCount`, replaces the "—" placeholder on the Lab WIP list. |
+| ✅ WIP count on `SampleListOut` | `has_wip: bool` (Exists subquery) | _Landed_ — adapter derives `in_wip` status from `has_wip && raw=='received'`, so the Lab Samples "In WIP" tab gets real rows without a second round-trip. |
 | Lab manager dashboard trend chart | `GET /reports/trends?metric=requests_per_day&days=30` | Currently the chart in `MgrDashboard` is faked. |
 | Manager "Awaiting your Response" count badge | `GET /requests/?status=pending_approval` | Already supported — just call it. |
 | Dashboard tile counts (In Progress / Drafts / etc.) | reuse `GET /requests/?status=…` per tile, or add `GET /requests/summary` | 4 parallel calls is fine for v1. |

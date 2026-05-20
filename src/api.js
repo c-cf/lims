@@ -135,6 +135,9 @@
       created: formatTimestamp(r.created_at),
       submitted: formatTimestamp(r.submitted_at),
       updated: formatTimestamp(r.updated_at),
+      // Server-annotated count on RequestListOut so list rows can show a
+      // wafer count without loading each request's detail.
+      sampleCount: r.sample_count ?? 0,
       // these are filled in by the detail endpoint
       expIds: [],
       samples: [],
@@ -166,13 +169,22 @@
   }
 
   function normalizeSampleRow(s) {
+    // Backend has no `in_wip` status — gap §3.2 calls for the adapter to
+    // derive it. `has_wip` is now annotated on SampleListOut/DetailOut, so
+    // a received sample that's been pulled into a non-terminal WIP renders
+    // as `in_wip` to the rest of the UI. Anything not currently `received`
+    // (split, processing_exception, completed, etc.) keeps its mapped value.
+    const mapped = SAMPLE_STATUS_MAP[s.status] || s.status;
+    const hasWip = s.has_wip ?? false;
+    const status = (mapped === 'received' && hasWip) ? 'in_wip' : mapped;
     return {
       id: s.id,
       wafer: s.wafer_id,
       size: s.wafer_size,
       requestId: s.request_id,
-      status: SAMPLE_STATUS_MAP[s.status] || s.status,
+      status,
       raw_status: s.status,
+      hasWip,
       // received_at is set when the lab confirms receipt (backend §2.5).
       // Until that transition fires it'll be null — countdowns in the UI
       // should treat null as "not yet started" rather than "0 time left".
@@ -200,12 +212,20 @@
       experimentName: w.experiment_type_name,
       // WIPListOut → sample_count; WIPDetailOut → derive from samples list
       sampleCount: typeof w.sample_count === 'number' ? w.sample_count : samples.length,
+      // WIPListOut → dispatch_count (just added on the backend);
+      // WIPDetailOut → derive from the inline dispatches array.
+      dispatchCount: typeof w.dispatch_count === 'number'
+        ? w.dispatch_count
+        : (w.dispatches || []).length,
       samples,           // empty array on list responses; populated on detail
       status: w.status,
       note: w.note,
       created: formatTimestamp(w.created_at),
       updated: formatTimestamp(w.updated_at),
       completed: formatTimestamp(w.completed_at),
+      // Nested dispatches (WIPDetailOut.dispatches) go through normalizeDispatch
+      // which surfaces equipmentId/equipmentName from the newly-added
+      // DispatchBriefOut.equipment_{id,name} fields.
       dispatches: (w.dispatches || []).map(normalizeDispatch),
     };
   }

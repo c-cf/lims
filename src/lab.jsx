@@ -63,8 +63,8 @@ const WIP_SEED = [
 ];
 
 // Live WIP list (read-only). Returns the normalized rows from /wips/;
-// `sample_count` is server-annotated on `WIPListOut`, but `dispatch_count`
-// is not yet exposed (gap doc §4 follow-up) so list rows show "—" for it.
+// both `sample_count` and `dispatch_count` are server-annotated on
+// `WIPListOut` so list rows render real numbers without per-row joins.
 const useLabWips = () => {
   const [wips, setWips] = lS([]);
   const [loading, setLoading] = lS(true);
@@ -1239,10 +1239,9 @@ const LabWipList = ({ navigate, showToast }) => {
                 <LF.Wafer size={12} color={muted} style={{ verticalAlign: '-2px', marginRight: 4 }}/>
                 {w.sampleCount ?? (Array.isArray(w.waferIds) ? w.waferIds.length : 0)}
               </span>
-              {/* dispatch_count isn't on WIPListOut yet (gap §4 follow-up) */}
-              <span style={{ fontSize: 13, fontWeight: 600, color: muted }} title="Dispatch count pending backend addition (gap §4)">
+              <span style={{ fontSize: 13, fontWeight: 600, color: text2 }}>
                 <LF.Dispatch size={12} color={muted} style={{ verticalAlign: '-2px', marginRight: 4 }}/>
-                —
+                {w.dispatchCount ?? (Array.isArray(w.dispatchIds) ? w.dispatchIds.length : 0)}
               </span>
               <span><Pill kind={w.status} dotted={w.status === 'in_progress'}/></span>
               <LF.ChevronRight size={15} color="#cbcbd6"/>
