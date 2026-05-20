@@ -323,7 +323,18 @@
       let detail = `${res.status} ${res.statusText}`;
       try {
         const body = await res.json();
-        if (body && body.detail) detail = body.detail;
+        // Ninja/Pydantic validation errors come back as { detail: [...] };
+        // unwrap to a readable string so the UI banner doesn't render
+        // "[object Object]". Single-message detail strings pass through.
+        if (body && body.detail) {
+          if (typeof body.detail === 'string') {
+            detail = body.detail;
+          } else if (Array.isArray(body.detail)) {
+            detail = body.detail.map(e => e.msg || JSON.stringify(e)).join('; ');
+          } else {
+            detail = JSON.stringify(body.detail);
+          }
+        }
       } catch (_e) { /* non-json error */ }
       const err = new Error(detail);
       err.status = res.status;
@@ -605,8 +616,22 @@
       },
       async recordResult(id, payload) {
         // payload = { summary, verdict: 'pass'|'fail', data?, note? }
+        // Backend `ExperimentResultIn.data` is a dict — accept either an
+        // object or a JSON string from callers (the existing form UI emits
+        // a raw JSON string), and coerce to an object before POSTing.
+        let normalized = payload;
+        if (payload && typeof payload.data === 'string') {
+          let parsed = {};
+          try { parsed = payload.data.trim() ? JSON.parse(payload.data) : {}; }
+          catch (_e) {
+            const err = new Error('Result data must be valid JSON.');
+            err.status = 400;
+            throw err;
+          }
+          normalized = { ...payload, data: parsed };
+        }
         return normalizeDispatch(await call(`/dispatches/${id}/record-result/`, {
-          method: 'POST', body: payload,
+          method: 'POST', body: normalized,
         }));
       },
       async complete(id) {

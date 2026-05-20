@@ -62,6 +62,36 @@ const WIP_SEED = [
   { id: 'WIP-7698', equipmentId: 'QA-TCT-02',  experimentId: 'tct',  waferIds: ['W040701'],            note: '',                     status: 'completed',   createdAt: '2026-05-08 10:00', dispatchIds: ['DP-3300'] },
 ];
 
+// Live dispatch detail. `api.dispatches.get(id)` returns
+// experimentName/equipmentName/recipeName inline, but recipe parameters
+// are not on the response — co-fetch `recipes.list()` so the Recipe
+// Parameters card can render.
+const useLabDispatchDetail = (id) => {
+  const [d, setD] = lS(null);
+  const [recipeById, setRecipeById] = lS(new Map());
+  const [loading, setLoading] = lS(true);
+  const [error, setError] = lS(null);
+  const refresh = React.useCallback(() => {
+    if (id == null || !window.api || !window.api.dispatches) { setLoading(false); return; }
+    setLoading(true);
+    Promise.all([
+      window.api.dispatches.get(id),
+      window.api.recipes.list().catch(() => []),
+    ])
+      .then(([dp, rs]) => {
+        setD(dp);
+        setRecipeById(new Map(rs.map(r => [r.id, r])));
+        setError(null);
+      })
+      .catch(err => setError(err.message || String(err)))
+      .finally(() => setLoading(false));
+  }, [id]);
+  React.useEffect(() => { refresh(); }, [refresh]);
+  // Attach recipe params (if known) so the consumer doesn't have to look up.
+  const dispatch = d ? { ...d, recipeParams: recipeById.get(d.recipeId)?.params || null } : null;
+  return { dispatch, loading, error, refresh };
+};
+
 // Live dispatch list. The /dispatches/ endpoint carries only ids, so the
 // hook co-fetches experiment-types and equipment to populate the per-row
 // experiment chip and equipment label. Three parallel GETs on mount.
@@ -1658,49 +1688,105 @@ const LabDispatchList = ({ navigate, defaultTab = 'active' }) => {
 // ── Dispatch detail ─────────────────────────────────────────────
 const STATUS_FLOW = ['dispatched', 'pending', 'running', 'unloaded', 'result_recorded'];
 
-const LabDispatchDetail = ({ id, dispatches, wips, navigate, onAdvance, onAbort, onException, onRecord }) => {
-  const d = dispatches.find(x => x.id === id);
-  if (!d) return <Page title="Dispatch not found"/>;
-  const wip = findWip(d.wipId, wips);
-  const exp = findExp(d.experimentId);
-  const rec = findRecipe(d.recipeId);
+const LabDispatchDetail = ({ id, navigate, showToast }) => {
+  const { dispatch: d, loading, error, refresh } = useLabDispatchDetail(id);
   const [recordOpen, setRecordOpen] = lS(false);
+  const [busy, setBusy] = lS(false);
+  const [actionError, setActionError] = lS(null);
 
+  const runAction = async (op, label) => {
+    setBusy(true);
+    setActionError(null);
+    try {
+      await op();
+      showToast && showToast(label);
+      refresh();
+    } catch (e) {
+      setActionError(e.message || String(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+  const confirmThen = (msg, op, label) => {
+    if (!window.confirm(msg)) return;
+    return runAction(op, label);
+  };
+
+  if (loading && !d) {
+    return (
+      <Page title="Loading dispatch…">
+        <div style={{ padding: '60px 20px', textAlign: 'center', color: muted, fontSize: 14 }}>Loading…</div>
+      </Page>
+    );
+  }
+  if (error || !d) {
+    return (
+      <Page
+        breadcrumb={<Breadcrumb items={[
+          { label: 'Dispatches', onClick: () => navigate({ page: 'lab_dispatches' }) },
+          { label: '?' },
+        ]}/>}
+        title="Dispatch not found"
+      >
+        <div style={{ padding: 24, color: '#c0394a', fontSize: 14 }}>
+          {error || 'This dispatch is no longer available.'}
+        </div>
+      </Page>
+    );
+  }
+
+  // For the lifecycle stepper. The status-mapped value lives in d.status
+  // (FE-normalized); some FE-mapped statuses come from multiple backend
+  // states (e.g. `exception` covers `execution_exception` + `pending_redispatch`).
   const stepIdx = STATUS_FLOW.indexOf(d.status);
   const isClosed = d.status === 'aborted' || d.status === 'exception' || d.status === 'result_recorded';
 
-  // Action surface depends on status
+  // Action surface depends on status. Each button confirms, hits the API,
+  // refetches, and shows a toast. `record-result` opens the existing modal
+  // which itself calls api.dispatches.recordResult.
   let actions = null;
-  if (d.status === 'dispatched') actions = <>
-    <SecondaryBtn danger onClick={() => onAbort(d.id)}>Abort</SecondaryBtn>
-    <PrimaryBtn icon={<LF.Clock size={14}/>} onClick={() => onAdvance(d.id, 'pending')}>Mark Pending</PrimaryBtn>
-  </>;
-  else if (d.status === 'pending') actions = <>
-    <SecondaryBtn danger onClick={() => onAbort(d.id)}>Abort</SecondaryBtn>
-    <PrimaryBtn icon={<LF.Play size={14}/>} success onClick={() => onAdvance(d.id, 'running')}>Start Running</PrimaryBtn>
+  if (d.status === 'dispatched' || d.status === 'pending') actions = <>
+    <SecondaryBtn danger disabled={busy} onClick={() => confirmThen(`Abort ${d.code}?`, () => window.api.dispatches.abort(d.id), `${d.code} aborted`)}>Abort</SecondaryBtn>
+    <PrimaryBtn icon={<LF.Play size={14}/>} success disabled={busy} onClick={() => confirmThen(`Start ${d.code}?`, () => window.api.dispatches.start(d.id), `${d.code} started`)}>{busy ? '…' : 'Start Running'}</PrimaryBtn>
   </>;
   else if (d.status === 'running') actions = <>
-    <SecondaryBtn danger onClick={() => onException(d.id)}>Mark Exception</SecondaryBtn>
-    <PrimaryBtn icon={<LF.Check size={14}/>} onClick={() => onAdvance(d.id, 'unloaded')}>Mark Unloaded</PrimaryBtn>
+    <SecondaryBtn danger disabled={busy} onClick={() => confirmThen(`Flag ${d.code} as an exception?`, () => window.api.dispatches.reportException(d.id, ''), `${d.code} flagged exception`)}>Mark Exception</SecondaryBtn>
+    <PrimaryBtn icon={<LF.Check size={14}/>} disabled={busy} onClick={() => confirmThen(`Unload ${d.code}?`, () => window.api.dispatches.unload(d.id), `${d.code} unloaded`)}>{busy ? '…' : 'Mark Unloaded'}</PrimaryBtn>
   </>;
   else if (d.status === 'unloaded' || d.status === 'exception') actions = <>
-    <PrimaryBtn icon={<LF.ClipboardList size={14}/>} onClick={() => setRecordOpen(true)}>Record Result</PrimaryBtn>
+    <PrimaryBtn icon={<LF.ClipboardList size={14}/>} disabled={busy} onClick={() => setRecordOpen(true)}>Record Result</PrimaryBtn>
   </>;
+  else if (d.status === 'result_recorded') actions = <>
+    <SecondaryBtn disabled={busy} onClick={() => confirmThen(`Re-dispatch ${d.code}? A new dispatch will be created.`, () => window.api.dispatches.redispatch(d.id), `${d.code} re-dispatched`)}>Redispatch</SecondaryBtn>
+    <PrimaryBtn icon={<LF.Check size={14}/>} success disabled={busy} onClick={() => confirmThen(`Complete ${d.code}?`, () => window.api.dispatches.complete(d.id), `${d.code} completed`)}>{busy ? '…' : 'Complete'}</PrimaryBtn>
+  </>;
+
+  const wipCode = `WIP-${String(d.wipId).padStart(4, '0')}`;
+  const rec = d.recipeParams ? { name: d.recipeName, params: d.recipeParams } : null;
 
   return (
     <Page
       breadcrumb={<Breadcrumb items={[
         { label: 'Dispatches', onClick: () => navigate({ page: 'lab_dispatches' }) },
-        { label: wip?.id || 'WIP', onClick: () => navigate({ page: 'lab_wip_detail', id: d.wipId }) },
-        { label: d.id },
+        { label: wipCode, onClick: () => navigate({ page: 'lab_wip_detail', id: d.wipId }) },
+        { label: d.code },
       ]}/>}
-      title={`Dispatch ${d.id}`}
+      title={`Dispatch ${d.code}`}
       subtitle={<span style={{ display: 'inline-flex', alignItems: 'center', gap: 10 }}>
         <Pill kind={d.status} dotted={d.status === 'running'}/>
-        <span style={{ color: text2, fontSize: 13 }}>{exp?.name} → <strong style={{ color: ink, fontFamily: 'var(--font-mono)' }}>{d.equipmentId || wip?.equipmentId || '—'}</strong></span>
+        <span style={{ color: text2, fontSize: 13 }}>{d.experimentName || '—'} → <strong style={{ color: ink, fontFamily: 'var(--font-mono)' }}>{d.equipmentName || '—'}</strong></span>
       </span>}
       right={actions}
     >
+      {actionError && (
+        <div style={{
+          padding: '12px 16px', marginBottom: 14, borderRadius: 10,
+          background: '#fde4e4', color: '#c0394a', fontSize: 13.5, fontWeight: 500,
+          border: '1px solid #f6c4c4',
+        }}>
+          {actionError}
+        </div>
+      )}
       {/* Status timeline */}
       <Card padding={0} style={{ marginBottom: 18 }}>
         <CardHeader>Lifecycle</CardHeader>
@@ -1734,9 +1820,11 @@ const LabDispatchDetail = ({ id, dispatches, wips, navigate, onAdvance, onAbort,
             );
           })}
         </div>
-        {d.status === 'running' && d.startedAt && (() => {
+        {d.status === 'running' && d.dispatchedAt && (() => {
           // Soft estimate — elapsed time vs an assumed 24h run window.
-          const start = new Date(d.startedAt.replace(' ', 'T')).getTime();
+          // No `started_at` on the backend; dispatchedAt is the closest
+          // approximation until that field lands (gap §2.7-adjacent).
+          const start = new Date(d.dispatchedAt.replace(' ', 'T')).getTime();
           const elapsed = Math.max(0, Date.now() - start);
           const total = 24 * 60 * 60 * 1000;
           const pct = Math.max(4, Math.min(96, (elapsed / total) * 100));
@@ -1758,7 +1846,7 @@ const LabDispatchDetail = ({ id, dispatches, wips, navigate, onAdvance, onAbort,
                     boxShadow: '0 0 8px #f4a8bf',
                     animation: 'pulse 1.4s ease-in-out infinite',
                   }}/>
-                  Running · started <span style={{ fontFamily: 'var(--font-mono)', color: ink }}>{d.startedAt.split(' ')[1]}</span>
+                  Running · dispatched <span style={{ fontFamily: 'var(--font-mono)', color: ink }}>{d.dispatchedAt.split(' ')[1]}</span>
                 </span>
                 <span style={{ fontFamily: 'var(--font-mono)', color: accent, fontWeight: 700 }}>
                   ~{fmt(remainMs)} remaining
@@ -1801,19 +1889,19 @@ const LabDispatchDetail = ({ id, dispatches, wips, navigate, onAdvance, onAbort,
               <button onClick={() => navigate({ page: 'lab_wip_detail', id: d.wipId })} style={{
                 background: 'transparent', border: 'none', padding: 0, cursor: 'pointer',
                 color: accent, fontFamily: 'var(--font-mono)', fontSize: 14, fontWeight: 700, textAlign: 'left',
-              }}>{d.wipId}</button>
+              }}>{wipCode}</button>
               <div style={{ fontSize: 13, color: text2 }}>Experiment Type</div>
-              <div style={{ fontSize: 14, color: ink }}>{exp?.name}</div>
+              <div style={{ fontSize: 14, color: ink }}>{d.experimentName || '—'}</div>
               <div style={{ fontSize: 13, color: text2 }}>Equipment</div>
-              <div style={{ fontFamily: 'var(--font-mono)', fontSize: 14, color: ink }}>{d.equipmentId || wip?.equipmentId || '—'}</div>
+              <div style={{ fontFamily: 'var(--font-mono)', fontSize: 14, color: ink }}>{d.equipmentName || '—'}</div>
               <div style={{ fontSize: 13, color: text2 }}>Recipe</div>
-              <div style={{ fontFamily: 'var(--font-mono)', fontSize: 13, color: ink }}>{rec?.name}</div>
+              <div style={{ fontFamily: 'var(--font-mono)', fontSize: 13, color: ink }}>{d.recipeName || '—'}</div>
+              <div style={{ fontSize: 13, color: text2 }}>Operator</div>
+              <div style={{ fontFamily: 'var(--font-mono)', fontSize: 13, color: ink }}>{d.operator || '—'}</div>
               <div style={{ fontSize: 13, color: text2 }}>Dispatched At</div>
               <div style={{ fontFamily: 'var(--font-mono)', fontSize: 13, color: ink }}>{d.dispatchedAt || '—'}</div>
-              <div style={{ fontSize: 13, color: text2 }}>Started At</div>
-              <div style={{ fontFamily: 'var(--font-mono)', fontSize: 13, color: ink }}>{d.startedAt || '—'}</div>
-              <div style={{ fontSize: 13, color: text2 }}>Ended At</div>
-              <div style={{ fontFamily: 'var(--font-mono)', fontSize: 13, color: ink }}>{d.endedAt || '—'}</div>
+              <div style={{ fontSize: 13, color: text2 }}>Completed At</div>
+              <div style={{ fontFamily: 'var(--font-mono)', fontSize: 13, color: ink }}>{d.completedAt || '—'}</div>
             </div>
           </Card>
 
@@ -1831,13 +1919,15 @@ const LabDispatchDetail = ({ id, dispatches, wips, navigate, onAdvance, onAbort,
                   fontFamily: 'var(--font-mono)', fontSize: 12, color: text2,
                   background: bgSoft, padding: '10px 12px', borderRadius: 8, lineHeight: 1.5,
                   whiteSpace: 'pre-wrap', wordBreak: 'break-all',
-                }}>{d.result.data || '—'}</div>
-                {d.result.note && <>
-                  <div style={{ fontSize: 13, color: text2 }}>Note</div>
-                  <div style={{ fontSize: 13, color: ink }}>{d.result.note}</div>
+                }}>
+                  {d.result.data && Object.keys(d.result.data).length > 0
+                    ? JSON.stringify(d.result.data, null, 2)
+                    : '—'}
+                </div>
+                {d.result.source && <>
+                  <div style={{ fontSize: 13, color: text2 }}>Source</div>
+                  <div style={{ fontFamily: 'var(--font-mono)', fontSize: 13, color: ink }}>{d.result.source}</div>
                 </>}
-                <div style={{ fontSize: 13, color: text2 }}>Recorded At</div>
-                <div style={{ fontFamily: 'var(--font-mono)', fontSize: 13, color: ink }}>{d.result.recordedAt}</div>
               </div>
             </Card>
           )}
@@ -1860,7 +1950,13 @@ const LabDispatchDetail = ({ id, dispatches, wips, navigate, onAdvance, onAbort,
         open={recordOpen}
         onClose={() => setRecordOpen(false)}
         dispatch={d}
-        onSubmit={(payload) => { onRecord(d.id, payload); setRecordOpen(false); }}
+        onSubmit={async (payload) => {
+          setRecordOpen(false);
+          await runAction(
+            () => window.api.dispatches.recordResult(d.id, payload),
+            `${d.code} result recorded`,
+          );
+        }}
       />
     </Page>
   );
@@ -2350,8 +2446,7 @@ const LabApp = ({ route, navigate, canManage = false }) => {
   else if (p === 'lab_dispatches' || p === 'dispatches')
     page = <LabDispatchList navigate={navigate} defaultTab={route.tab || 'active'}/>;
   else if (p === 'lab_dispatch_detail')
-    page = <LabDispatchDetail id={route.id} dispatches={dispatches} wips={wips} navigate={navigate}
-      onAdvance={advanceDispatch} onAbort={abortDispatch} onException={exceptionDispatch} onRecord={recordResult}/>;
+    page = <LabDispatchDetail id={route.id} navigate={navigate} showToast={showToast}/>;
   else if (p === 'lab_equipment' || p === 'equipment')
     page = <LabEquipment equipment={equipment} wips={wips} navigate={navigate} canManage={canManage} onOpenNew={() => setNewEquipmentOpen(true)}/>;
   else
