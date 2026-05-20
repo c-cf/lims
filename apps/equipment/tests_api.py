@@ -647,7 +647,6 @@ class TestCreateRecipe:
                     "description": "描述",
                     "experiment_type_id": et.pk,
                     "parameters": {"temp": 150},
-                    "estimated_duration_minutes": 180,
                 }
             ),
             content_type="application/json",
@@ -659,43 +658,7 @@ class TestCreateRecipe:
         assert data["name"] == "新 Recipe"
         assert data["experiment_type"]["id"] == et.pk
         assert data["parameters"] == {"temp": 150}
-        assert data["estimated_duration_minutes"] == 180
         assert "equipment" not in data
-
-    def test_create_recipe_estimated_duration_optional(self, client, auth_headers):
-        """estimated_duration_minutes may be omitted; the response carries
-        null so the SPA can fall back to its hardcoded 24h default."""
-        profile = LabStaffFactory()
-        et = ExperimentTypeFactory()
-
-        response = client.post(
-            "/api/recipes/",
-            data=json.dumps(
-                {
-                    "name": "Recipe without duration",
-                    "experiment_type_id": et.pk,
-                }
-            ),
-            content_type="application/json",
-            **auth_headers(profile.user),
-        )
-
-        assert response.status_code == 201
-        assert response.json()["estimated_duration_minutes"] is None
-
-    def test_update_recipe_estimated_duration(self, client, auth_headers):
-        """PATCH can set estimated_duration_minutes after creation."""
-        profile = LabStaffFactory()
-        recipe = RecipeFactory()
-
-        response = client.patch(
-            f"/api/recipes/{recipe.pk}",
-            data=json.dumps({"estimated_duration_minutes": 90}),
-            content_type="application/json",
-            **auth_headers(profile.user),
-        )
-        assert response.status_code == 200
-        assert response.json()["estimated_duration_minutes"] == 90
 
     def test_fab_user_cannot_create(self, client, auth_headers):
         """Fab user cannot create recipes (403)."""

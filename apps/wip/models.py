@@ -110,6 +110,11 @@ class Dispatch(models.Model):
         default=DispatchStatus.PENDING,
     )
     note = models.TextField(blank=True)
+    estimated_duration_minutes = models.PositiveIntegerField(
+        null=True,
+        blank=True,
+        help_text="預估執行時間（分鐘）。Optional — 派工時可填或留空",
+    )
     dispatched_at = models.DateTimeField(null=True, blank=True)
     completed_at = models.DateTimeField(null=True, blank=True)
     created_by = models.ForeignKey(

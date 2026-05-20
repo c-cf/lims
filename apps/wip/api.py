@@ -427,6 +427,7 @@ def create_dispatch(request: HttpRequest, wip_id: int, payload: DispatchIn):
             equipment=equipment,
             recipe=recipe,
             note=payload.note,
+            estimated_duration_minutes=payload.estimated_duration_minutes,
             created_by=request.auth,
         )
 
@@ -807,12 +808,15 @@ def redispatch(request: HttpRequest, dispatch_id: int):
         dispatch.status = target
         dispatch.save()
 
-        # Create a new dispatch with the same experiment/equipment/recipe.
+        # Create a new dispatch with the same experiment/equipment/recipe;
+        # carry the duration estimate over so the SPA countdown stays
+        # accurate on the redispatched run.
         Dispatch.objects.create(
             wip=dispatch.wip,
             experiment_type=dispatch.experiment_type,
             equipment=dispatch.equipment,
             recipe=dispatch.recipe,
+            estimated_duration_minutes=dispatch.estimated_duration_minutes,
             created_by=request.auth,
         )
 

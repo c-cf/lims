@@ -427,6 +427,55 @@ class TestWIPCreateDispatch:
         )
         assert resp.status_code == 403
 
+    def test_create_dispatch_with_estimated_duration(
+        self, client, auth_headers, lab_staff, wip, equipment, recipe
+    ):
+        """Optional estimated_duration_minutes round-trips on the WIP-detail
+        response's nested dispatches array."""
+        resp = client.post(
+            f"/api/wips/{wip.pk}/dispatches/",
+            data={
+                "equipment_id": equipment.pk,
+                "recipe_id": recipe.pk,
+                "estimated_duration_minutes": 240,
+            },
+            content_type="application/json",
+            **auth_headers(lab_staff),
+        )
+        assert resp.status_code == 201, resp.json()
+        nested = resp.json()["dispatches"][0]
+        assert nested["estimated_duration_minutes"] == 240
+
+    def test_create_dispatch_without_estimated_duration(
+        self, client, auth_headers, lab_staff, wip, equipment, recipe
+    ):
+        """estimated_duration_minutes is optional; the response carries
+        null so the SPA can fall back to its hardcoded 24h default."""
+        resp = client.post(
+            f"/api/wips/{wip.pk}/dispatches/",
+            data={"equipment_id": equipment.pk, "recipe_id": recipe.pk},
+            content_type="application/json",
+            **auth_headers(lab_staff),
+        )
+        assert resp.status_code == 201, resp.json()
+        assert resp.json()["dispatches"][0]["estimated_duration_minutes"] is None
+
+    def test_create_dispatch_rejects_non_positive_duration(
+        self, client, auth_headers, lab_staff, wip, equipment, recipe
+    ):
+        """Field validation: zero / negative values are rejected by Ninja."""
+        resp = client.post(
+            f"/api/wips/{wip.pk}/dispatches/",
+            data={
+                "equipment_id": equipment.pk,
+                "recipe_id": recipe.pk,
+                "estimated_duration_minutes": 0,
+            },
+            content_type="application/json",
+            **auth_headers(lab_staff),
+        )
+        assert resp.status_code == 422
+
 
 @pytest.mark.django_db
 class TestWIPComplete:
@@ -571,6 +620,20 @@ class TestDispatchList:
         assert row["created_by"]["id"] == dispatch.created_by_id
         assert row["created_by"]["username"] == dispatch.created_by.username
         assert "department" in row["created_by"]
+
+    def test_list_dispatch_row_includes_estimated_duration(
+        self, client, auth_headers, lab_staff, dispatch
+    ):
+        """Each list row exposes estimated_duration_minutes (None when
+        unset) so the SPA can show a per-dispatch countdown without a
+        detail round-trip."""
+        dispatch.estimated_duration_minutes = 360
+        dispatch.save(update_fields=["estimated_duration_minutes"])
+
+        resp = client.get("/api/dispatches/", **auth_headers(lab_staff))
+        assert resp.status_code == 200
+        row = next(r for r in resp.json() if r["id"] == dispatch.pk)
+        assert row["estimated_duration_minutes"] == 360
 
 
 @pytest.mark.django_db

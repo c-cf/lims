@@ -37,6 +37,7 @@ class DispatchBriefOut(Schema):
     recipe_id: int
     recipe_name: str
     status: str
+    estimated_duration_minutes: int | None
     dispatched_at: datetime | None
     completed_at: datetime | None
     created_at: datetime
@@ -82,11 +83,14 @@ class DispatchIn(Schema):
 
     Chat-design: experiment_type is derived from the parent WIP; the
     payload only carries the per-dispatch choices (equipment + recipe).
+    estimated_duration_minutes is optional — operators can leave it
+    blank, and the SPA falls back to a hardcoded 24h countdown.
     """
 
     equipment_id: int
     recipe_id: int
     note: str = ""
+    estimated_duration_minutes: int | None = Field(None, gt=0)
 
 
 class ExperimentResultIn(Schema):
@@ -183,6 +187,7 @@ class WIPDetailOut(Schema):
                     "recipe_id": d.recipe_id,
                     "recipe_name": d.recipe.name,
                     "status": d.status,
+                    "estimated_duration_minutes": d.estimated_duration_minutes,
                     "dispatched_at": d.dispatched_at,
                     "completed_at": d.completed_at,
                     "created_at": d.created_at,
@@ -247,6 +252,7 @@ class DispatchDetailOut(Schema):
     recipe_name: str
     status: str
     note: str
+    estimated_duration_minutes: int | None
     dispatched_at: datetime | None
     completed_at: datetime | None
     result: ExperimentResultOut | None
@@ -279,6 +285,7 @@ class DispatchDetailOut(Schema):
             "recipe_name": dispatch.recipe.name,
             "status": dispatch.status,
             "note": dispatch.note,
+            "estimated_duration_minutes": dispatch.estimated_duration_minutes,
             "dispatched_at": dispatch.dispatched_at,
             "completed_at": dispatch.completed_at,
             "result": result,
@@ -297,6 +304,7 @@ class DispatchListOut(Schema):
     equipment_id: int
     recipe_id: int
     status: str
+    estimated_duration_minutes: int | None
     dispatched_at: datetime | None
     completed_at: datetime | None
     created_by: RequesterOut | None
@@ -318,6 +326,7 @@ class DispatchListOut(Schema):
             "equipment_id": dispatch.equipment_id,
             "recipe_id": dispatch.recipe_id,
             "status": dispatch.status,
+            "estimated_duration_minutes": dispatch.estimated_duration_minutes,
             "dispatched_at": dispatch.dispatched_at,
             "completed_at": dispatch.completed_at,
             "created_by": _build_created_by(dispatch),

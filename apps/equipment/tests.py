@@ -180,23 +180,6 @@ class TestRecipe:
 
         assert Recipe._meta.db_table == "recipe"
 
-    def test_recipe_estimated_duration_round_trip(self, experiment_type):
-        """estimated_duration_minutes is nullable and round-trips."""
-        from apps.equipment.models import Recipe
-
-        r1 = Recipe.objects.create(
-            name="No duration set",
-            experiment_type=experiment_type,
-        )
-        assert r1.estimated_duration_minutes is None
-
-        r2 = Recipe.objects.create(
-            name="2-hour bake",
-            experiment_type=experiment_type,
-            estimated_duration_minutes=120,
-        )
-        assert Recipe.objects.get(pk=r2.pk).estimated_duration_minutes == 120
-
 
 # ---------------------------------------------------------------------------
 # Factory tests

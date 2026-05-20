@@ -225,7 +225,6 @@ def create_recipe(request: HttpRequest, payload: RecipeIn):
         description=payload.description,
         experiment_type=experiment_type,
         parameters=payload.parameters,
-        estimated_duration_minutes=payload.estimated_duration_minutes,
     )
 
     return 201, RecipeOut.from_recipe(recipe)

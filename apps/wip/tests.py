@@ -236,6 +236,40 @@ class TestDispatch:
         )
         assert dispatch.equipment == equipment
 
+    def test_dispatch_estimated_duration_round_trip(
+        self, lab_user, sample, experiment_type, equipment, recipe
+    ):
+        """estimated_duration_minutes is nullable and round-trips. Large
+        values (e.g. multi-day burn-in runs) are accepted — it's a
+        PositiveIntegerField with no upper cap by design."""
+        from apps.wip.models import WIP, Dispatch, WIPSample
+
+        wip = WIP.objects.create(experiment_type=experiment_type, created_by=lab_user)
+        WIPSample.objects.create(wip=wip, sample=sample)
+
+        no_estimate = Dispatch.objects.create(
+            wip=wip,
+            experiment_type=experiment_type,
+            equipment=equipment,
+            recipe=recipe,
+            created_by=lab_user,
+        )
+        assert no_estimate.estimated_duration_minutes is None
+
+        seven_days = 7 * 24 * 60
+        long_run = Dispatch.objects.create(
+            wip=wip,
+            experiment_type=experiment_type,
+            equipment=equipment,
+            recipe=recipe,
+            estimated_duration_minutes=seven_days,
+            created_by=lab_user,
+        )
+        assert (
+            Dispatch.objects.get(pk=long_run.pk).estimated_duration_minutes
+            == seven_days
+        )
+
 
 @pytest.mark.django_db
 class TestExperimentResult:
