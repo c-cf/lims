@@ -187,7 +187,10 @@ class TestFullWorkflow:
             client,
             "/api/wips/",
             lab_staff,
-            {"sample_ids": [sample_id], "equipment_id": equipment.pk},
+            {
+                "sample_ids": [sample_id],
+                "experiment_type_id": experiment_type.pk,
+            },
         )
         assert r.status_code == 201, r.json()
         wip_id = r.json()["id"]
@@ -199,7 +202,6 @@ class TestFullWorkflow:
             f"/api/wips/{wip_id}/dispatches/",
             lab_staff,
             {
-                "experiment_type_id": experiment_type.pk,
                 "equipment_id": equipment.pk,
                 "recipe_id": recipe.pk,
             },
@@ -254,7 +256,9 @@ class TestMultiDispatchWorkflow:
             request=sample.request, experiment_type=experiment_type
         )
         wip = WIPFactory(
-            equipment=equipment, status=WIPStatus.IN_PROGRESS, created_by=lab_staff
+            experiment_type=experiment_type,
+            status=WIPStatus.IN_PROGRESS,
+            created_by=lab_staff,
         )
         WIPSample.objects.create(wip=wip, sample=sample)
         wip_id = wip.pk
@@ -265,7 +269,7 @@ class TestMultiDispatchWorkflow:
             f"/api/wips/{wip_id}/dispatches/",
             lab_staff,
             {
-                "experiment_type_id": experiment_type.pk,
+                "equipment_id": equipment.pk,
                 "recipe_id": recipe.pk,
             },
         )
@@ -278,7 +282,7 @@ class TestMultiDispatchWorkflow:
             f"/api/wips/{wip_id}/dispatches/",
             lab_staff,
             {
-                "experiment_type_id": experiment_type.pk,
+                "equipment_id": equipment.pk,
                 "recipe_id": recipe.pk,
             },
         )
@@ -328,7 +332,9 @@ class TestExceptionRedispatch:
             request=sample.request, experiment_type=experiment_type
         )
         wip = WIPFactory(
-            equipment=equipment, status=WIPStatus.IN_PROGRESS, created_by=lab_staff
+            experiment_type=experiment_type,
+            status=WIPStatus.IN_PROGRESS,
+            created_by=lab_staff,
         )
         WIPSample.objects.create(wip=wip, sample=sample)
         wip_id = wip.pk
@@ -339,7 +345,7 @@ class TestExceptionRedispatch:
             f"/api/wips/{wip_id}/dispatches/",
             lab_staff,
             {
-                "experiment_type_id": experiment_type.pk,
+                "equipment_id": equipment.pk,
                 "recipe_id": recipe.pk,
             },
         )
@@ -543,7 +549,9 @@ class TestAutomationWorkflow:
             request=sample.request, experiment_type=experiment_type
         )
         wip = WIPFactory(
-            equipment=equipment, status=WIPStatus.IN_PROGRESS, created_by=lab_staff
+            experiment_type=experiment_type,
+            status=WIPStatus.IN_PROGRESS,
+            created_by=lab_staff,
         )
         WIPSample.objects.create(wip=wip, sample=sample)
         wip_id = wip.pk
@@ -554,7 +562,7 @@ class TestAutomationWorkflow:
             f"/api/wips/{wip_id}/dispatches/",
             lab_staff,
             {
-                "experiment_type_id": experiment_type.pk,
+                "equipment_id": equipment.pk,
                 "recipe_id": recipe.pk,
             },
         )
@@ -607,13 +615,16 @@ class TestAutomationWorkflow:
             request=sample.request, experiment_type=experiment_type
         )
         wip = WIPFactory(
-            equipment=equipment, status=WIPStatus.IN_PROGRESS, created_by=lab_staff
+            experiment_type=experiment_type,
+            status=WIPStatus.IN_PROGRESS,
+            created_by=lab_staff,
         )
         WIPSample.objects.create(wip=wip, sample=sample)
 
         dispatch = DispatchFactory(
             wip=wip,
             experiment_type=experiment_type,
+            equipment=equipment,
             recipe=recipe,
             status=DispatchStatus.DISPATCHED,
             created_by=lab_staff,

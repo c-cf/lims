@@ -55,21 +55,23 @@ def sample(request_obj):
 
 @pytest.mark.django_db
 class TestWIP:
-    def test_create_wip(self, lab_user, equipment, sample):
-        """WIP can be created with equipment and samples via M2M."""
+    def test_create_wip(self, lab_user, equipment, experiment_type, sample):
+        """WIP can be created with experiment_type and samples via M2M."""
         from apps.wip.models import WIP, WIPSample, WIPStatus
 
-        wip = WIP.objects.create(equipment=equipment, created_by=lab_user)
+        wip = WIP.objects.create(experiment_type=experiment_type, created_by=lab_user)
         WIPSample.objects.create(wip=wip, sample=sample)
 
-        assert wip.equipment == equipment
+        assert wip.experiment_type == experiment_type
         assert wip.status == WIPStatus.CREATED
         assert wip.created_by == lab_user
         assert wip.completed_at is None
         assert wip.samples.count() == 1
         assert wip.samples.first() == sample
 
-    def test_wip_multiple_samples(self, lab_user, equipment, request_obj):
+    def test_wip_multiple_samples(
+        self, lab_user, equipment, experiment_type, request_obj
+    ):
         """A WIP can have multiple samples from different requests."""
         from apps.commissions.models import Request, Sample, WaferSize
         from apps.wip.models import WIP, WIPSample
@@ -82,33 +84,33 @@ class TestWIP:
             request=req2, wafer_id="WF-002", wafer_size=WaferSize.SIZE_200MM
         )
 
-        wip = WIP.objects.create(equipment=equipment, created_by=lab_user)
+        wip = WIP.objects.create(experiment_type=experiment_type, created_by=lab_user)
         WIPSample.objects.create(wip=wip, sample=s1)
         WIPSample.objects.create(wip=wip, sample=s2)
 
         assert wip.samples.count() == 2
 
-    def test_sample_in_multiple_wips(self, lab_user, equipment, sample):
+    def test_sample_in_multiple_wips(
+        self, lab_user, equipment, experiment_type, sample
+    ):
         """A sample can participate in multiple WIPs."""
-        from apps.equipment.models import Equipment
         from apps.wip.models import WIP, WIPSample
 
-        wip1 = WIP.objects.create(equipment=equipment, created_by=lab_user)
+        wip1 = WIP.objects.create(experiment_type=experiment_type, created_by=lab_user)
         WIPSample.objects.create(wip=wip1, sample=sample)
 
-        equip2 = Equipment.objects.create(
-            name="烤箱 B-01", model_name="OV-5000", capacity=10
-        )
-        wip2 = WIP.objects.create(equipment=equip2, created_by=lab_user)
+        wip2 = WIP.objects.create(experiment_type=experiment_type, created_by=lab_user)
         WIPSample.objects.create(wip=wip2, sample=sample)
 
         assert sample.wips.count() == 2
 
-    def test_wip_sample_unique_together(self, lab_user, equipment, sample):
+    def test_wip_sample_unique_together(
+        self, lab_user, equipment, experiment_type, sample
+    ):
         """Same sample cannot be added to same WIP twice."""
         from apps.wip.models import WIP, WIPSample
 
-        wip = WIP.objects.create(equipment=equipment, created_by=lab_user)
+        wip = WIP.objects.create(experiment_type=experiment_type, created_by=lab_user)
         WIPSample.objects.create(wip=wip, sample=sample)
 
         with pytest.raises(IntegrityError):
@@ -127,25 +129,13 @@ class TestWIP:
 
         assert WIP._meta.db_table == "wip"
 
-    def test_wip_experiment_type_optional_for_now(
-        self, lab_user, equipment, experiment_type
-    ):
-        """WIP.experiment_type is a nullable FK during the layered migration.
-
-        The non-null tightening lands in a later commit; until then both
-        a null value and a set value must be accepted at the schema level.
-        """
+    def test_wip_experiment_type_required(self, lab_user, experiment_type):
+        """WIP.experiment_type is required (chat-design: every WIP is bound
+        to exactly one experiment_type at creation time)."""
         from apps.wip.models import WIP
 
-        wip_without = WIP.objects.create(equipment=equipment, created_by=lab_user)
-        assert wip_without.experiment_type is None
-
-        wip_with = WIP.objects.create(
-            equipment=equipment,
-            experiment_type=experiment_type,
-            created_by=lab_user,
-        )
-        assert wip_with.experiment_type == experiment_type
+        wip = WIP.objects.create(experiment_type=experiment_type, created_by=lab_user)
+        assert wip.experiment_type == experiment_type
 
 
 @pytest.mark.django_db
@@ -156,11 +146,12 @@ class TestDispatch:
         """Dispatch links WIP to recipe + experiment_type (equipment on WIP)."""
         from apps.wip.models import WIP, Dispatch, DispatchStatus, WIPSample
 
-        wip = WIP.objects.create(equipment=equipment, created_by=lab_user)
+        wip = WIP.objects.create(experiment_type=experiment_type, created_by=lab_user)
         WIPSample.objects.create(wip=wip, sample=sample)
         dispatch = Dispatch.objects.create(
             wip=wip,
             experiment_type=experiment_type,
+            equipment=equipment,
             recipe=recipe,
             created_by=lab_user,
         )
@@ -180,11 +171,12 @@ class TestDispatch:
         from apps.experiments.models import ExperimentType, LabCategory
         from apps.wip.models import WIP, Dispatch, WIPSample
 
-        wip = WIP.objects.create(equipment=equipment, created_by=lab_user)
+        wip = WIP.objects.create(experiment_type=experiment_type, created_by=lab_user)
         WIPSample.objects.create(wip=wip, sample=sample)
         Dispatch.objects.create(
             wip=wip,
             experiment_type=experiment_type,
+            equipment=equipment,
             recipe=recipe,
             created_by=lab_user,
         )
@@ -199,6 +191,7 @@ class TestDispatch:
         Dispatch.objects.create(
             wip=wip,
             experiment_type=et2,
+            equipment=equipment,
             recipe=recipe2,
             created_by=lab_user,
         )
@@ -228,17 +221,14 @@ class TestDispatch:
 
         assert Dispatch._meta.db_table == "dispatch"
 
-    def test_dispatch_equipment_optional_for_now(
+    def test_dispatch_equipment_required(
         self, lab_user, sample, experiment_type, equipment, recipe
     ):
-        """Dispatch.equipment is a nullable FK during the layered migration.
-
-        The non-null tightening lands in a later commit; this commit only
-        introduces the column and backfills it from the parent WIP.
-        """
+        """Dispatch.equipment is required (chat-design: equipment is chosen
+        per-dispatch and stored on the Dispatch row directly)."""
         from apps.wip.models import WIP, Dispatch, WIPSample
 
-        wip = WIP.objects.create(equipment=equipment, created_by=lab_user)
+        wip = WIP.objects.create(experiment_type=experiment_type, created_by=lab_user)
         WIPSample.objects.create(wip=wip, sample=sample)
         dispatch = Dispatch.objects.create(
             wip=wip,
@@ -258,11 +248,12 @@ class TestExperimentResult:
         """ExperimentResult can be created with OneToOne relation to Dispatch."""
         from apps.wip.models import WIP, Dispatch, ExperimentResult, WIPSample
 
-        wip = WIP.objects.create(equipment=equipment, created_by=lab_user)
+        wip = WIP.objects.create(experiment_type=experiment_type, created_by=lab_user)
         WIPSample.objects.create(wip=wip, sample=sample)
         dispatch = Dispatch.objects.create(
             wip=wip,
             experiment_type=experiment_type,
+            equipment=equipment,
             recipe=recipe,
             created_by=lab_user,
         )
@@ -282,11 +273,12 @@ class TestExperimentResult:
         """A Dispatch can have at most one ExperimentResult."""
         from apps.wip.models import WIP, Dispatch, ExperimentResult, WIPSample
 
-        wip = WIP.objects.create(equipment=equipment, created_by=lab_user)
+        wip = WIP.objects.create(experiment_type=experiment_type, created_by=lab_user)
         WIPSample.objects.create(wip=wip, sample=sample)
         dispatch = Dispatch.objects.create(
             wip=wip,
             experiment_type=experiment_type,
+            equipment=equipment,
             recipe=recipe,
             created_by=lab_user,
         )
@@ -309,11 +301,12 @@ class TestExperimentResult:
         """data JSONField can be written and read back correctly."""
         from apps.wip.models import WIP, Dispatch, ExperimentResult, WIPSample
 
-        wip = WIP.objects.create(equipment=equipment, created_by=lab_user)
+        wip = WIP.objects.create(experiment_type=experiment_type, created_by=lab_user)
         WIPSample.objects.create(wip=wip, sample=sample)
         dispatch = Dispatch.objects.create(
             wip=wip,
             experiment_type=experiment_type,
+            equipment=equipment,
             recipe=recipe,
             created_by=lab_user,
         )

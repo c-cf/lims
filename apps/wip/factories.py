@@ -25,6 +25,7 @@ class WIPFactory(DjangoModelFactory):
         model = WIP
 
     equipment = factory.SubFactory(EquipmentFactory)
+    experiment_type = factory.SubFactory(ExperimentTypeFactory)
     status = WIPStatus.CREATED
     note = ""
     created_by = factory.SubFactory(UserFactory)
@@ -56,6 +57,7 @@ class DispatchFactory(DjangoModelFactory):
 
     wip = factory.SubFactory(WIPFactory)
     experiment_type = factory.SubFactory(ExperimentTypeFactory)
+    equipment = factory.SubFactory(EquipmentFactory)
     recipe = factory.SubFactory(RecipeFactory)
     status = DispatchStatus.PENDING
     note = ""

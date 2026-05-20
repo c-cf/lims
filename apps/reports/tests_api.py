@@ -61,8 +61,8 @@ class TestEquipmentUtilization:
         """Lab manager can access the endpoint and get valid utilization data."""
         equipment = EquipmentFactory()
         wip = WIPFactory(equipment=equipment)
-        DispatchFactory(wip=wip, status=DispatchStatus.COMPLETED)
-        DispatchFactory(wip=wip, status=DispatchStatus.COMPLETED)
+        DispatchFactory(wip=wip, equipment=equipment, status=DispatchStatus.COMPLETED)
+        DispatchFactory(wip=wip, equipment=equipment, status=DispatchStatus.COMPLETED)
 
         params = "?period=week&start_date=2000-01-01&end_date=2099-12-31"
         resp = client.get(
@@ -110,8 +110,12 @@ class TestEquipmentUtilization:
 
         wip_a = WIPFactory(equipment=equipment_a)
         wip_b = WIPFactory(equipment=equipment_b)
-        DispatchFactory(wip=wip_a, status=DispatchStatus.COMPLETED)
-        DispatchFactory(wip=wip_b, status=DispatchStatus.COMPLETED)
+        DispatchFactory(
+            wip=wip_a, equipment=equipment_a, status=DispatchStatus.COMPLETED
+        )
+        DispatchFactory(
+            wip=wip_b, equipment=equipment_b, status=DispatchStatus.COMPLETED
+        )
 
         params = (
             f"?period=month&start_date=2000-01-01&end_date=2099-12-31"
@@ -146,10 +150,10 @@ class TestEquipmentUtilization:
         wip_a = WIPFactory(equipment=equipment)
         wip_b = WIPFactory(equipment=equipment)
         # Two dispatches on the same WIP — should count as 1 unique WIP/sample
-        DispatchFactory(wip=wip_a, status=DispatchStatus.COMPLETED)
-        DispatchFactory(wip=wip_a, status=DispatchStatus.COMPLETED)
+        DispatchFactory(wip=wip_a, equipment=equipment, status=DispatchStatus.COMPLETED)
+        DispatchFactory(wip=wip_a, equipment=equipment, status=DispatchStatus.COMPLETED)
         # One dispatch on a different WIP
-        DispatchFactory(wip=wip_b, status=DispatchStatus.COMPLETED)
+        DispatchFactory(wip=wip_b, equipment=equipment, status=DispatchStatus.COMPLETED)
 
         params = "?period=week&start_date=2000-01-01&end_date=2099-12-31"
         resp = client.get(

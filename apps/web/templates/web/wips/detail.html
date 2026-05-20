@@ -14,7 +14,7 @@
     <h1 class="text-xl font-semibold text-slate-900">WIP #{{ wip.pk }}</h1>
     <div class="flex items-center gap-3 mt-2">
       {% include "web/_status_badge.html" with status=wip.status %}
-      <span class="text-sm text-slate-500">Equipment: <span class="font-medium text-slate-700">{{ wip.equipment.name }}</span></span>
+      <span class="text-sm text-slate-500">Experiment: <span class="font-medium text-slate-700">{{ wip.experiment_type.name }}</span></span>
       <span class="text-sm text-slate-400">{{ wip.samples.count }} sample{{ wip.samples.count|pluralize }}</span>
     </div>
   </div>
@@ -51,7 +51,7 @@
         <thead class="bg-slate-50">
           <tr>
             <th class="px-4 py-3 text-left text-xs font-semibold text-slate-500 uppercase tracking-wide">ID</th>
-            <th class="px-4 py-3 text-left text-xs font-semibold text-slate-500 uppercase tracking-wide">Exp. Type</th>
+            <th class="px-4 py-3 text-left text-xs font-semibold text-slate-500 uppercase tracking-wide">Equipment</th>
             <th class="px-4 py-3 text-left text-xs font-semibold text-slate-500 uppercase tracking-wide">Recipe</th>
             <th class="px-4 py-3 text-left text-xs font-semibold text-slate-500 uppercase tracking-wide">Status</th>
             <th class="px-4 py-3"></th>
@@ -61,7 +61,7 @@
           {% for dispatch in wip.dispatches.all %}
           <tr class="hover:bg-slate-50 transition-colors">
             <td class="px-4 py-3 text-slate-400 font-mono text-xs">#{{ dispatch.pk }}</td>
-            <td class="px-4 py-3 text-slate-700">{{ dispatch.experiment_type.name }}</td>
+            <td class="px-4 py-3 text-slate-700">{{ dispatch.equipment.name }}</td>
             <td class="px-4 py-3 text-slate-600">{{ dispatch.recipe.name }}</td>
             <td class="px-4 py-3">{% include "web/_status_badge.html" with status=dispatch.status %}</td>
             <td class="px-4 py-3">
@@ -79,29 +79,29 @@
 
     <!-- Create dispatch form -->
     {% if wip.status != 'completed' and wip.status != 'aborted' %}
-    <div class="bg-white rounded-xl border border-slate-200 shadow-sm p-5"
-         x-data="dispatchForm()">
+    <div class="bg-white rounded-xl border border-slate-200 shadow-sm p-5">
       <h2 class="font-semibold text-slate-500 text-xs uppercase tracking-wider mb-4">Add Dispatch</h2>
       <form method="post" action="{% url 'web:dispatch-create' wip.pk %}">
         {% csrf_token %}
         <div class="grid grid-cols-2 gap-4 mb-4">
           <div>
-            <label class="block text-xs font-medium text-slate-600 mb-1">Experiment Type</label>
-            <select name="experiment_type_id" required x-model="selectedExpType"
-                    @change="loadRecipes()"
+            <label class="block text-xs font-medium text-slate-600 mb-1">Equipment</label>
+            <select name="equipment_id" required
                     class="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm text-slate-700 focus:outline-none focus:ring-2 focus:ring-blue-500 cursor-pointer">
               <option value="">— Select —</option>
-              {% for et in exp_types %}
-              <option value="{{ et.pk }}">{{ et.name }}</option>
+              {% for eq in equipment_list %}
+              <option value="{{ eq.pk }}">{{ eq.name }} ({{ eq.model_name }})</option>
               {% endfor %}
             </select>
           </div>
           <div>
             <label class="block text-xs font-medium text-slate-600 mb-1">Recipe</label>
             <select name="recipe_id" required
-                    id="recipe-select-{{ wip.pk }}"
                     class="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm text-slate-700 focus:outline-none focus:ring-2 focus:ring-blue-500 cursor-pointer">
-              <option value="">— Select experiment type first —</option>
+              <option value="">— Select —</option>
+              {% for r in recipes %}
+              <option value="{{ r.pk }}">{{ r.name }}</option>
+              {% endfor %}
             </select>
           </div>
           <div class="col-span-2">
@@ -120,14 +120,14 @@
   </div>
 
   <div>
-    <!-- Equipment Info -->
+    <!-- Experiment Type Info -->
     <div class="bg-white rounded-xl border border-slate-200 shadow-sm p-5 mb-4">
-      <h2 class="font-semibold text-slate-500 text-xs uppercase tracking-wider mb-3">Equipment</h2>
+      <h2 class="font-semibold text-slate-500 text-xs uppercase tracking-wider mb-3">Experiment Type</h2>
       <dl class="space-y-2 text-sm">
         <dt class="text-slate-400 text-xs">Name</dt>
-        <dd class="text-slate-700 font-medium">{{ wip.equipment.name }}</dd>
-        <dt class="text-slate-400 text-xs mt-2">Model</dt>
-        <dd class="text-slate-700">{{ wip.equipment.model_name }}</dd>
+        <dd class="text-slate-700 font-medium">{{ wip.experiment_type.name }}</dd>
+        <dt class="text-slate-400 text-xs mt-2">Lab Category</dt>
+        <dd class="text-slate-700">{{ wip.experiment_type.lab_category }}</dd>
       </dl>
     </div>
     <!-- Samples -->
@@ -154,21 +154,4 @@
   </div>
 </div>
 
-{% block extra_js %}
-<script>
-function dispatchForm() {
-  return {
-    selectedExpType: '',
-    async loadRecipes() {
-      if (!this.selectedExpType) return;
-      const equipId = {{ wip.equipment_id }};
-      const url = `/htmx/recipes/?equipment_id=${equipId}&experiment_type_id=${this.selectedExpType}`;
-      const resp = await fetch(url, { headers: { 'X-Requested-With': 'XMLHttpRequest' } });
-      const html = await resp.text();
-      document.getElementById('recipe-select-{{ wip.pk }}').outerHTML = html;
-    }
-  };
-}
-</script>
-{% endblock %}
 {% endblock %}

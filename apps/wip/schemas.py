@@ -55,10 +55,14 @@ class ExperimentResultOut(Schema):
 
 
 class WIPIn(Schema):
-    """Input schema for creating a WIP."""
+    """Input schema for creating a WIP.
+
+    Chat-design: a WIP is bound to one experiment_type at creation time.
+    Equipment is chosen later, per dispatch.
+    """
 
     sample_ids: list[int] = Field(..., min_length=1)
-    equipment_id: int
+    experiment_type_id: int
     note: str = ""
 
 
@@ -72,9 +76,13 @@ class WIPAddSamplesIn(Schema):
 
 
 class DispatchIn(Schema):
-    """Input schema for creating a dispatch."""
+    """Input schema for creating a dispatch.
 
-    experiment_type_id: int
+    Chat-design: experiment_type is derived from the parent WIP; the
+    payload only carries the per-dispatch choices (equipment + recipe).
+    """
+
+    equipment_id: int
     recipe_id: int
     note: str = ""
 
@@ -110,8 +118,8 @@ class WIPListOut(Schema):
     """Output schema for WIP list responses."""
 
     id: int
-    equipment_id: int
-    equipment_name: str
+    experiment_type_id: int
+    experiment_type_name: str
     sample_count: int
     status: str
     note: str
@@ -124,8 +132,8 @@ class WIPListOut(Schema):
         """Build a dict from a WIP instance."""
         return {
             "id": wip.pk,
-            "equipment_id": wip.equipment_id,
-            "equipment_name": wip.equipment.name,
+            "experiment_type_id": wip.experiment_type_id,
+            "experiment_type_name": wip.experiment_type.name,
             "sample_count": wip.samples.count(),
             "status": wip.status,
             "note": wip.note,
@@ -139,8 +147,8 @@ class WIPDetailOut(Schema):
     """Output schema for WIP detail responses."""
 
     id: int
-    equipment_id: int
-    equipment_name: str
+    experiment_type_id: int
+    experiment_type_name: str
     samples: list[SampleBriefOut]
     status: str
     note: str
@@ -179,8 +187,8 @@ class WIPDetailOut(Schema):
         ]
         return {
             "id": wip.pk,
-            "equipment_id": wip.equipment_id,
-            "equipment_name": wip.equipment.name,
+            "experiment_type_id": wip.experiment_type_id,
+            "experiment_type_name": wip.experiment_type.name,
             "samples": samples,
             "status": wip.status,
             "note": wip.note,
@@ -252,8 +260,8 @@ class DispatchDetailOut(Schema):
             "wip_id": dispatch.wip_id,
             "experiment_type_id": dispatch.experiment_type_id,
             "experiment_type_name": dispatch.experiment_type.name,
-            "equipment_id": dispatch.wip.equipment_id,
-            "equipment_name": dispatch.wip.equipment.name,
+            "equipment_id": dispatch.equipment_id,
+            "equipment_name": dispatch.equipment.name,
             "recipe_id": dispatch.recipe_id,
             "recipe_name": dispatch.recipe.name,
             "status": dispatch.status,
@@ -273,6 +281,7 @@ class DispatchListOut(Schema):
     id: int
     wip_id: int
     experiment_type_id: int
+    equipment_id: int
     recipe_id: int
     status: str
     dispatched_at: datetime | None
@@ -293,10 +302,7 @@ class DispatchListOut(Schema):
             "id": dispatch.pk,
             "wip_id": dispatch.wip_id,
             "experiment_type_id": dispatch.experiment_type_id,
-            # Equipment moved from Dispatch to WIP in PR #34. The
-            # list endpoint must prefetch wip — see _dispatch_list_queryset
-            # (or list_dispatches view) to avoid an N+1.
-            "equipment_id": dispatch.wip.equipment_id,
+            "equipment_id": dispatch.equipment_id,
             "recipe_id": dispatch.recipe_id,
             "status": dispatch.status,
             "dispatched_at": dispatch.dispatched_at,

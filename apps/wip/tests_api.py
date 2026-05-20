@@ -95,29 +95,32 @@ def sample(in_progress_request):
 
 
 @pytest.fixture
-def wip(sample, equipment, lab_staff):
+def wip(sample, equipment, experiment_type, lab_staff):
     """A WIP in created state with one sample."""
-    w = WIPFactory(equipment=equipment, created_by=lab_staff)
+    w = WIPFactory(experiment_type=experiment_type, created_by=lab_staff)
     WIPSample.objects.create(wip=w, sample=sample)
     return w
 
 
 @pytest.fixture
-def wip_in_progress(sample, equipment, lab_staff):
+def wip_in_progress(sample, equipment, experiment_type, lab_staff):
     """A WIP in in_progress state."""
     w = WIPFactory(
-        equipment=equipment, status=WIPStatus.IN_PROGRESS, created_by=lab_staff
+        experiment_type=experiment_type,
+        status=WIPStatus.IN_PROGRESS,
+        created_by=lab_staff,
     )
     WIPSample.objects.create(wip=w, sample=sample)
     return w
 
 
 @pytest.fixture
-def dispatch(wip_in_progress, experiment_type, recipe, lab_staff):
+def dispatch(wip_in_progress, experiment_type, equipment, recipe, lab_staff):
     """A dispatch in pending state."""
     return DispatchFactory(
         wip=wip_in_progress,
         experiment_type=experiment_type,
+        equipment=equipment,
         recipe=recipe,
         created_by=lab_staff,
     )
@@ -199,95 +202,81 @@ class TestWIPList:
 @pytest.mark.django_db
 class TestWIPCreate:
     def test_create_wip_success(
-        self, client, auth_headers, lab_staff, sample, equipment
+        self, client, auth_headers, lab_staff, sample, experiment_type
     ):
-        """Lab staff can create a WIP with samples and equipment."""
-        payload = {"sample_ids": [sample.pk], "equipment_id": equipment.pk}
+        """Lab staff can create a WIP for an experiment_type with samples."""
+        payload = {
+            "sample_ids": [sample.pk],
+            "experiment_type_id": experiment_type.pk,
+        }
         resp = client.post(
             "/api/wips/",
             data=payload,
             content_type="application/json",
             **auth_headers(lab_staff),
         )
-        assert resp.status_code == 201
+        assert resp.status_code == 201, resp.json()
         data = resp.json()
-        assert data["equipment_id"] == equipment.pk
+        assert data["experiment_type_id"] == experiment_type.pk
         assert len(data["samples"]) == 1
         assert data["samples"][0]["id"] == sample.pk
         assert data["status"] == WIPStatus.CREATED
 
-    def test_create_wip_equipment_not_found(self, client, auth_headers, lab_staff):
-        """Returns 404 if equipment does not exist."""
+    def test_create_wip_experiment_type_not_found(
+        self, client, auth_headers, lab_staff
+    ):
+        """Returns 404 if experiment_type does not exist."""
         resp = client.post(
             "/api/wips/",
-            data={"sample_ids": [1], "equipment_id": 99999},
+            data={"sample_ids": [1], "experiment_type_id": 99999},
             content_type="application/json",
             **auth_headers(lab_staff),
         )
         assert resp.status_code == 404
 
     def test_create_wip_sample_not_found(
-        self, client, auth_headers, lab_staff, equipment
+        self, client, auth_headers, lab_staff, experiment_type
     ):
         """Returns 400 if sample does not exist."""
         resp = client.post(
             "/api/wips/",
-            data={"sample_ids": [99999], "equipment_id": equipment.pk},
+            data={
+                "sample_ids": [99999],
+                "experiment_type_id": experiment_type.pk,
+            },
             content_type="application/json",
             **auth_headers(lab_staff),
         )
         assert resp.status_code == 400
 
-    def test_create_wip_exceeds_capacity(
-        self, client, auth_headers, lab_staff, sample, in_progress_request
+    def test_create_wip_sample_request_missing_experiment_type(
+        self, client, auth_headers, lab_staff, sample
     ):
-        """Returns 400 if samples exceed equipment capacity."""
-        equip = EquipmentFactory(capacity=1)
-        s2 = SampleFactory(request=in_progress_request, status=SampleStatus.PROCESSING)
+        """Returns 400 if the sample's parent request does not include the
+        chosen experiment_type (chat-design constraint)."""
+        other_et = ExperimentTypeFactory()
         resp = client.post(
             "/api/wips/",
-            data={"sample_ids": [sample.pk, s2.pk], "equipment_id": equip.pk},
+            data={
+                "sample_ids": [sample.pk],
+                "experiment_type_id": other_et.pk,
+            },
             content_type="application/json",
             **auth_headers(lab_staff),
         )
         assert resp.status_code == 400
-        assert "capacity" in resp.json()["detail"].lower()
-
-    def test_create_wip_capacity_shared_across_active_wips(
-        self, client, auth_headers, lab_staff, sample, equipment, in_progress_request
-    ):
-        """Capacity is shared: existing active WIP samples reduce remaining slots."""
-        # equipment.capacity defaults to EquipmentFactory default; set to 1
-        equipment.capacity = 1
-        equipment.save()
-
-        # First WIP uses the only slot
-        resp = client.post(
-            "/api/wips/",
-            data={"sample_ids": [sample.pk], "equipment_id": equipment.pk},
-            content_type="application/json",
-            **auth_headers(lab_staff),
-        )
-        assert resp.status_code == 201
-
-        # Second WIP on same equipment should fail
-        s2 = SampleFactory(request=in_progress_request, status=SampleStatus.PROCESSING)
-        resp = client.post(
-            "/api/wips/",
-            data={"sample_ids": [s2.pk], "equipment_id": equipment.pk},
-            content_type="application/json",
-            **auth_headers(lab_staff),
-        )
-        assert resp.status_code == 400
-        assert "capacity" in resp.json()["detail"].lower()
+        assert "experiment type" in resp.json()["detail"].lower()
 
     def test_create_wip_fab_user_forbidden(
-        self, client, auth_headers, fab_user, sample, equipment
+        self, client, auth_headers, fab_user, sample, experiment_type
     ):
         """Fab user cannot create WIPs."""
         resp = client.post(
             "/api/wips/",
-            data={"sample_ids": [sample.pk], "equipment_id": equipment.pk},
+            data={
+                "sample_ids": [sample.pk],
+                "experiment_type_id": experiment_type.pk,
+            },
             content_type="application/json",
             **auth_headers(fab_user),
         )
@@ -322,11 +311,12 @@ class TestWIPDetail:
 @pytest.mark.django_db
 class TestWIPCreateDispatch:
     def test_create_dispatch_success(
-        self, client, auth_headers, lab_staff, wip, experiment_type, recipe
+        self, client, auth_headers, lab_staff, wip, equipment, recipe
     ):
-        """Lab staff can create a dispatch for a WIP (no equipment in payload)."""
+        """Lab staff can create a dispatch for a WIP. The payload carries
+        equipment_id + recipe_id; experiment_type is derived from the WIP."""
         payload = {
-            "experiment_type_id": experiment_type.pk,
+            "equipment_id": equipment.pk,
             "recipe_id": recipe.pk,
         }
         resp = client.post(
@@ -335,40 +325,57 @@ class TestWIPCreateDispatch:
             content_type="application/json",
             **auth_headers(lab_staff),
         )
-        assert resp.status_code == 201
+        assert resp.status_code == 201, resp.json()
         data = resp.json()
         assert data["status"] == WIPStatus.IN_PROGRESS
 
         wip.refresh_from_db()
         assert wip.status == WIPStatus.IN_PROGRESS
 
-    def test_create_dispatch_recipe_wrong_equipment(
-        self, client, auth_headers, lab_staff, wip, experiment_type
+    def test_create_dispatch_recipe_experiment_type_mismatch(
+        self, client, auth_headers, lab_staff, wip, equipment
     ):
-        """Returns 400 if recipe does not belong to the WIP's equipment."""
-        other_equipment = EquipmentFactory()
-        other_recipe = RecipeFactory(
-            equipment=other_equipment, experiment_type=experiment_type
-        )
+        """Returns 400 if recipe.experiment_type != wip.experiment_type."""
+        other_et = ExperimentTypeFactory()
+        other_recipe = RecipeFactory(equipment=equipment, experiment_type=other_et)
         resp = client.post(
             f"/api/wips/{wip.pk}/dispatches/",
             data={
-                "experiment_type_id": experiment_type.pk,
+                "equipment_id": equipment.pk,
                 "recipe_id": other_recipe.pk,
             },
             content_type="application/json",
             **auth_headers(lab_staff),
         )
         assert resp.status_code == 400
+        assert "experiment type" in resp.json()["detail"].lower()
+
+    def test_create_dispatch_equipment_lacks_capability(
+        self, client, auth_headers, lab_staff, wip, recipe
+    ):
+        """Returns 400 if the chosen equipment doesn't support the WIP's
+        experiment_type."""
+        other_equipment = EquipmentFactory()  # no capability for wip.experiment_type
+        resp = client.post(
+            f"/api/wips/{wip.pk}/dispatches/",
+            data={
+                "equipment_id": other_equipment.pk,
+                "recipe_id": recipe.pk,
+            },
+            content_type="application/json",
+            **auth_headers(lab_staff),
+        )
+        assert resp.status_code == 400
+        assert "does not support" in resp.json()["detail"].lower()
 
     def test_create_dispatch_fab_user_forbidden(
-        self, client, auth_headers, fab_user, wip, experiment_type, recipe
+        self, client, auth_headers, fab_user, wip, equipment, recipe
     ):
         """Fab user cannot create dispatches."""
         resp = client.post(
             f"/api/wips/{wip.pk}/dispatches/",
             data={
-                "experiment_type_id": experiment_type.pk,
+                "equipment_id": equipment.pk,
                 "recipe_id": recipe.pk,
             },
             content_type="application/json",
@@ -490,13 +497,14 @@ class TestDispatchList:
     def test_list_dispatches_filter_by_equipment_id(
         self, client, auth_headers, lab_staff, dispatch
     ):
-        """Dispatches can be filtered by equipment_id (via WIP)."""
-        equipment_id = dispatch.wip.equipment_id
+        """Dispatches can be filtered by equipment_id (direct FK on Dispatch)."""
         resp = client.get(
-            f"/api/dispatches/?equipment_id={equipment_id}",
+            f"/api/dispatches/?equipment_id={dispatch.equipment_id}",
             **auth_headers(lab_staff),
         )
         assert resp.status_code == 200
+        data = resp.json()
+        assert all(d["equipment_id"] == dispatch.equipment_id for d in data)
 
     def test_list_dispatches_fab_user_forbidden(self, client, auth_headers, fab_user):
         """Fab user cannot list dispatches."""
@@ -530,8 +538,8 @@ class TestDispatchDetail:
         data = resp.json()
         assert data["id"] == dispatch.pk
         assert data["result"] is None
-        # Equipment comes from WIP
-        assert data["equipment_id"] == dispatch.wip.equipment_id
+        # Equipment is a direct FK on Dispatch under the chat-design model.
+        assert data["equipment_id"] == dispatch.equipment_id
 
     def test_get_dispatch_with_result(
         self, client, auth_headers, lab_staff, result_recorded_dispatch

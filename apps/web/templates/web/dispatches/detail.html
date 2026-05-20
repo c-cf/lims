@@ -17,7 +17,7 @@
     <h1 class="text-xl font-semibold text-slate-900">Dispatch #{{ dispatch.pk }}</h1>
     <div class="flex items-center gap-3 mt-2">
       {% include "web/_status_badge.html" with status=dispatch.status %}
-      <span class="text-sm text-slate-500">{{ dispatch.experiment_type.name }} → {{ dispatch.wip.equipment.name }}</span>
+      <span class="text-sm text-slate-500">{{ dispatch.experiment_type.name }} → {{ dispatch.equipment.name }}</span>
     </div>
   </div>
 
@@ -162,7 +162,7 @@
         <dt class="text-slate-400">Experiment Type</dt>
         <dd class="text-slate-700">{{ dispatch.experiment_type.name }}</dd>
         <dt class="text-slate-400">Equipment</dt>
-        <dd class="text-slate-700">{{ dispatch.wip.equipment.name }}</dd>
+        <dd class="text-slate-700">{{ dispatch.equipment.name }}</dd>
         <dt class="text-slate-400">Recipe</dt>
         <dd class="text-slate-700">{{ dispatch.recipe.name }}</dd>
         {% if dispatch.dispatched_at %}

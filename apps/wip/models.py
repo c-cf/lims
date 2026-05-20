@@ -42,8 +42,6 @@ class WIP(models.Model):
         "experiments.ExperimentType",
         on_delete=models.PROTECT,
         related_name="wips",
-        null=True,
-        blank=True,
     )
     samples = models.ManyToManyField(
         "commissions.Sample",
@@ -103,8 +101,6 @@ class Dispatch(models.Model):
         "equipment.Equipment",
         on_delete=models.PROTECT,
         related_name="dispatches",
-        null=True,
-        blank=True,
     )
     recipe = models.ForeignKey(
         "equipment.Recipe",
