@@ -111,8 +111,16 @@ const useWipCreationData = () => {
       window.api.equipment.list(),
     ])
       .then(async ([exps, allSamples, equip]) => {
-        // Coarse filter: received at the lab + not yet on a non-terminal WIP.
-        const eligible = allSamples.filter(s => s.raw_status === 'received' && !s.hasWip);
+        // Coarse filter: at the lab (received or already processing for a
+        // different experiment) + not currently locked to an active WIP.
+        // Processing wafers still need to land in new WIPs when their parent
+        // request requires more experiments — e.g. a TCT-processed wafer
+        // still owes CP + FT, which become eligible once its first WIP closes.
+        // Backend would 400 on a duplicate (sample,experiment) WIP anyway;
+        // see INTEGRATION_GAPS.md §2.8 follow-up for a finer pre-check.
+        const eligible = allSamples.filter(s =>
+          (s.raw_status === 'received' || s.raw_status === 'processing') && !s.hasWip
+        );
         const reqIds = Array.from(new Set(eligible.map(s => s.requestId)));
         const reqDetails = await Promise.all(
           reqIds.map(id => window.api.requests.get(id).catch(() => null))
@@ -355,7 +363,9 @@ const useLabDashboardData = () => {
       window.api.experimentTypes.list().catch(() => []),
     ])
       .then(([ss, ws, ds, eqs, exps]) => {
-        setSamples(ss);
+        // Mirror useLabSamples — fab-side unshipped wafers (raw_status='created')
+        // shouldn't drive the lab dashboard tile counts either.
+        setSamples(ss.filter(s => s.raw_status !== 'created'));
         setWips(ws);
         setEquipment(eqs);
         const expById = new Map(exps.map(e => [e.id, e]));
@@ -396,7 +406,12 @@ const useLabSamples = () => {
       window.api.requests.list().catch(() => []),
     ])
       .then(([ss, rs]) => {
-        setSamples(ss);
+        // Hide samples the fab user hasn't shipped yet (raw_status='created').
+        // The FE adapter collapses created + shipped both to 'incoming', so
+        // without this filter unshipped wafers leak into the lab view and
+        // tempt the lab user into Receive → backend 400.
+        const visible = ss.filter(s => s.raw_status !== 'created');
+        setSamples(visible);
         setRequestsById(new Map(rs.map(r => [r.id, r])));
         setError(null);
       })

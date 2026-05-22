@@ -500,8 +500,12 @@ const phaseIndexFor = (sample, request) => {
   const rawReq = request.rawStatus || request.status;
   if (rawReq === 'draft' || rawReq === 'submitted' || rawReq === 'pending_approval') return -1;
   if (request.status === 'completed' || sample.status === 'completed') return 4;
-  // Processing: sample is in a non-terminal WIP, or backend split/process-exception.
+  // Processing: sample is in a non-terminal WIP, or backend split/
+  // processing_exception, or backend's explicit `processing` state (set
+  // once the sample enters a dispatch).
   if (sample.status === 'in_wip'
+      || sample.status === 'processing'
+      || sample.raw_status === 'processing'
       || sample.raw_status === 'processing_exception'
       || sample.raw_status === 'split') return 3;
   // Received: physically at the lab, not yet pulled into a WIP.
