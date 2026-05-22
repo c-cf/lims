@@ -384,12 +384,12 @@ class TestExceptionRedispatch:
         ).latest("created_at")
         new_dispatch_id = new_dispatch.pk
 
-        # Complete the new dispatch
+        # Complete the new dispatch — WIP auto-completes because the
+        # original is PENDING_REDISPATCH (terminal) and the new one is
+        # COMPLETED, so all dispatches are terminal + ≥1 COMPLETED.
         _run_dispatch_to_complete(client, new_dispatch_id, lab_staff)
 
-        # WIP can now be completed (original is PENDING_REDISPATCH=terminal, new is COMPLETED)
-        r = _post(client, f"/api/wips/{wip_id}/complete/", lab_staff)
-        assert r.status_code == 200, r.json()
+        r = _get(client, f"/api/wips/{wip_id}/", lab_staff)
         assert r.json()["status"] == WIPStatus.COMPLETED
 
 

@@ -503,6 +503,30 @@ class TestWIPCreateDispatch:
         )
         assert resp.status_code == 201, resp.json()
 
+    def test_create_dispatch_allowed_when_only_pending_redispatch_exists(
+        self,
+        client,
+        auth_headers,
+        lab_staff,
+        wip_in_progress,
+        dispatch,
+        equipment,
+        recipe,
+    ):
+        """PENDING_REDISPATCH semantically means "this attempt has been
+        superseded" — it's terminal for the single-active check, same as
+        COMPLETED/ABORTED. Operator can open a fresh dispatch."""
+        dispatch.status = DispatchStatus.PENDING_REDISPATCH
+        dispatch.save(update_fields=["status"])
+
+        resp = client.post(
+            f"/api/wips/{wip_in_progress.pk}/dispatches/",
+            data={"equipment_id": equipment.pk, "recipe_id": recipe.pk},
+            content_type="application/json",
+            **auth_headers(lab_staff),
+        )
+        assert resp.status_code == 201, resp.json()
+
     def test_create_dispatch_with_estimated_duration(
         self, client, auth_headers, lab_staff, wip, equipment, recipe
     ):
@@ -1093,6 +1117,95 @@ class TestWIPAutoCompleteOnDispatchTerminate:
 
         wip_in_progress.refresh_from_db()
         assert wip_in_progress.status == WIPStatus.IN_PROGRESS
+
+    def test_record_result_with_prior_pending_redispatch_auto_completes_wip(
+        self,
+        client,
+        auth_headers,
+        lab_staff,
+        wip_in_progress,
+        dispatch,
+        experiment_type,
+        equipment,
+        recipe,
+    ):
+        """A historical PENDING_REDISPATCH dispatch (its replacement has
+        already been driven and was eventually superseded) should NOT
+        block WIP auto-completion when a sibling dispatch finishes
+        COMPLETED — PENDING_REDISPATCH is terminal."""
+        # Mark the fixture dispatch as historical PENDING_REDISPATCH —
+        # like a redispatch happened earlier in the WIP's life.
+        dispatch.status = DispatchStatus.PENDING_REDISPATCH
+        dispatch.save(update_fields=["status"])
+
+        # Create a fresh dispatch (allowed, since PENDING_REDISPATCH is
+        # terminal for the active gate after this fix).
+        resp = client.post(
+            f"/api/wips/{wip_in_progress.pk}/dispatches/",
+            data={"equipment_id": equipment.pk, "recipe_id": recipe.pk},
+            content_type="application/json",
+            **auth_headers(lab_staff),
+        )
+        assert resp.status_code == 201, resp.json()
+        new_id = next(
+            d["id"] for d in resp.json()["dispatches"] if d["id"] != dispatch.pk
+        )
+        # Drive the new one through start → unload → record_result.
+        client.post(f"/api/dispatches/{new_id}/start/", **auth_headers(lab_staff))
+        client.post(f"/api/dispatches/{new_id}/unload/", **auth_headers(lab_staff))
+        resp = client.post(
+            f"/api/dispatches/{new_id}/record-result/",
+            data={"summary": "ok", "verdict": "pass"},
+            content_type="application/json",
+            **auth_headers(lab_staff),
+        )
+        assert resp.status_code == 200, resp.json()
+
+        wip_in_progress.refresh_from_db()
+        assert wip_in_progress.status == WIPStatus.COMPLETED
+
+    def test_record_result_from_running_with_prior_pending_redispatch_auto_completes_wip(
+        self,
+        client,
+        auth_headers,
+        lab_staff,
+        wip_in_progress,
+        dispatch,
+        experiment_type,
+        equipment,
+        recipe,
+    ):
+        """Same auto-complete behaviour when the active sibling starts
+        in RUNNING (operator unloads then records the result)."""
+        dispatch.status = DispatchStatus.PENDING_REDISPATCH
+        dispatch.save(update_fields=["status"])
+
+        # Build a sibling already in RUNNING via the factory (skip the
+        # PENDING → DISPATCHED → RUNNING walk).
+        from apps.wip.factories import DispatchFactory
+
+        running = DispatchFactory(
+            wip=wip_in_progress,
+            experiment_type=experiment_type,
+            equipment=equipment,
+            recipe=recipe,
+            status=DispatchStatus.RUNNING,
+            created_by=lab_staff,
+        )
+
+        # unload → record_result (lands in COMPLETED, triggers
+        # auto-complete check).
+        client.post(f"/api/dispatches/{running.pk}/unload/", **auth_headers(lab_staff))
+        resp = client.post(
+            f"/api/dispatches/{running.pk}/record-result/",
+            data={"summary": "ok", "verdict": "pass"},
+            content_type="application/json",
+            **auth_headers(lab_staff),
+        )
+        assert resp.status_code == 200, resp.json()
+
+        wip_in_progress.refresh_from_db()
+        assert wip_in_progress.status == WIPStatus.COMPLETED
 
 
 @pytest.mark.django_db

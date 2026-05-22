@@ -83,38 +83,37 @@ def _dispatch_detail_queryset() -> "models.QuerySet[Dispatch]":
     ).prefetch_related("result")
 
 
-def _check_all_dispatches_done(wip: WIP) -> bool:
-    """Return True if all dispatches for the WIP are in a terminal state."""
-    active_statuses = {
-        DispatchStatus.PENDING,
-        DispatchStatus.DISPATCHED,
-        DispatchStatus.RUNNING,
-        DispatchStatus.UNLOADED,
-        DispatchStatus.RESULT_RECORDED,
+# Dispatch statuses with no further progression possible on this row.
+# PENDING_REDISPATCH is included because its semantics are "this attempt
+# has been superseded by a replacement" — the row will never transition
+# again. All three checks below (single-active gate, auto-complete
+# trigger, manual /wips/{id}/complete/ gate) agree on the same set, so
+# the redispatch flow can both (a) freely open a fresh dispatch after
+# the replacement chain ends and (b) let the WIP auto-complete when
+# the surviving sibling lands in COMPLETED.
+TERMINAL_DISPATCH_STATUSES = frozenset(
+    {
+        DispatchStatus.COMPLETED,
+        DispatchStatus.ABORTED,
+        DispatchStatus.PENDING_REDISPATCH,
     }
-    return not wip.dispatches.filter(status__in=active_statuses).exists()
-
-
-# Statuses that count as "active" for the single-active-dispatch rule.
-# Strictly per spec: COMPLETED and ABORTED are the only non-active ones.
-# PENDING_REDISPATCH is considered active here — by design, redispatch
-# creates the replacement dispatch in the same transaction, so the
-# create_dispatch single-active gate never sees an "orphan"
-# PENDING_REDISPATCH without a sibling active dispatch.
-_ACTIVE_DISPATCH_STATUSES = frozenset(
-    s
-    for s in DispatchStatus.values
-    if s not in (DispatchStatus.COMPLETED, DispatchStatus.ABORTED)
 )
 
 
+def _check_all_dispatches_done(wip: WIP) -> bool:
+    """Return True if all dispatches for the WIP are in a terminal state."""
+    return not wip.dispatches.exclude(status__in=TERMINAL_DISPATCH_STATUSES).exists()
+
+
 def _maybe_auto_complete_wip(wip: WIP) -> bool:
-    """If every dispatch on this WIP is in (COMPLETED, ABORTED) AND at
-    least one is COMPLETED, transition the WIP to COMPLETED and cascade
+    """If every dispatch on this WIP is terminal AND at least one is
+    COMPLETED, transition the WIP to COMPLETED and cascade
     sample/request auto-completion. Returns True iff the WIP was
     transitioned. Caller must hold a select_for_update lock on the WIP.
 
-    Aborted-only WIPs are intentionally NOT auto-completed — operators
+    Terminal here uses TERMINAL_DISPATCH_STATUSES (COMPLETED, ABORTED,
+    PENDING_REDISPATCH). An all-aborted (or all-superseded) WIP with no
+    COMPLETED dispatch is intentionally NOT auto-completed — operators
     decide whether to manually complete or create a fresh dispatch.
     """
     if wip.status != WIPStatus.IN_PROGRESS:
@@ -123,8 +122,7 @@ def _maybe_auto_complete_wip(wip: WIP) -> bool:
     statuses = list(wip.dispatches.values_list("status", flat=True))
     if not statuses:
         return False
-    terminal = {DispatchStatus.COMPLETED, DispatchStatus.ABORTED}
-    if any(s not in terminal for s in statuses):
+    if any(s not in TERMINAL_DISPATCH_STATUSES for s in statuses):
         return False
     if DispatchStatus.COMPLETED not in statuses:
         return False
@@ -484,10 +482,10 @@ def create_dispatch(request: HttpRequest, wip_id: int, payload: DispatchIn):
             return 404, {"detail": "Not found"}
 
         # Single-active-dispatch rule: refuse if any existing dispatch
-        # is still active (status NOT IN COMPLETED, ABORTED). Done
-        # after the WIP select_for_update so concurrent create_dispatch
-        # calls serialize through the same row lock.
-        if wip.dispatches.filter(status__in=_ACTIVE_DISPATCH_STATUSES).exists():
+        # is non-terminal (see TERMINAL_DISPATCH_STATUSES). Done after
+        # the WIP select_for_update so concurrent create_dispatch calls
+        # serialize through the same row lock.
+        if wip.dispatches.exclude(status__in=TERMINAL_DISPATCH_STATUSES).exists():
             return 422, {
                 "detail": (
                     "WIP already has an active dispatch — only one "
