@@ -92,8 +92,11 @@
     dispatched: 'dispatched',
     running: 'running',
     unloaded: 'unloaded',
-    result_recorded: 'result_recorded',
-    completed: 'result_recorded',
+    // Backend's record_result now flips the dispatch straight to
+    // `completed` (no `result_recorded` intermediate). Map both to the
+    // same terminal FE state so the UI shows a single Completed pill.
+    result_recorded: 'completed',
+    completed: 'completed',
     execution_exception: 'exception',
     pending_redispatch: 'exception',
     aborted: 'aborted',
@@ -171,6 +174,31 @@
       completed_at: formatTimestamp(r.completed_at),
       closed_at: formatTimestamp(r.closed_at),
     };
+  }
+
+  // GET /samples/:id/experiments returns the wafer-side rollup that
+  // joins request.experiment_types with the latest dispatch + result for
+  // each one. Backend shape per row:
+  //   { experiment_type: {id, name}, status: 'done'|'pending'|'running',
+  //     dispatch_id: number|null,
+  //     result: {id, summary, verdict, data, data_source, created_at}|null }
+  // We surface dispatchId at the top level so the UI can link to the
+  // dispatch detail page without poking into nested shapes.
+  function normalizeSampleExperiments(rows) {
+    return (rows || []).map(r => ({
+      experimentTypeId: r.experiment_type?.id ?? null,
+      experimentName:   r.experiment_type?.name ?? '',
+      status:           r.status,
+      dispatchId:       r.dispatch_id ?? null,
+      result: r.result ? {
+        id:        r.result.id,
+        summary:   r.result.summary ?? '',
+        verdict:   r.result.verdict ?? null,
+        data:      r.result.data ?? null,
+        dataSource: r.result.data_source ?? null,
+        recordedAt: formatTimestamp(r.result.created_at),
+      } : null,
+    }));
   }
 
   function normalizeSampleRow(s) {
@@ -568,6 +596,9 @@
       },
       async get(id) {
         return normalizeSampleRow(await call(`/samples/${id}`));
+      },
+      async getExperiments(id) {
+        return normalizeSampleExperiments(await call(`/samples/${id}/experiments`));
       },
       async receive(id) {
         return normalizeSampleRow(await call(`/samples/${id}/receive`, { method: 'POST' }));

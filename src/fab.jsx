@@ -1640,9 +1640,44 @@ const CancelRequestModal = ({ requestId, onClose, onCancelled, showToast }) => {
   );
 };
 
+// Per-sample experiment rollup lookup. The request detail payload only
+// carries the request-level experiment list — done/pending state lives
+// on /samples/:id/experiments (gap §2.8). Fetch one rollup per sample in
+// parallel and return a Map keyed by sample id so the experiments-by-wafer
+// card can look up each row in O(1).
+const useSampleExperimentsForRequest = (samples) => {
+  const [byId, setById] = uS({});
+  const [loading, setLoading] = uS(false);
+  const ids = (samples || []).map(s => s.id).filter(v => v != null);
+  const key = ids.join(',');
+  React.useEffect(() => {
+    if (!window.api || !window.api.samples || ids.length === 0) {
+      setById({});
+      return;
+    }
+    let cancelled = false;
+    setLoading(true);
+    Promise.all(ids.map(sid =>
+      window.api.samples.getExperiments(sid)
+        .then(rows => [sid, rows])
+        .catch(() => [sid, []])
+    ))
+      .then(pairs => {
+        if (cancelled) return;
+        const next = {};
+        pairs.forEach(([sid, rows]) => { next[sid] = rows; });
+        setById(next);
+      })
+      .finally(() => { if (!cancelled) setLoading(false); });
+    return () => { cancelled = true; };
+  }, [key]);
+  return { byId, loading };
+};
+
 const FabRequestDetail = ({ id, navigate, showToast }) => {
   const { data: r, loading, error, refresh } = useRequestDetail(id);
   const { data: liveTypes } = useExperimentTypes();
+  const { byId: expsBySample } = useSampleExperimentsForRequest(r?.samples);
   const [cancelOpen, setCancelOpen] = uS(false);
   const [shipBusy, setShipBusy] = uS(false);
 
@@ -1851,13 +1886,14 @@ const FabRequestDetail = ({ id, navigate, showToast }) => {
         </PlainCardHeader>
         <div style={{ padding: 18, display: 'flex', flexDirection: 'column', gap: 12, background: '#fafafd' }}>
           {r.samples.map((s, si) => {
+            // Wafer-side rollup from /samples/:id/experiments (gap §2.8).
+            // Joined with the request's exps so we render in a stable
+            // experiment-order and fall back to "pending" before the
+            // per-sample fetch lands.
+            const rollup = expsBySample[s.id] || [];
+            const statusByExpId = new Map(rollup.map(r => [r.experimentTypeId, r.status]));
             const total = exps.length;
-            // Per-experiment done/pending state lives on the wafer's
-            // WIP → Dispatch → ExperimentResult chain — until the §2.8 wafer
-            // rollup endpoint lands, the detail payload can't tell us which
-            // experiments finished. Render every chip as pending and skip
-            // the result block rather than fake data.
-            const doneCount = 0;
+            const doneCount = exps.filter(e => statusByExpId.get(e.id) === 'done').length;
             return (
               <div key={si} style={{
                 background: '#fff', borderRadius: 12,
@@ -1876,8 +1912,9 @@ const FabRequestDetail = ({ id, navigate, showToast }) => {
                     <div style={{ fontSize: 11.5, color: 'var(--text-muted)', marginTop: 4, marginLeft: 23 }}>{s.size}</div>
                   </div>
                   <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
-                    {exps.map((e, ei) => {
-                      const done = ei < doneCount;
+                    {exps.map(e => {
+                      const st = statusByExpId.get(e.id) || 'pending';
+                      const done = st === 'done';
                       return (
                         <span key={e.id} style={{
                           display: 'inline-flex', alignItems: 'center', gap: 7,
@@ -1902,19 +1939,12 @@ const FabRequestDetail = ({ id, navigate, showToast }) => {
                     })}
                   </div>
                   <div style={{ textAlign: 'right' }}>
-                    <div style={{ fontFamily: 'var(--font-display)', fontSize: 18, fontWeight: 700, color: doneCount === total ? '#157a4a' : '#1e1e24', letterSpacing: '-0.01em' }}>
+                    <div style={{ fontFamily: 'var(--font-display)', fontSize: 18, fontWeight: 700, color: doneCount === total && total > 0 ? '#157a4a' : '#1e1e24', letterSpacing: '-0.01em' }}>
                       {doneCount}<span style={{ color: '#a8a8b8', fontWeight: 500 }}>/{total}</span>
                     </div>
                     <div style={{ fontSize: 10.5, fontWeight: 600, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.06em', marginTop: 2 }}>done</div>
                   </div>
                 </div>
-                {/*
-                  Per-experiment result block intentionally removed for v1.
-                  The real summary/verdict/note lives on the wafer's
-                  WIP → Dispatch → ExperimentResult chain, which is not on
-                  RequestDetailOut yet (see INTEGRATION_GAPS.md §2.8 wafer
-                  rollup). Reintroduce once that endpoint lands.
-                */}
               </div>
             );
           })}

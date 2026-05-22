@@ -108,11 +108,25 @@ The branch keeps the 6 existing commits and adds new commits on top that reshape
 - Backend has no `estimated_duration` on `Dispatch` or `Recipe`.
 - **Resolution (optional):** add `Recipe.estimated_duration_minutes = PositiveIntegerField(null=True)`. Frontend falls back to 24h if absent.
 
-### 2.8 Wafer / Sample experiments view  `[BOTH]`
-- Frontend wafer detail shows the list of required experiments per wafer with per-experiment status (Pending / In Progress / Done) and result data.
-- Backend has the data but it's split: `request.request_experiments` (required experiments) + `wip.dispatches` (running) + `dispatch.result`. There's no single endpoint that hands the wafer-side rollup.
-- **Resolution A (preferred):** add `GET /samples/:id/experiments` returning `[{experiment_type, status, dispatch_id, result}]` computed server-side.
-- **Resolution B:** assemble client-side by joining `samples`, `wips`, `dispatches` — costs three extra requests per wafer detail open.
+### 2.8 ✅ Wafer / Sample experiments view  `[BOTH]` — _resolved 2026-05-22_
+- **Resolved 2026-05-22** — backend's `GET /samples/:id/experiments`
+  (apps/commissions/api.py:679) hands back the rollup as
+  `[{experiment_type:{id,name}, status:'done'|'pending'|'running',
+  dispatch_id, result:{summary,verdict,data,...}|null}]`. Frontend
+  wires it through `api.samples.getExperiments(id)` + a
+  `normalizeSampleExperiments` adapter in `src/api.js`.
+- `useWaferDetail` now co-fetches the rollup alongside sample +
+  request; `LabWaferDetail` renders the Experiments card as fab-style
+  clickable chips (Done = green check, Running = pulsing purple dot,
+  Pending = grey dashed dot; click → `lab_dispatch_detail`).
+- `FabRequestDetail` adds `useSampleExperimentsForRequest`, a per-sample
+  parallel fetch keyed by sample id. The Experiments-by-Wafer card
+  drives doneCount + chip render from the real rollup instead of the
+  hardcoded `doneCount = 0` placeholder.
+- Follow-up: `useWaferDetail` still scans `/wips/?status=in_progress`
+  to find the WIP that owns this sample (only used for a breadcrumb).
+  When `SampleDetailOut.wip_id` lands (separate gap) the scan loop
+  can drop entirely.
 
 ### 2.9 ✅ `RequestUpdateIn` accepts samples + experiment_type_ids on drafts  `[BE]` _small_ — _resolved 2026-05-22 by lims-backend SHA `6c187f4`_
 - **Resolved 2026-05-22 by lims-backend SHA `6c187f4`** — PATCH

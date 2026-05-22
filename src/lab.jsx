@@ -292,8 +292,15 @@ const useWaferDetail = (id) => {
         const sample = await window.api.samples.get(id);
         if (cancelled) return;
         // Parent request — gives us urgency + experiment_type_ids/names.
-        const request = await window.api.requests.get(sample.requestId).catch(() => null);
-        // Locate the active WIP that holds this sample, if any.
+        // The per-experiment rollup (gap §2.8) now lives on
+        // /samples/:id/experiments — fetch alongside the request so we
+        // don't need to scan WIPs to derive done/pending state.
+        const [request, experiments] = await Promise.all([
+          window.api.requests.get(sample.requestId).catch(() => null),
+          window.api.samples.getExperiments(sample.id).catch(() => []),
+        ]);
+        // Locate the active WIP that holds this sample (only needed
+        // for the WIP-detail back-link); skip the scan if there isn't one.
         let wip = null;
         if (sample.hasWip) {
           const wipList = await window.api.wips.list({ status: 'in_progress' }).catch(() => []);
@@ -307,7 +314,7 @@ const useWaferDetail = (id) => {
           }
         }
         if (cancelled) return;
-        setData({ sample, request, wip });
+        setData({ sample, request, wip, experiments });
       } catch (e) {
         if (!cancelled) setError(e.message || String(e));
       } finally {
@@ -432,13 +439,13 @@ const PILL = {
   rejected:   { label: 'Rejected',   bg: '#fbe4e6', fg: '#a93445' },
   in_wip:     { label: 'In WIP',     bg: '#ecebf3', fg: '#4f4a8f' },
   processing: { label: 'Processing', bg: '#ecebf3', fg: '#4f4a8f' },
-  completed:  { label: 'Completed',  bg: '#dbeafe', fg: '#1d4ed8' },
+  completed:  { label: 'Completed',  bg: '#e7f0e9', fg: '#2e6a47' },
   // urgency
   '3d':      { label: '3 Days',    bg: '#fbe4e6', fg: '#a93445' },
   '1w':      { label: '1 Week',    bg: '#ecebf3', fg: '#4f4a8f' },
   '2w':      { label: '2 Weeks',   bg: '#eef0ed', fg: '#4d5a4f' },
   // wip
-  created:     { label: 'Created',     bg: '#ecebf3', fg: '#4f4a8f' },
+  created:     { label: 'Created',     bg: '#fef4dd', fg: '#a06618' },
   in_progress: { label: 'In Progress', bg: '#ecebf3', fg: '#4f4a8f' },
   aborted:     { label: 'Aborted',     bg: '#fbe4e6', fg: '#a93445' },
   // dispatch
@@ -1240,6 +1247,7 @@ const LabSamples = ({ navigate, defaultTab = 'all', showToast }) => {
 // ── Wafer detail ────────────────────────────────────────────────
 const LabWaferDetail = ({ id, navigate, showToast }) => {
   const { data, loading, error, refresh } = useWaferDetail(id);
+  const { data: expTypes } = useLabExperimentTypes();
   const [busy, setBusy] = lS(false);
   const [actionError, setActionError] = lS(null);
 
@@ -1280,24 +1288,22 @@ const LabWaferDetail = ({ id, navigate, showToast }) => {
     );
   }
 
-  const { sample: w, request, wip } = data;
+  const { sample: w, request, wip, experiments } = data;
   const urgency = request?.urgency || '1w';
-  const wipDispatches = wip?.dispatches || [];
 
-  // Experiments needed for this wafer come from the parent request's
-  // experiment_types. Resolve each to its execution state via the WIP's
-  // dispatches: result_recorded -> done, running/pending/dispatched ->
-  // in progress, otherwise pending.
-  const requestExps = request?.experiment_types || [];
-  const expRows = requestExps.map(et => {
-    const dps = wipDispatches.filter(d => d.experimentId === et.id);
-    const recorded = dps.find(d => d.status === 'result_recorded');
-    const running  = dps.find(d => d.status === 'running' || d.status === 'pending' || d.status === 'dispatched');
-    let state = 'pending';
-    if (recorded) state = 'recorded';
-    else if (running) state = 'running';
-    return { exp: et, state, dispatch: recorded || running || null };
-  });
+  // Per-experiment rollup comes from /samples/:id/experiments. Join the
+  // lab_category from /experiment-types/ so each chip shows the RA/MA/FA/TM
+  // group badge (same shape Fab Request Detail uses).
+  const labCategoryById = new Map((expTypes || []).map(t => [t.id, t.labCategory]));
+  const expRows = (experiments || []).map(e => ({
+    id: e.experimentTypeId,
+    name: e.experimentName,
+    group: labCategoryById.get(e.experimentTypeId) || '',
+    status: e.status,
+    dispatchId: e.dispatchId,
+    result: e.result,
+  }));
+  const doneCount = expRows.filter(r => r.status === 'done').length;
 
   const onReceive = () => runAction(() => window.api.samples.receive(w.id), `${w.wafer} received`);
   const onReject = () => runAction(() => window.api.samples.rejectReceiving(w.id, ''), `${w.wafer} rejected`);
@@ -1350,57 +1356,46 @@ const LabWaferDetail = ({ id, navigate, showToast }) => {
             <Card padding={0}>
               <CardHeader>
                 <span>Experiments</span>
-                <span style={{ marginLeft: 'auto', fontSize: 11, color: muted, fontWeight: 600 }}>
-                  {expRows.filter(r => r.state === 'recorded').length}/{expRows.length} done
+                <span style={{ marginLeft: 'auto', fontSize: 11, color: muted, fontWeight: 600, letterSpacing: '0.06em' }}>
+                  {doneCount}/{expRows.length} DONE
                 </span>
               </CardHeader>
-              <div>
-                {expRows.map(({ exp, state, dispatch }) => {
-                  const stateInfo = state === 'recorded'
-                    ? { bg: '#e7f0e9', fg: '#2e6a47', label: 'Done' }
-                    : state === 'running'
-                      ? { bg: '#ecebf3', fg: '#4f4a8f', label: 'In Progress' }
-                      : { bg: '#fef4dd', fg: '#a06618', label: 'Pending' };
+              <div style={{ padding: 18, display: 'flex', flexWrap: 'wrap', gap: 8, background: '#fafafd' }}>
+                {expRows.map(e => {
+                  const done    = e.status === 'done';
+                  const running = e.status === 'running';
+                  // Pending = grey dashed dot. Done = solid green check.
+                  // Running = pulsing purple dot. Clickable when there's
+                  // a dispatch to drill into (done or running).
+                  const clickable = e.dispatchId != null;
+                  const bg = done ? '#e7f6ec' : running ? '#ecebf3' : '#f4f4f7';
+                  const border = done ? '#9ad9b7' : running ? '#bcb8e2' : 'rgba(0,0,0,0.08)';
+                  const badgeBg = done ? '#157a4a' : running ? '#4f4a8f' : '#cbcbd6';
+                  const textCol = done ? '#1f3d2c' : running ? ink : '#7a7a8c';
                   return (
-                    <div key={exp.id} style={{
-                      padding: '14px 20px', borderTop: `1px solid ${lineSoft}`,
-                      display: 'flex', flexDirection: 'column', gap: 8,
-                    }}>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                        <span style={{ fontSize: 13.5, fontWeight: 600, color: ink, flex: 1 }}>{exp.name}</span>
-                        <span style={{
-                          padding: '3px 9px', borderRadius: 999,
-                          background: stateInfo.bg, color: stateInfo.fg,
-                          fontSize: 11.5, fontWeight: 700,
-                        }}>{stateInfo.label}</span>
-                      </div>
-                      {dispatch?.result && (
-                        <div style={{
-                          padding: '10px 12px', background: bgSoft,
-                          border: `1px solid ${lineSoft}`, borderRadius: 8,
-                          display: 'flex', flexDirection: 'column', gap: 6,
-                        }}>
-                          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                            <Pill kind={dispatch.result.verdict}/>
-                            <span style={{ fontSize: 12, color: muted, fontFamily: 'var(--font-mono)' }}>{dispatch.code}</span>
-                            <button onClick={() => navigate({ page: 'lab_dispatch_detail', id: dispatch.id })} style={{
-                              marginLeft: 'auto', background: 'transparent', border: 'none', padding: 0,
-                              cursor: 'pointer', color: accent, fontWeight: 600, fontSize: 12, fontFamily: 'inherit',
-                            }}>Open dispatch \u2192</button>
-                          </div>
-                          <div style={{ fontSize: 13, color: ink, lineHeight: 1.5 }}>{dispatch.result.summary}</div>
-                          {dispatch.result.note && (
-                            <div style={{ fontSize: 12.5, color: text2, fontStyle: 'italic' }}>{dispatch.result.note}</div>
-                          )}
-                        </div>
-                      )}
-                      {state === 'running' && dispatch && (
-                        <div style={{ fontSize: 12.5, color: text2, display: 'inline-flex', alignItems: 'center', gap: 6 }}>
-                          <span style={{ width: 6, height: 6, borderRadius: 999, background: '#4f4a8f', animation: 'pulse 1.4s infinite' }}/>
-                          Running on <strong style={{ color: ink, fontFamily: 'var(--font-mono)' }}>{dispatch.equipmentName || '\u2014'}</strong> \u00b7 dispatch {dispatch.code}
-                        </div>
-                      )}
-                    </div>
+                    <button
+                      key={e.id}
+                      type="button"
+                      disabled={!clickable}
+                      onClick={() => clickable && navigate({ page: 'lab_dispatch_detail', id: e.dispatchId })}
+                      style={{
+                        display: 'inline-flex', alignItems: 'center', gap: 7,
+                        padding: '6px 12px 6px 7px', borderRadius: 999,
+                        background: bg, border: `1px solid ${border}`,
+                        fontFamily: 'inherit', cursor: clickable ? 'pointer' : 'default',
+                      }}
+                    >
+                      <span style={{
+                        fontSize: 10, fontWeight: 700, padding: '3px 7px', borderRadius: 999,
+                        background: badgeBg, color: '#fff', letterSpacing: '0.05em',
+                      }}>{e.group || '\u2014'}</span>
+                      <span style={{ fontSize: 13, fontWeight: 500, color: textCol }}>{e.name}</span>
+                      {done
+                        ? <LF.Check size={13} color="#157a4a" strokeWidth={3}/>
+                        : running
+                          ? <span style={{ width: 9, height: 9, borderRadius: 999, background: '#4f4a8f', animation: 'pulse 1.4s infinite' }}/>
+                          : <span style={{ width: 13, height: 13, borderRadius: 999, border: '1.5px dashed #cbcbd6' }}/>}
+                    </button>
                   );
                 })}
               </div>
@@ -1805,11 +1800,8 @@ const LabWipDetail = ({ id, navigate, showToast }) => {
       setBusy(false);
     }
   };
-  const onComplete = () => {
-    if (!w) return;
-    if (!window.confirm(`Mark ${w.code} as complete? Active dispatches must already be in a terminal state.`)) return;
-    runAction(() => window.api.wips.complete(w.id), `${w.code} completed`);
-  };
+  // Backend auto-completes the parent WIP when its last dispatch is
+  // closed, so the UI no longer offers a manual "Complete WIP" button.
   const onAbort = () => {
     if (!w) return;
     if (!window.confirm(`Abort ${w.code}? This cannot be undone.`)) return;
@@ -1850,6 +1842,9 @@ const LabWipDetail = ({ id, navigate, showToast }) => {
   // exists (live ids are integers; the EXPERIMENTS catalogue is string-keyed).
   const expCode = (findExp(w.experimentId)?.code) || (w.experimentName ? w.experimentName.split(/\s+/).map(t => t[0]).join('').slice(0, 4).toUpperCase() : '—');
   const isActive = w.status !== 'completed' && w.status !== 'aborted';
+  // Only one active dispatch per WIP at a time — gate "Create Dispatch"
+  // on there being no open one (anything not yet completed/aborted).
+  const hasActiveDispatch = w.dispatches.some(d => d.status !== 'completed' && d.status !== 'aborted');
 
   return (
     <Page
@@ -1875,10 +1870,11 @@ const LabWipDetail = ({ id, navigate, showToast }) => {
         <span style={{ color: muted, fontSize: 13 }}>· {w.sampleCount} sample{w.sampleCount === 1 ? '' : 's'}</span>
         {w.created && <span style={{ color: muted, fontSize: 13 }}>· created {w.created.split(' ')[0]}</span>}
       </span>}
-      right={isActive && <>
-        <SecondaryBtn danger onClick={onAbort} disabled={busy}>{busy ? '…' : 'Abort'}</SecondaryBtn>
-        <PrimaryBtn success onClick={onComplete} disabled={busy} icon={<LF.Check size={14}/>}>{busy ? 'Working…' : 'Complete WIP'}</PrimaryBtn>
-      </>}
+      right={isActive && (hasActiveDispatch ? (
+        <SecondaryBtn danger onClick={onAbort} disabled={busy}>{busy ? '…' : 'Abort WIP'}</SecondaryBtn>
+      ) : (
+        <PrimaryBtn icon={<LF.Plus size={14}/>} onClick={onAddDispatch} disabled={busy}>Create Dispatch</PrimaryBtn>
+      ))}
     >
       {actionError && (
         <div style={{
@@ -1899,7 +1895,7 @@ const LabWipDetail = ({ id, navigate, showToast }) => {
             </CardHeader>
             {w.dispatches.length === 0 ? (
               <div style={{ padding: '28px 20px', textAlign: 'center', color: muted, fontSize: 13 }}>
-                No dispatches yet{isActive ? ' — use Add Dispatch above to create one' : ''}
+                No dispatches yet{isActive && !hasActiveDispatch ? ' — use Create Dispatch above to start one' : ''}
               </div>
             ) : (
               <>
@@ -1931,18 +1927,6 @@ const LabWipDetail = ({ id, navigate, showToast }) => {
               </>
             )}
           </Card>
-
-          {isActive && (
-            <Card padding={22} style={{ textAlign: 'center' }}>
-              <div style={{ fontSize: 11.5, color: muted, fontWeight: 600, letterSpacing: '0.06em', textTransform: 'uppercase', marginBottom: 8 }}>
-                Add Dispatch
-              </div>
-              <div style={{ fontSize: 13, color: text2, marginBottom: 14 }}>
-                Pick equipment + recipe to spin up a new dispatch on this WIP.
-              </div>
-              <PrimaryBtn icon={<LF.Plus size={14}/>} onClick={onAddDispatch}>Add Dispatch</PrimaryBtn>
-            </Card>
-          )}
 
           {w.note && (
             <Card padding={0}>
@@ -2150,20 +2134,26 @@ const AddDispatchModalInner = ({ onClose, wip, onCreated }) => {
 
         <div>
           <FieldLabel>Estimated duration (seconds)</FieldLabel>
-          <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-            <TextInput
-              type="number" min="1"
-              placeholder="e.g., 3600 (= 1 hour), 86400 (= 1 day)"
-              value={duration}
-              onChange={(e) => setDuration(e.target.value)}
-              style={{ flex: 1 }}
-            />
-            <button type="button" onClick={() => setDuration('20')} style={{
-              padding: '8px 12px', borderRadius: 999,
-              background: '#f5f5fa', color: accent, border: `1px solid ${line}`,
-              fontSize: 12.5, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit',
-              whiteSpace: 'nowrap',
-            }}>20s — demo</button>
+          <TextInput
+            type="number" min="1"
+            placeholder="Seconds — leave blank if unknown"
+            value={duration}
+            onChange={(e) => setDuration(e.target.value)}
+          />
+          <div style={{ display: 'flex', gap: 6, marginTop: 8, flexWrap: 'wrap' }}>
+            {[
+              { label: '20s', value: '20' },
+              { label: '1m',  value: '60' },
+              { label: '1h',  value: '3600' },
+              { label: '1d',  value: '86400' },
+            ].map(preset => (
+              <button key={preset.value} type="button" onClick={() => setDuration(preset.value)} style={{
+                padding: '6px 12px', borderRadius: 999,
+                background: duration === preset.value ? '#ecebf3' : '#f5f5fa',
+                color: accent, border: `1px solid ${duration === preset.value ? '#bcb8e2' : line}`,
+                fontSize: 12.5, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit',
+              }}>{preset.label}</button>
+            ))}
           </div>
           <div style={{ fontSize: 12, color: muted, marginTop: 6 }}>
             Leave blank if unknown. The countdown bar will show — if not set.
@@ -2186,7 +2176,7 @@ const LabDispatchList = ({ navigate, defaultTab = 'active' }) => {
   const groups = {
     active: ['dispatched', 'pending', 'running'],
     record: ['unloaded', 'exception'],
-    done:   ['result_recorded', 'aborted'],
+    done:   ['completed', 'aborted'],
     all:    null,
   };
   const filtered = groups[tab] === null
@@ -2343,7 +2333,10 @@ const LabDispatchList = ({ navigate, defaultTab = 'active' }) => {
 };
 
 // ── Dispatch detail ─────────────────────────────────────────────
-const STATUS_FLOW = ['dispatched', 'pending', 'running', 'unloaded', 'result_recorded'];
+// Lifecycle order. record_result on the backend now writes the result
+// AND flips the dispatch straight to `completed` — there's no
+// `result_recorded` intermediate state any more.
+const STATUS_FLOW = ['dispatched', 'pending', 'running', 'unloaded', 'completed'];
 
 const LabDispatchDetail = ({ id, navigate, showToast }) => {
   const { dispatch: d, loading, error, refresh } = useLabDispatchDetail(id);
@@ -2401,15 +2394,18 @@ const LabDispatchDetail = ({ id, navigate, showToast }) => {
     );
   }
 
-  // For the lifecycle stepper. The status-mapped value lives in d.status
-  // (FE-normalized); some FE-mapped statuses come from multiple backend
-  // states (e.g. `exception` covers `execution_exception` + `pending_redispatch`).
-  const stepIdx = STATUS_FLOW.indexOf(d.status);
-  const isClosed = d.status === 'aborted' || d.status === 'exception' || d.status === 'result_recorded';
+  // For the lifecycle stepper. Backend's record_result now closes the
+  // dispatch straight to `completed` — there's no result_recorded
+  // intermediate state. `exception` is still its own non-terminal
+  // failure mode (the FE collapses multiple backend exception states).
+  const isFailed = d.status === 'aborted' || d.status === 'exception';
+  const isDone   = d.status === 'completed';
+  const stepIdx  = isDone ? STATUS_FLOW.length - 1 : STATUS_FLOW.indexOf(d.status);
 
   // Action surface depends on status. Each button confirms, hits the API,
   // refetches, and shows a toast. `record-result` opens the existing modal
-  // which itself calls api.dispatches.recordResult.
+  // which itself calls api.dispatches.recordResult; once recorded the
+  // dispatch is `completed` and there are no further actions.
   let actions = null;
   if (d.status === 'dispatched' || d.status === 'pending') actions = <>
     <SecondaryBtn danger disabled={busy} onClick={() => confirmThen(`Abort ${d.code}?`, () => window.api.dispatches.abort(d.id), `${d.code} aborted`)}>Abort</SecondaryBtn>
@@ -2421,10 +2417,6 @@ const LabDispatchDetail = ({ id, navigate, showToast }) => {
   </>;
   else if (d.status === 'unloaded' || d.status === 'exception') actions = <>
     <PrimaryBtn icon={<LF.ClipboardList size={14}/>} disabled={busy} onClick={() => setRecordOpen(true)}>Record Result</PrimaryBtn>
-  </>;
-  else if (d.status === 'result_recorded') actions = <>
-    <SecondaryBtn disabled={busy} onClick={() => confirmThen(`Re-dispatch ${d.code}? A new dispatch will be created.`, () => window.api.dispatches.redispatch(d.id), `${d.code} re-dispatched`)}>Redispatch</SecondaryBtn>
-    <PrimaryBtn icon={<LF.Check size={14}/>} success disabled={busy} onClick={() => confirmThen(`Complete ${d.code}?`, () => window.api.dispatches.complete(d.id), `${d.code} completed`)}>{busy ? '…' : 'Complete'}</PrimaryBtn>
   </>;
 
   const wipCode = `WIP-${String(d.wipId).padStart(4, '0')}`;
@@ -2458,9 +2450,12 @@ const LabDispatchDetail = ({ id, navigate, showToast }) => {
         <CardHeader>Lifecycle</CardHeader>
         <div style={{ padding: '22px 26px', display: 'flex', alignItems: 'center', gap: 0 }}>
           {STATUS_FLOW.map((s, i) => {
-            const done = !isClosed && i < stepIdx;
-            const cur  = !isClosed && i === stepIdx;
-            const fail = isClosed && (d.status === 'aborted' || d.status === 'exception') && i > stepIdx;
+            // `completed` lights up every dot; otherwise i < stepIdx are
+            // done, i === stepIdx is current. Failed states (aborted /
+            // exception) hold the line at whichever stage they fired
+            // from — no further dots illuminate.
+            const done = isDone ? i <= stepIdx : (!isFailed && i < stepIdx);
+            const cur  = !isDone && !isFailed && i === stepIdx;
             const reachedColor = done ? accent : cur ? accent : '#dcdce3';
             return (
               <React.Fragment key={s}>
