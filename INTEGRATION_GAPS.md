@@ -114,30 +114,20 @@ The branch keeps the 6 existing commits and adds new commits on top that reshape
 - **Resolution A (preferred):** add `GET /samples/:id/experiments` returning `[{experiment_type, status, dispatch_id, result}]` computed server-side.
 - **Resolution B:** assemble client-side by joining `samples`, `wips`, `dispatches` — costs three extra requests per wafer detail open.
 
-### 2.9 `RequestUpdateIn` is too narrow for the draft-edit flow  `[BE]` _small_
-- Frontend's "Continue editing" on a draft card needs to replay
-  `experiment_type_ids` + `samples`, not just title/note. Backend
-  `RequestUpdateIn` (`apps/commissions/schemas.py`) only accepts
-  `title`, `note`, `urgency`.
-- **Surfaced during Fab New Request wiring smoke-test 2026-05-19.** Confirmed
-  again 2026-05-22: PATCH `/requests/29` with a `samples` array silently
-  dropped the field and only persisted `title`. Until the resolution below
-  lands, the frontend Drafts → Continue editing flow locks the wafer /
-  experiment block as read-only and only ships title / note / urgency.
-- **Resolution:** widen `RequestUpdateIn`:
-  ```python
-  experiment_type_ids: list[int] | None = None
-  experiment_parameters: dict[str, dict[str, Any]] | None = None
-  samples: list[SampleIn] | None = None
-  ```
-  View `update_request` already guards on `status in (DRAFT, RETURNED)`, so
-  the state-machine invariant holds. The view body needs to replace (not
-  patch) the through-table rows and samples when the new fields are
-  provided — wrap in `transaction.atomic` (already done), delete existing
-  `RequestExperiment` + `Sample` rows for the request, recreate from
-  payload. Same pattern as `create_request`.
-- Lower priority than the count-rollup fields in §4 (those are visible on
-  every list page); batch this with §4 in the next backend mini-PR.
+### 2.9 ✅ `RequestUpdateIn` accepts samples + experiment_type_ids on drafts  `[BE]` _small_ — _resolved 2026-05-22 by lims-backend SHA `6c187f4`_
+- **Resolved 2026-05-22 by lims-backend SHA `6c187f4`** — PATCH
+  `/requests/:id` now accepts `experiment_type_ids` + `samples` on
+  draft requests (the through-table rows + Sample rows get replaced
+  inside a `transaction.atomic`). Non-draft requests return 422 if
+  those fields are present, and an empty `samples` list also 422s
+  (min_length=1).
+- Frontend lockdown removed in commit-on-this-branch: FabNewRequest's
+  isEdit mode is fully editable again, and `handle()`'s isEdit branch
+  sends the full create-shape payload via `api.requests.update`.
+- _History:_ originally surfaced 2026-05-19 during Fab New Request
+  wiring; confirmed again 2026-05-22 that PATCH was silently dropping
+  `samples`. The frontend had locked the wafer/experiment block as
+  read-only as a workaround.
 
 ---
 
