@@ -277,6 +277,13 @@ def _update_experiment_statuses_on_dispatch_complete(dispatch: Dispatch) -> None
     row attached to this dispatch's WIP × experiment_type, then check
     for sample/request auto-completion.
 
+    Guarantees a SampleExperimentStatus row exists for every sample in
+    the WIP, creating one if upstream init never ran. (Originally
+    relied on _initialize_sample_experiment_statuses, called when the
+    request transitions to IN_PROGRESS — but that's a fragile coupling:
+    samples added post-init, or factory-built WIPs that bypass the
+    receive flow, would silently land null verdicts.)
+
     Must be called inside an active transaction.atomic() block.
     """
     wip = dispatch.wip
@@ -284,11 +291,14 @@ def _update_experiment_statuses_on_dispatch_complete(dispatch: Dispatch) -> None
     sample_ids = list(wip.samples.values_list("pk", flat=True))
 
     # Per-wafer roll: each row gets its own dice. We can't .update() in
-    # bulk because each row needs an independent random value.
-    rows = SampleExperimentStatus.objects.select_for_update().filter(
-        sample_id__in=sample_ids, experiment_type=experiment_type
-    )
-    for row in rows:
+    # bulk because each row needs an independent random value. Use
+    # get_or_create so a missing upstream init doesn't silently swallow
+    # the verdict assignment — see regression test
+    # test_record_result_full_flow_fills_verdict_without_preinit.
+    for sample_id in sample_ids:
+        row, _ = SampleExperimentStatus.objects.get_or_create(
+            sample_id=sample_id, experiment_type=experiment_type
+        )
         row.status = SampleExperimentProgress.COMPLETED
         row.verdict = _random_verdict()
         row.dispatch = dispatch

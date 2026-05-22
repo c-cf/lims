@@ -1127,6 +1127,89 @@ class TestDispatchRecordResult:
         )
         assert row.verdict is None
 
+    def test_record_result_full_flow_fills_verdict_without_preinit(
+        self,
+        client,
+        auth_headers,
+        lab_staff,
+        experiment_type,
+        equipment,
+        recipe,
+    ):
+        """Regression test for the verdict-stays-null bug.
+
+        Mirrors the SPA smoke scenario exactly: factory-built request +
+        samples + WIP + dispatch (no manual SampleExperimentStatus
+        priming), then walks start → unload → record_result via the API.
+        The previous shape — _update_experiment_statuses_on_dispatch_complete
+        filtering existing SampleExperimentStatus rows — silently
+        no-op'd when rows weren't pre-created, leaving verdict=null on
+        every wafer.
+        """
+        from apps.commissions.factories import RequestFactory
+        from apps.commissions.models import RequestExperiment, RequestStatus
+        from apps.wip.models import SampleExperimentStatus
+
+        req = RequestFactory(status=RequestStatus.IN_PROGRESS)
+        RequestExperiment.objects.create(request=req, experiment_type=experiment_type)
+        samples = [
+            SampleFactory(
+                request=req,
+                wafer_id=f"WF-REPRO-{i}",
+                status=SampleStatus.PROCESSING,
+            )
+            for i in range(3)
+        ]
+        wip = WIPFactory(
+            experiment_type=experiment_type,
+            status=WIPStatus.IN_PROGRESS,
+            created_by=lab_staff,
+        )
+        for s in samples:
+            WIPSample.objects.create(wip=wip, sample=s)
+        # Deliberately do NOT pre-create SampleExperimentStatus rows —
+        # this is the gap. The helper has to either find existing rows
+        # or create them.
+
+        d = DispatchFactory(
+            wip=wip,
+            experiment_type=experiment_type,
+            equipment=equipment,
+            recipe=recipe,
+        )
+
+        # start → unload → record_result via the API.
+        assert (
+            client.post(
+                f"/api/dispatches/{d.pk}/start/", **auth_headers(lab_staff)
+            ).status_code
+            == 200
+        )
+        assert (
+            client.post(
+                f"/api/dispatches/{d.pk}/unload/", **auth_headers(lab_staff)
+            ).status_code
+            == 200
+        )
+        resp = client.post(
+            f"/api/dispatches/{d.pk}/record-result/",
+            data={"comment": "test"},
+            content_type="application/json",
+            **auth_headers(lab_staff),
+        )
+        assert resp.status_code == 200, resp.json()
+        assert resp.json()["status"] == DispatchStatus.COMPLETED
+
+        # Every wafer must have a verdict — this is what the bug breaks.
+        rows = SampleExperimentStatus.objects.filter(
+            sample__in=samples, experiment_type=experiment_type
+        )
+        assert rows.count() == 3
+        for row in rows:
+            assert row.verdict in ("pass", "fail"), (
+                f"sample {row.sample_id} verdict was {row.verdict!r}"
+            )
+
 
 @pytest.mark.django_db
 class TestWIPAutoCompleteOnDispatchTerminate:
@@ -1603,3 +1686,59 @@ class TestAutomationEquipmentResult:
             **auth_headers(fab_user),
         )
         assert resp.status_code == 403
+
+    def test_automation_result_assigns_per_wafer_verdict_without_preinit(
+        self, client, auth_headers, lab_staff, experiment_type, equipment, recipe
+    ):
+        """Same verdict-assignment guarantee as the manual record_result
+        path — the automation endpoint also runs through
+        _update_experiment_statuses_on_dispatch_complete and must fill in
+        every wafer's verdict even when SampleExperimentStatus rows
+        weren't pre-initialised."""
+        from apps.commissions.factories import RequestFactory
+        from apps.commissions.factories import SampleFactory as _SF
+        from apps.commissions.models import RequestExperiment, RequestStatus
+        from apps.wip.models import SampleExperimentStatus
+
+        req = RequestFactory(status=RequestStatus.IN_PROGRESS)
+        RequestExperiment.objects.create(request=req, experiment_type=experiment_type)
+        samples = [
+            _SF(
+                request=req,
+                wafer_id=f"WF-AUTO-{i}",
+                status=SampleStatus.PROCESSING,
+            )
+            for i in range(2)
+        ]
+        wip = WIPFactory(
+            experiment_type=experiment_type,
+            status=WIPStatus.IN_PROGRESS,
+            created_by=lab_staff,
+        )
+        for s in samples:
+            WIPSample.objects.create(wip=wip, sample=s)
+        # No SampleExperimentStatus pre-init — same gap as record_result.
+
+        d = DispatchFactory(
+            wip=wip,
+            experiment_type=experiment_type,
+            equipment=equipment,
+            recipe=recipe,
+            status=DispatchStatus.DISPATCHED,
+            created_by=lab_staff,
+        )
+
+        resp = client.post(
+            "/api/automation/equipment-result/",
+            data={"dispatch_id": d.pk, "comment": "auto"},
+            content_type="application/json",
+            **auth_headers(lab_staff),
+        )
+        assert resp.status_code == 200, resp.json()
+
+        rows = SampleExperimentStatus.objects.filter(
+            sample__in=samples, experiment_type=experiment_type
+        )
+        assert rows.count() == 2
+        for row in rows:
+            assert row.verdict in ("pass", "fail")
