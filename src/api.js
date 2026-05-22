@@ -8,7 +8,7 @@
 // load; falls back to the production host.
 
 (function () {
-  const DEFAULT_BASE = 'https://lims.cchuml.com/api';
+  const DEFAULT_BASE = '/api';
   const BASE = (window.LIMS_API_BASE || DEFAULT_BASE).replace(/\/+$/, '');
 
   // ---------------------------------------------------------------------------
