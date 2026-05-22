@@ -924,6 +924,122 @@ class TestDispatchUnload:
         )
         assert resp.status_code == 400
 
+    def test_unload_assigns_verdicts_to_all_samples(
+        self,
+        client,
+        auth_headers,
+        lab_staff,
+        experiment_type,
+        equipment,
+        recipe,
+    ):
+        """Per-wafer verdict is rolled at unload time — the Record
+        Result modal needs them visible BEFORE the operator opens it,
+        so the roll cannot wait until record_result. 3 samples → 3
+        verdicts after unload."""
+        from apps.commissions.factories import RequestFactory
+        from apps.commissions.models import RequestExperiment, RequestStatus
+        from apps.wip.models import SampleExperimentStatus
+
+        req = RequestFactory(status=RequestStatus.IN_PROGRESS)
+        RequestExperiment.objects.create(request=req, experiment_type=experiment_type)
+        samples = [
+            SampleFactory(
+                request=req,
+                wafer_id=f"WF-UNLOAD-{i}",
+                status=SampleStatus.PROCESSING,
+            )
+            for i in range(3)
+        ]
+        wip = WIPFactory(
+            experiment_type=experiment_type,
+            status=WIPStatus.IN_PROGRESS,
+            created_by=lab_staff,
+        )
+        for s in samples:
+            WIPSample.objects.create(wip=wip, sample=s)
+        d = DispatchFactory(
+            wip=wip,
+            experiment_type=experiment_type,
+            equipment=equipment,
+            recipe=recipe,
+            status=DispatchStatus.RUNNING,
+        )
+
+        resp = client.post(f"/api/dispatches/{d.pk}/unload/", **auth_headers(lab_staff))
+        assert resp.status_code == 200, resp.json()
+        assert resp.json()["status"] == DispatchStatus.UNLOADED
+
+        rows = SampleExperimentStatus.objects.filter(
+            sample__in=samples, experiment_type=experiment_type
+        )
+        assert rows.count() == 3
+        for row in rows:
+            assert row.verdict in ("pass", "fail"), (
+                f"sample {row.sample_id} verdict was {row.verdict!r}"
+            )
+
+    def test_unload_verdict_distribution_roughly_80_20(
+        self,
+        client,
+        auth_headers,
+        lab_staff,
+        experiment_type,
+        equipment,
+        recipe,
+    ):
+        """100 unloads of single-sample dispatches with seeded RNG; expect
+        ~20 fails, allow Wilson-ish slack. Moved from record_result side
+        since the roll happens at unload now."""
+        import random
+
+        from apps.commissions.factories import RequestFactory
+        from apps.commissions.models import RequestExperiment, RequestStatus
+        from apps.wip.models import (
+            SampleExperimentStatus,
+            SampleExperimentVerdict,
+        )
+
+        random.seed(42)
+
+        fail_count = 0
+        for i in range(100):
+            req = RequestFactory(status=RequestStatus.IN_PROGRESS)
+            RequestExperiment.objects.create(
+                request=req, experiment_type=experiment_type
+            )
+            s = SampleFactory(
+                request=req,
+                wafer_id=f"WF-UNLOAD-DIST-{i:03d}",
+                status=SampleStatus.PROCESSING,
+            )
+            w = WIPFactory(
+                experiment_type=experiment_type,
+                status=WIPStatus.IN_PROGRESS,
+                created_by=lab_staff,
+            )
+            WIPSample.objects.create(wip=w, sample=s)
+            d = DispatchFactory(
+                wip=w,
+                experiment_type=experiment_type,
+                equipment=equipment,
+                recipe=recipe,
+                status=DispatchStatus.RUNNING,
+            )
+            resp = client.post(
+                f"/api/dispatches/{d.pk}/unload/", **auth_headers(lab_staff)
+            )
+            assert resp.status_code == 200, resp.json()
+
+            row = SampleExperimentStatus.objects.get(
+                sample=s, experiment_type=experiment_type
+            )
+            if row.verdict == SampleExperimentVerdict.FAIL:
+                fail_count += 1
+
+        # 80/20 with n=100 → ~95% CI [12, 30]; widen a touch.
+        assert 10 <= fail_count <= 35, f"got fail_count={fail_count}"
+
 
 @pytest.mark.django_db
 class TestDispatchRecordResult:
@@ -980,138 +1096,87 @@ class TestDispatchRecordResult:
         )
         assert resp.status_code == 400
 
-    def test_record_result_assigns_per_wafer_verdict_for_every_sample(
+    def test_record_result_does_not_modify_verdict(
         self,
         client,
         auth_headers,
         lab_staff,
-        wip_in_progress,
         experiment_type,
         equipment,
         recipe,
-        in_progress_request,
     ):
-        """One dispatch over 3 samples → 3 SampleExperimentStatus rows
-        each carrying a verdict (pass or fail) after record_result."""
-        import random
+        """Verdict is rolled at unload; record_result must NOT touch it.
+        Capture verdicts post-unload, run record_result, assert unchanged."""
+        from apps.commissions.factories import RequestFactory
+        from apps.commissions.models import RequestExperiment, RequestStatus
+        from apps.wip.models import SampleExperimentStatus
 
-        from apps.wip.models import SampleExperimentStatus, SampleExperimentVerdict
-
-        random.seed(0)
-
-        # Add 2 more samples to the wip so it has 3 total.
-        extra1 = SampleFactory(
-            request=in_progress_request,
-            wafer_id="WF-EXTRA-1",
-            status=SampleStatus.PROCESSING,
-        )
-        extra2 = SampleFactory(
-            request=in_progress_request,
-            wafer_id="WF-EXTRA-2",
-            status=SampleStatus.PROCESSING,
-        )
-        for s in (extra1, extra2):
-            WIPSample.objects.create(wip=wip_in_progress, sample=s)
-            SampleExperimentStatus.objects.create(
-                sample=s, experiment_type=experiment_type
+        req = RequestFactory(status=RequestStatus.IN_PROGRESS)
+        RequestExperiment.objects.create(request=req, experiment_type=experiment_type)
+        samples = [
+            SampleFactory(
+                request=req,
+                wafer_id=f"WF-FROZEN-{i}",
+                status=SampleStatus.PROCESSING,
             )
-
+            for i in range(3)
+        ]
+        wip = WIPFactory(
+            experiment_type=experiment_type,
+            status=WIPStatus.IN_PROGRESS,
+            created_by=lab_staff,
+        )
+        for s in samples:
+            WIPSample.objects.create(wip=wip, sample=s)
         d = DispatchFactory(
-            wip=wip_in_progress,
+            wip=wip,
             experiment_type=experiment_type,
             equipment=equipment,
             recipe=recipe,
-            status=DispatchStatus.UNLOADED,
+            status=DispatchStatus.RUNNING,
         )
 
+        # Unload — verdict rolled here.
+        client.post(f"/api/dispatches/{d.pk}/unload/", **auth_headers(lab_staff))
+        before = dict(
+            SampleExperimentStatus.objects.filter(
+                sample__in=samples, experiment_type=experiment_type
+            ).values_list("sample_id", "verdict")
+        )
+        assert len(before) == 3
+        assert all(v in ("pass", "fail") for v in before.values())
+
+        # record_result must not touch verdict.
         resp = client.post(
             f"/api/dispatches/{d.pk}/record-result/",
-            data={"comment": "batch run"},
+            data={"comment": "operator note"},
             content_type="application/json",
             **auth_headers(lab_staff),
         )
         assert resp.status_code == 200, resp.json()
 
-        sample_ids = list(wip_in_progress.samples.values_list("pk", flat=True))
-        assert len(sample_ids) == 3
-        rows = SampleExperimentStatus.objects.filter(
-            sample_id__in=sample_ids, experiment_type=experiment_type
+        after = dict(
+            SampleExperimentStatus.objects.filter(
+                sample__in=samples, experiment_type=experiment_type
+            ).values_list("sample_id", "verdict")
         )
-        assert rows.count() == 3
-        verdicts = {r.verdict for r in rows}
-        assert verdicts.issubset(
-            {SampleExperimentVerdict.PASS, SampleExperimentVerdict.FAIL}
-        )
-        # Every row got a verdict — none left null.
-        assert all(r.verdict is not None for r in rows)
+        assert after == before
 
-    def test_record_result_verdict_distribution_roughly_80_20(
-        self,
-        client,
-        auth_headers,
-        lab_staff,
-        experiment_type,
-        equipment,
-        recipe,
+    def test_record_result_only_persists_comment(
+        self, client, auth_headers, lab_staff, unloaded_dispatch
     ):
-        """Drive 100 single-sample dispatches through record_result with
-        a pinned seed; expect ~20 fails, allow Wilson-ish slack so the
-        test isn't flaky."""
-        import random
-
-        from apps.commissions.factories import RequestFactory
-        from apps.commissions.models import RequestExperiment, RequestStatus
-        from apps.wip.models import (
-            SampleExperimentStatus,
-            SampleExperimentVerdict,
+        """Post-unload, record_result's only job is to write the comment
+        and transition the dispatch to COMPLETED."""
+        resp = client.post(
+            f"/api/dispatches/{unloaded_dispatch.pk}/record-result/",
+            data={"comment": "abc"},
+            content_type="application/json",
+            **auth_headers(lab_staff),
         )
-
-        random.seed(42)
-
-        fail_count = 0
-        for i in range(100):
-            req = RequestFactory(status=RequestStatus.IN_PROGRESS)
-            RequestExperiment.objects.create(
-                request=req, experiment_type=experiment_type
-            )
-            s = SampleFactory(
-                request=req,
-                wafer_id=f"WF-DIST-{i:03d}",
-                status=SampleStatus.PROCESSING,
-            )
-            SampleExperimentStatus.objects.create(
-                sample=s, experiment_type=experiment_type
-            )
-            w = WIPFactory(
-                experiment_type=experiment_type,
-                status=WIPStatus.IN_PROGRESS,
-                created_by=lab_staff,
-            )
-            WIPSample.objects.create(wip=w, sample=s)
-            d = DispatchFactory(
-                wip=w,
-                experiment_type=experiment_type,
-                equipment=equipment,
-                recipe=recipe,
-                status=DispatchStatus.UNLOADED,
-            )
-            resp = client.post(
-                f"/api/dispatches/{d.pk}/record-result/",
-                data={"comment": "dist test"},
-                content_type="application/json",
-                **auth_headers(lab_staff),
-            )
-            assert resp.status_code == 200, resp.json()
-
-            row = SampleExperimentStatus.objects.get(
-                sample=s, experiment_type=experiment_type
-            )
-            if row.verdict == SampleExperimentVerdict.FAIL:
-                fail_count += 1
-
-        # 80/20 with n=100 → 95% CI is ~[12, 30]; widen a hair for
-        # the seeded run to stay robust if Python's RNG drifts.
-        assert 10 <= fail_count <= 35, f"got fail_count={fail_count}"
+        assert resp.status_code == 200, resp.json()
+        unloaded_dispatch.refresh_from_db()
+        assert unloaded_dispatch.status == DispatchStatus.COMPLETED
+        assert unloaded_dispatch.result.comment == "abc"
 
     def test_sample_experiment_status_verdict_null_before_record(
         self, sample, experiment_type
@@ -1141,7 +1206,7 @@ class TestDispatchRecordResult:
         Mirrors the SPA smoke scenario exactly: factory-built request +
         samples + WIP + dispatch (no manual SampleExperimentStatus
         priming), then walks start → unload → record_result via the API.
-        The previous shape — _update_experiment_statuses_on_dispatch_complete
+        The previous shape — _update_experiment_statuses_on_unload
         filtering existing SampleExperimentStatus rows — silently
         no-op'd when rows weren't pre-created, leaving verdict=null on
         every wafer.
@@ -1692,7 +1757,7 @@ class TestAutomationEquipmentResult:
     ):
         """Same verdict-assignment guarantee as the manual record_result
         path — the automation endpoint also runs through
-        _update_experiment_statuses_on_dispatch_complete and must fill in
+        _update_experiment_statuses_on_unload and must fill in
         every wafer's verdict even when SampleExperimentStatus rows
         weren't pre-initialised."""
         from apps.commissions.factories import RequestFactory

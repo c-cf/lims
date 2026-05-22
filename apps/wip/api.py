@@ -271,11 +271,15 @@ def _transition_samples_to_processing(samples: list[Sample]) -> None:
             sample.save(update_fields=["status", "updated_at"])
 
 
-def _update_experiment_statuses_on_dispatch_complete(dispatch: Dispatch) -> None:
-    """When a dispatch completes, set status=COMPLETED and roll a
-    per-wafer verdict (80/20 pass/fail) on every SampleExperimentStatus
-    row attached to this dispatch's WIP × experiment_type, then check
-    for sample/request auto-completion.
+def _update_experiment_statuses_on_unload(dispatch: Dispatch) -> None:
+    """Called when a dispatch unloads from the equipment: set
+    status=COMPLETED and roll a per-wafer verdict (80/20 pass/fail) on
+    every SampleExperimentStatus row attached to this dispatch's
+    WIP × experiment_type, then check for sample/request auto-completion.
+
+    The verdict roll happens at unload (not at record_result) so the
+    Record Result modal can display the per-wafer outcomes before the
+    operator finalises the run with a comment.
 
     Guarantees a SampleExperimentStatus row exists for every sample in
     the WIP, creating one if upstream init never ran. (Originally
@@ -796,13 +800,23 @@ def start_dispatch(request: HttpRequest, dispatch_id: int):
     response={200: DispatchDetailOut, 400: ErrorOut, 403: ErrorOut, 404: ErrorOut},
 )
 def unload_dispatch(request: HttpRequest, dispatch_id: int):
-    """Unload a dispatch (dispatched/running → unloaded). Lab staff only."""
+    """Unload a dispatch (dispatched/running → unloaded). Lab staff only.
+
+    Rolls the per-wafer pass/fail verdict on every SampleExperimentStatus
+    row for this dispatch's WIP × experiment_type. This happens at unload
+    time (not at record_result) so the Record Result modal can display
+    the outcomes before the operator finalises the run.
+    """
     if not has_lab_role(request):
         return 403, {"detail": "Permission denied"}
 
     with transaction.atomic():
         try:
-            dispatch = Dispatch.objects.select_for_update().get(pk=dispatch_id)
+            dispatch = (
+                Dispatch.objects.select_for_update()
+                .select_related("wip", "experiment_type")
+                .get(pk=dispatch_id)
+            )
         except Dispatch.DoesNotExist:
             return 404, {"detail": "Not found"}
 
@@ -813,6 +827,8 @@ def unload_dispatch(request: HttpRequest, dispatch_id: int):
 
         dispatch.status = target
         dispatch.save()
+
+        _update_experiment_statuses_on_unload(dispatch)
 
     dispatch = _dispatch_detail_queryset().get(pk=dispatch_id)
     return 200, DispatchDetailOut.from_dispatch(dispatch)
@@ -825,12 +841,12 @@ def unload_dispatch(request: HttpRequest, dispatch_id: int):
 def record_result(request: HttpRequest, dispatch_id: int, payload: RecordResultIn):
     """Record result for an unloaded dispatch — terminal step.
 
-    Payload is just {comment} now — the per-wafer pass/fail verdict
-    is rolled server-side (80% pass / 20% fail per wafer) and stored
-    on each SampleExperimentStatus row, not on the dispatch result.
-    Lands the dispatch in COMPLETED directly (no intermediate
-    RESULT_RECORDED step), stamps completed_at, and cascades the
-    per-sample experiment-status update. Lab staff only.
+    Payload is just {comment}. Per-wafer pass/fail verdicts are rolled
+    at unload time (see _update_experiment_statuses_on_unload), so by
+    the time the Record Result modal opens, the operator can already
+    see the outcomes. This endpoint only persists the comment, lands
+    the dispatch in COMPLETED, stamps completed_at, and triggers the
+    WIP-level auto-complete cascade. Lab staff only.
     """
     if not has_lab_role(request):
         return 403, {"detail": "Permission denied"}
@@ -860,9 +876,10 @@ def record_result(request: HttpRequest, dispatch_id: int, payload: RecordResultI
             recorded_by=request.auth,
         )
 
-        # Cascade per-sample / per-request auto-completion that used to
-        # live in the standalone /complete/ endpoint.
-        _update_experiment_statuses_on_dispatch_complete(dispatch)
+        # Per-wafer verdicts were already rolled at unload time — see
+        # _update_experiment_statuses_on_unload. record_result only
+        # finalises the dispatch (status + completed_at + comment) and
+        # then propagates the WIP-level auto-complete.
 
         # If this was the last active dispatch on the WIP and ≥1
         # dispatch is COMPLETED, auto-complete the WIP (with sample/
@@ -1018,13 +1035,23 @@ def submit_equipment_result(request: HttpRequest, payload: AutomationResultIn):
         except Dispatch.DoesNotExist:
             return 404, {"detail": "Dispatch not found"}
 
-        # Run state machine chain: (dispatched|running) → unloaded → completed.
+        # Run state machine chain: (dispatched|running) → unloaded →
+        # completed. The verdict roll fires at the unload step (mirroring
+        # the manual flow), so it runs exactly once even though both
+        # transitions happen in this single call.
         for action in ("unload", "record_result"):
             try:
                 target = validate_dispatch_transition(dispatch.status, action)
             except InvalidTransitionError as e:
                 return 400, {"detail": str(e)}
             dispatch.status = target
+            if action == "unload":
+                # Persist the UNLOADED status before the cascade reads
+                # dispatch.status; the helper itself only cares about
+                # WIP × experiment_type, but a consistent on-disk row
+                # makes the transaction easier to reason about.
+                dispatch.save(update_fields=["status", "updated_at"])
+                _update_experiment_statuses_on_unload(dispatch)
 
         dispatch.completed_at = timezone.now()
         dispatch.save()
@@ -1033,9 +1060,6 @@ def submit_equipment_result(request: HttpRequest, payload: AutomationResultIn):
             dispatch=dispatch,
             comment=payload.comment,
         )
-
-        # Update experiment statuses for all samples in the WIP.
-        _update_experiment_statuses_on_dispatch_complete(dispatch)
 
         # Same auto-complete trigger as the manual record_result path.
         wip = WIP.objects.select_for_update().get(pk=dispatch.wip_id)

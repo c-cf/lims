@@ -1297,9 +1297,15 @@ def recipes_for_equipment(request: HttpRequest) -> HttpResponse:
 def _dispatch_action(
     request: HttpRequest, dispatch_id: int, action: str
 ) -> HttpResponse:
+    # Lazy import to avoid apps.web → apps.wip.api at module load.
+    from apps.wip.api import _update_experiment_statuses_on_unload
+
     with transaction.atomic():
         dispatch = get_object_or_404(
-            Dispatch.objects.select_for_update(), pk=dispatch_id
+            Dispatch.objects.select_for_update().select_related(
+                "wip", "experiment_type"
+            ),
+            pk=dispatch_id,
         )
         # Special case: start auto-handles PENDING → DISPATCHED → RUNNING
         if action == "start" and dispatch.status == DispatchStatus.PENDING:
@@ -1319,6 +1325,12 @@ def _dispatch_action(
         if action == "complete":
             dispatch.completed_at = timezone.now()
         dispatch.save()
+
+        # Mirror the API: per-wafer verdict roll fires at unload time so
+        # the legacy UI's Record Result modal can show the outcomes
+        # before the operator finalises a comment.
+        if action == "unload":
+            _update_experiment_statuses_on_unload(dispatch)
     return redirect("web:dispatch-detail", dispatch_id=dispatch_id)
 
 
@@ -1339,14 +1351,11 @@ def dispatch_unload(request: HttpRequest, dispatch_id: int) -> HttpResponse:
 def dispatch_record_result(request: HttpRequest, dispatch_id: int) -> HttpResponse:
     """Record-result via the legacy Django-templated UI.
 
-    Comment-only payload (random per-wafer verdict happens server-side
-    via the shared cascade helper, matching the SPA API path).
+    Comment-only payload. Per-wafer verdicts were already rolled at
+    unload (see _dispatch_action's unload branch) so this endpoint
+    only persists the comment and finalises the dispatch.
     """
     comment = request.POST.get("comment", request.POST.get("note", "")).strip()
-
-    # Lazy import to avoid the apps.web → apps.wip.api dependency at
-    # module load.
-    from apps.wip.api import _update_experiment_statuses_on_dispatch_complete
 
     with transaction.atomic():
         dispatch = get_object_or_404(
@@ -1369,7 +1378,6 @@ def dispatch_record_result(request: HttpRequest, dispatch_id: int) -> HttpRespon
             comment=comment,
             recorded_by=request.user,
         )
-        _update_experiment_statuses_on_dispatch_complete(dispatch)
     return redirect("web:dispatch-detail", dispatch_id=dispatch_id)
 
 
