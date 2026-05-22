@@ -20,23 +20,56 @@ from django.db import transaction
 from apps.experiments.models import ExperimentType, LabCategory
 
 # (name, category, description). Order is display-stable; the unique
-# constraint on name keeps re-runs idempotent across deploys.
+# constraint on name keeps re-runs idempotent across deploys. Seven
+# canonical full names — the consolidation migration
+# (0002_consolidate_experiment_types) merges any pre-existing
+# abbreviation-named or deprecated rows into this set before the seed
+# runs, so a re-seed never produces duplicates.
 SEED_TYPES: list[tuple[str, str, str]] = [
     # --- Reliability Analysis (RA) ---
-    ("TCT", LabCategory.RA, "Temperature Cycling Test (JESD22-A104)"),
-    ("HAST", LabCategory.RA, "Highly Accelerated Stress Test (JESD22-A110)"),
-    ("HTOL", LabCategory.RA, "High Temperature Operating Life (JESD22-A108)"),
-    ("THB", LabCategory.RA, "Temperature Humidity Bias (JESD22-A101)"),
-    ("BTC", LabCategory.RA, "Bias Temperature Cycling"),
+    (
+        "Temperature Cycling Test",
+        LabCategory.RA,
+        "JESD22-A104 — accelerated thermal cycling stress between hot and "
+        "cold extremes to expose CTE-mismatch failure modes.",
+    ),
+    (
+        "Highly Accelerated Stress Test",
+        LabCategory.RA,
+        "JESD22-A110 — high-pressure / high-humidity bias stress used to "
+        "compress months of moisture-related field exposure into hours.",
+    ),
+    (
+        "High Temperature Operating Life",
+        LabCategory.RA,
+        "JESD22-A108 — sustained high-temperature electrical operation to "
+        "estimate intrinsic lifetime and infant-mortality rates.",
+    ),
     # --- Test & Measurement (TM) ---
-    ("CP", LabCategory.TM, "Chip Probe / Wafer Sort"),
-    ("FT", LabCategory.TM, "Final Test"),
+    (
+        "Circuit Probe",
+        LabCategory.TM,
+        "Wafer-level functional and parametric test before dicing.",
+    ),
+    (
+        "Final Test",
+        LabCategory.TM,
+        "Packaged-device functional and parametric test before ship.",
+    ),
     # --- Failure Analysis (FA) ---
-    ("SEM", LabCategory.FA, "Scanning Electron Microscopy"),
-    ("FIB", LabCategory.FA, "Focused Ion Beam Cross-section"),
+    (
+        "Scanning Electron Microscopy",
+        LabCategory.FA,
+        "High-resolution surface imaging using a focused electron beam — "
+        "primary tool for visualising structural defects.",
+    ),
     # --- Material Analysis (MA) ---
-    ("EDX", LabCategory.MA, "Energy Dispersive X-ray Spectroscopy"),
-    ("XRD", LabCategory.MA, "X-ray Diffraction"),
+    (
+        "Energy Dispersive X-ray Spectroscopy",
+        LabCategory.MA,
+        "Elemental composition analysis via characteristic X-ray emission, "
+        "typically paired with SEM.",
+    ),
 ]
 
 
