@@ -700,45 +700,12 @@ def unload_dispatch(request: HttpRequest, dispatch_id: int):
     response={200: DispatchDetailOut, 400: ErrorOut, 403: ErrorOut, 404: ErrorOut},
 )
 def record_result(request: HttpRequest, dispatch_id: int, payload: ExperimentResultIn):
-    """Record result for an unloaded dispatch. Creates ExperimentResult. Lab staff only."""
-    if not has_lab_role(request):
-        return 403, {"detail": "Permission denied"}
+    """Record result for an unloaded dispatch — terminal step.
 
-    with transaction.atomic():
-        try:
-            dispatch = Dispatch.objects.select_for_update().get(pk=dispatch_id)
-        except Dispatch.DoesNotExist:
-            return 404, {"detail": "Not found"}
-
-        try:
-            target = validate_dispatch_transition(dispatch.status, "record_result")
-        except InvalidTransitionError as e:
-            return 400, {"detail": str(e)}
-
-        dispatch.status = target
-        if payload.note:
-            dispatch.note = f"{dispatch.note}\n{payload.note}".strip()
-        dispatch.save()
-
-        ExperimentResult.objects.create(
-            dispatch=dispatch,
-            summary=payload.summary,
-            verdict=payload.verdict,
-            data=payload.data,
-            data_source=ExperimentResult.DataSource.MANUAL,
-            recorded_by=request.auth,
-        )
-
-    dispatch = _dispatch_detail_queryset().get(pk=dispatch_id)
-    return 200, DispatchDetailOut.from_dispatch(dispatch)
-
-
-@dispatch_router.post(
-    "/{dispatch_id}/complete/",
-    response={200: DispatchDetailOut, 400: ErrorOut, 403: ErrorOut, 404: ErrorOut},
-)
-def complete_dispatch(request: HttpRequest, dispatch_id: int):
-    """Complete a result_recorded dispatch. Lab staff only."""
+    Lands the dispatch in COMPLETED directly (no intermediate
+    RESULT_RECORDED step), stamps completed_at, and cascades the
+    per-sample experiment-status update. Lab staff only.
+    """
     if not has_lab_role(request):
         return 403, {"detail": "Permission denied"}
 
@@ -753,15 +720,27 @@ def complete_dispatch(request: HttpRequest, dispatch_id: int):
             return 404, {"detail": "Not found"}
 
         try:
-            target = validate_dispatch_transition(dispatch.status, "complete")
+            target = validate_dispatch_transition(dispatch.status, "record_result")
         except InvalidTransitionError as e:
             return 400, {"detail": str(e)}
 
         dispatch.status = target
         dispatch.completed_at = timezone.now()
+        if payload.note:
+            dispatch.note = f"{dispatch.note}\n{payload.note}".strip()
         dispatch.save()
 
-        # Update experiment statuses for all samples in the WIP.
+        ExperimentResult.objects.create(
+            dispatch=dispatch,
+            summary=payload.summary,
+            verdict=payload.verdict,
+            data=payload.data,
+            data_source=ExperimentResult.DataSource.MANUAL,
+            recorded_by=request.auth,
+        )
+
+        # Cascade per-sample / per-request auto-completion that used to
+        # live in the standalone /complete/ endpoint.
         _update_experiment_statuses_on_dispatch_complete(dispatch)
 
     dispatch = _dispatch_detail_queryset().get(pk=dispatch_id)
@@ -883,8 +862,9 @@ def abort_dispatch(request: HttpRequest, dispatch_id: int):
 def submit_equipment_result(request: HttpRequest, payload: AutomationResultIn):
     """Automated equipment result submission. Completes dispatch and creates result.
 
-    Accepts dispatch in DISPATCHED or RUNNING state. Runs the full state
-    machine chain: unload → record_result → complete.
+    Accepts dispatch in DISPATCHED or RUNNING state. Runs the abbreviated
+    state machine chain: unload → record_result (which now lands
+    directly in COMPLETED).
     """
     if not has_lab_role(request):
         return 403, {"detail": "Permission denied"}
@@ -899,8 +879,8 @@ def submit_equipment_result(request: HttpRequest, payload: AutomationResultIn):
         except Dispatch.DoesNotExist:
             return 404, {"detail": "Dispatch not found"}
 
-        # Run state machine chain: (dispatched|running) → unloaded → result_recorded → completed.
-        for action in ("unload", "record_result", "complete"):
+        # Run state machine chain: (dispatched|running) → unloaded → completed.
+        for action in ("unload", "record_result"):
             try:
                 target = validate_dispatch_transition(dispatch.status, action)
             except InvalidTransitionError as e:

@@ -84,7 +84,9 @@ def _get(client, url, user) -> object:
 def _run_dispatch_to_complete(client, dispatch_id, lab_staff_user) -> dict:
     """Drive a dispatch from PENDING to COMPLETED via the API.
 
-    Steps: start (PENDING→RUNNING) → unload → record-result → complete.
+    Steps: start (PENDING→RUNNING) → unload → record-result.
+    record-result is the terminal step now — it lands in COMPLETED
+    directly; there is no separate /complete/ call.
     """
     r = _post(client, f"/api/dispatches/{dispatch_id}/start/", lab_staff_user)
     assert r.status_code == 200, r.json()
@@ -96,8 +98,6 @@ def _run_dispatch_to_complete(client, dispatch_id, lab_staff_user) -> dict:
         lab_staff_user,
         {"summary": "E2E test result", "verdict": "pass"},
     )
-    assert r.status_code == 200, r.json()
-    r = _post(client, f"/api/dispatches/{dispatch_id}/complete/", lab_staff_user)
     assert r.status_code == 200, r.json()
     return r.json()
 

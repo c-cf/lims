@@ -75,8 +75,11 @@ class TestDispatchStateMachine:
             (DispatchStatus.DISPATCHED, "start", DispatchStatus.RUNNING),
             (DispatchStatus.DISPATCHED, "unload", DispatchStatus.UNLOADED),
             (DispatchStatus.RUNNING, "unload", DispatchStatus.UNLOADED),
-            (DispatchStatus.UNLOADED, "record_result", DispatchStatus.RESULT_RECORDED),
-            (DispatchStatus.RESULT_RECORDED, "complete", DispatchStatus.COMPLETED),
+            # record_result is now terminal — it lands straight in
+            # COMPLETED, bypassing RESULT_RECORDED. The "complete"
+            # dispatch action is removed entirely (covered as illegal
+            # below by virtue of being an unknown action).
+            (DispatchStatus.UNLOADED, "record_result", DispatchStatus.COMPLETED),
             (
                 DispatchStatus.DISPATCHED,
                 "report_exception",

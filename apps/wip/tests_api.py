@@ -824,7 +824,12 @@ class TestDispatchRecordResult:
     def test_record_result_success(
         self, client, auth_headers, lab_staff, unloaded_dispatch
     ):
-        """Lab staff can record result for unloaded dispatch."""
+        """Lab staff can record result for unloaded dispatch.
+
+        Recording a result is now the terminal step — the dispatch
+        transitions straight to COMPLETED and completed_at is stamped.
+        RESULT_RECORDED is bypassed entirely.
+        """
         payload = {
             "summary": "All tests passed",
             "verdict": "pass",
@@ -836,9 +841,10 @@ class TestDispatchRecordResult:
             content_type="application/json",
             **auth_headers(lab_staff),
         )
-        assert resp.status_code == 200
+        assert resp.status_code == 200, resp.json()
         data = resp.json()
-        assert data["status"] == DispatchStatus.RESULT_RECORDED
+        assert data["status"] == DispatchStatus.COMPLETED
+        assert data["completed_at"] is not None
         assert data["result"]["verdict"] == "pass"
         assert data["result"]["data_source"] == ExperimentResult.DataSource.MANUAL
 
@@ -868,28 +874,26 @@ class TestDispatchRecordResult:
 
 
 @pytest.mark.django_db
-class TestDispatchComplete:
-    def test_complete_dispatch_success(
-        self, client, auth_headers, lab_staff, result_recorded_dispatch
-    ):
-        """Lab staff can complete a result_recorded dispatch."""
-        resp = client.post(
-            f"/api/dispatches/{result_recorded_dispatch.pk}/complete/",
-            **auth_headers(lab_staff),
-        )
-        assert resp.status_code == 200
-        data = resp.json()
-        assert data["status"] == DispatchStatus.COMPLETED
+class TestDispatchCompleteCollapse:
+    """record_result is now the terminal step; the /complete/ endpoint
+    is removed and RESULT_RECORDED is bypassed in the transition table.
+    The DispatchStatus.RESULT_RECORDED enum value is intentionally kept
+    so historical rows / migrations don't need touching."""
 
-    def test_complete_dispatch_wrong_status_fails(
-        self, client, auth_headers, lab_staff, running_dispatch
+    def test_complete_endpoint_removed(
+        self, client, auth_headers, lab_staff, unloaded_dispatch
     ):
-        """Cannot complete a non-result_recorded dispatch."""
+        """POST /complete/ no longer exists — should 404."""
         resp = client.post(
-            f"/api/dispatches/{running_dispatch.pk}/complete/",
+            f"/api/dispatches/{unloaded_dispatch.pk}/complete/",
             **auth_headers(lab_staff),
         )
-        assert resp.status_code == 400
+        assert resp.status_code == 404
+
+    def test_dispatch_status_result_recorded_enum_preserved(self):
+        """RESULT_RECORDED stays in the enum even though no new dispatch
+        ever lands in it — keeps existing rows / migrations untouched."""
+        assert DispatchStatus.RESULT_RECORDED == "result_recorded"
 
 
 @pytest.mark.django_db
