@@ -273,15 +273,68 @@ const useLabWips = () => {
   return { wips, loading, error, refresh };
 };
 
-// Live tile-count fetch for the Lab Dashboard. Mirrors the fab dashboard's
-// useRequests pattern but pulls three lists in parallel so the four count
-// tiles (Incoming wafers / Active WIPs / Dispatches live / To record) all
-// reflect the same snapshot. Returns the raw normalized lists; the
-// dashboard derives the counts client-side.
+// Live wafer-detail co-fetch. Backend doesn't expose `wip_id` on Sample
+// nor a `?sample_id=` filter on /wips/ yet, so we have to scan the
+// non-terminal WIPs and look up the one containing this sample. For demo
+// data volumes (<10 active WIPs) this is fine; if WIP counts grow this
+// should become a dedicated backend endpoint (gap follow-up).
+const useWaferDetail = (id) => {
+  const [data, setData] = lS(null);
+  const [loading, setLoading] = lS(true);
+  const [error, setError] = lS(null);
+  const refresh = React.useCallback(() => {
+    if (id == null || !window.api) { setLoading(false); return; }
+    setLoading(true);
+    setError(null);
+    let cancelled = false;
+    (async () => {
+      try {
+        const sample = await window.api.samples.get(id);
+        if (cancelled) return;
+        // Parent request — gives us urgency + experiment_type_ids/names.
+        const request = await window.api.requests.get(sample.requestId).catch(() => null);
+        // Locate the active WIP that holds this sample, if any.
+        let wip = null;
+        if (sample.hasWip) {
+          const wipList = await window.api.wips.list({ status: 'in_progress' }).catch(() => []);
+          for (const row of wipList) {
+            if (cancelled) return;
+            const detail = await window.api.wips.get(row.id).catch(() => null);
+            if (detail?.samples?.some(s => s.id === sample.id)) {
+              wip = detail;
+              break;
+            }
+          }
+        }
+        if (cancelled) return;
+        setData({ sample, request, wip });
+      } catch (e) {
+        if (!cancelled) setError(e.message || String(e));
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [id]);
+  React.useEffect(() => {
+    const cleanup = refresh();
+    return cleanup;
+  }, [refresh]);
+  return { data, loading, error, refresh };
+};
+
+// Live snapshot for the Lab Dashboard: tile counts come from the first
+// three lists (samples / wips / dispatches), the Now Running / Awaiting
+// Your Result panels read from the same dispatches array, and the
+// Equipment panel reads from /equipment/. Experiment types are joined in
+// so dispatch rows can render an experiment name (DispatchListOut only
+// carries ids — gap §3.7-ish; until backend exposes names on the list
+// schema we lookup client-side, same trick as `useLabDispatches`).
 const useLabDashboardData = () => {
   const [samples, setSamples] = lS([]);
   const [wips, setWips] = lS([]);
   const [dispatches, setDispatches] = lS([]);
+  const [equipment, setEquipment] = lS([]);
   const [loading, setLoading] = lS(true);
   const [error, setError] = lS(null);
   const refresh = React.useCallback(() => {
@@ -291,15 +344,29 @@ const useLabDashboardData = () => {
       window.api.samples.list(),
       window.api.wips.list(),
       window.api.dispatches.list(),
+      window.api.equipment.list().catch(() => []),
+      window.api.experimentTypes.list().catch(() => []),
     ])
-      .then(([ss, ws, ds]) => {
-        setSamples(ss); setWips(ws); setDispatches(ds); setError(null);
+      .then(([ss, ws, ds, eqs, exps]) => {
+        setSamples(ss);
+        setWips(ws);
+        setEquipment(eqs);
+        const expById = new Map(exps.map(e => [e.id, e]));
+        const eqById = new Map(eqs.map(e => [e.id, e]));
+        // DispatchListOut doesn't include experiment/equipment names; join
+        // client-side so the dashboard rows don't have to know.
+        setDispatches(ds.map(d => ({
+          ...d,
+          experimentName: expById.get(d.experimentId)?.name || null,
+          equipmentName: eqById.get(d.equipmentId)?.name || null,
+        })));
+        setError(null);
       })
       .catch(err => setError(err.message || String(err)))
       .finally(() => setLoading(false));
   }, []);
   React.useEffect(() => { refresh(); }, [refresh]);
-  return { samples, wips, dispatches, loading, error, refresh };
+  return { samples, wips, dispatches, equipment, loading, error, refresh };
 };
 
 // Live samples list. Co-fetches /requests/ so each row can show the
@@ -738,19 +805,31 @@ const EquipmentDots = ({ used, capacity }) => {
   );
 };
 
-const LabDashboard = ({ wafers, wips, dispatches, equipment, navigate }) => {
-  // Tile counts come from a live fetch (samples + wips + dispatches in
-  // parallel). The lower panels — Now Running, Awaiting Your Result,
-  // Equipment — still render from the seed-fed props until those sections
-  // get their own wiring pass.
-  const { samples: liveSamples, wips: liveWips, dispatches: liveDispatches, loading: countsLoading, error: countsError } = useLabDashboardData();
+const LabDashboard = ({ navigate }) => {
+  // All four dashboard panels — tile counts, Now Running, Awaiting Your
+  // Result, Equipment — now read from the live snapshot. No more seed
+  // props from LabApp.
+  const { samples: liveSamples, wips: liveWips, dispatches: liveDispatches, equipment: liveEquipment, loading: countsLoading, error: countsError } = useLabDashboardData();
   const incoming   = liveSamples.filter(s => s.status === 'incoming').length;
   const activeWips = liveWips.filter(w => w.status === 'in_progress').length;
   const runningDps = liveDispatches.filter(d => d.status === 'running').length;
   const needsRecord= liveDispatches.filter(d => d.status === 'unloaded' || d.status === 'exception').length;
 
-  const activeDispatches = dispatches.filter(d => d.status === 'running' || d.status === 'pending');
-  const toRecord = dispatches.filter(d => d.status === 'unloaded' || d.status === 'exception');
+  const activeDispatches = liveDispatches.filter(d => d.status === 'running' || d.status === 'pending' || d.status === 'dispatched').slice(0, 5);
+  const toRecord = liveDispatches.filter(d => d.status === 'unloaded' || d.status === 'exception');
+  // "Live" equipment = anything currently hosting a non-terminal dispatch.
+  // Backend doesn't ship a `running` status (gap §3.4) — compute client-side.
+  const liveEquipmentIds = new Set(
+    liveDispatches
+      .filter(d => d.status === 'running' || d.status === 'pending' || d.status === 'dispatched')
+      .map(d => d.equipmentId)
+  );
+
+  // Subtitle: live username + today (no more hardcoded TODAY constant).
+  const cachedUser = (window.api && window.api.auth && window.api.auth.cachedUser)
+    ? window.api.auth.cachedUser() : null;
+  const subtitleName = cachedUser?.username || 'lab_member';
+  const subtitleDate = new Date().toISOString().slice(0, 10);
 
   // While the initial fetch is in flight, render "—" on the tiles rather
   // than the misleading "0" that an empty filter would produce.
@@ -766,7 +845,7 @@ const LabDashboard = ({ wafers, wips, dispatches, equipment, navigate }) => {
   return (
     <Page
       title="Dashboard"
-      subtitle={`Welcome back, lab_member · ${TODAY}`}
+      subtitle={`Welcome back, ${subtitleName} · ${subtitleDate}`}
     >
       {countsError && (
         <div style={{
@@ -823,9 +902,47 @@ const LabDashboard = ({ wafers, wips, dispatches, equipment, navigate }) => {
               {activeDispatches.length === 0 && (
                 <div style={{ padding: '28px 22px', textAlign: 'center', color: muted, fontSize: 13 }}>No active dispatches</div>
               )}
-              {activeDispatches.map(d => (
-                <RunningDispatchRow key={d.id} d={d} wip={findWip(d.wipId, wips)} navigate={navigate}/>
-              ))}
+              {activeDispatches.map(d => {
+                const totalSec = d.estimatedDurationSeconds || 0;
+                let pct = 0, remainLabel = null;
+                if (d.status === 'running' && d.dispatchedAtIso && totalSec > 0) {
+                  const startMs = new Date(d.dispatchedAtIso).getTime();
+                  const elapsedSec = Math.max(0, (Date.now() - startMs) / 1000);
+                  pct = Math.min(100, (elapsedSec / totalSec) * 100);
+                  remainLabel = `${window.UI.formatDuration(Math.ceil(Math.max(0, totalSec - elapsedSec)))} left`;
+                }
+                return (
+                  <button key={d.id} onClick={() => navigate({ page: 'lab_dispatch_detail', id: d.id })} style={{
+                    display: 'block', width: '100%', textAlign: 'left',
+                    padding: '14px 22px', borderTop: `1px solid ${lineSoft}`,
+                    background: '#fff', border: 'none', cursor: 'pointer', fontFamily: 'inherit',
+                  }}>
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr auto', alignItems: 'center', gap: 12, marginBottom: 8 }}>
+                      <div style={{ minWidth: 0 }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontFamily: 'var(--font-mono)', fontSize: 11.5, color: muted, marginBottom: 3 }}>
+                          <span>{d.code}</span>
+                          <span style={{ color: '#cdcdda' }}>·</span>
+                          <span>{d.equipmentName || '—'}</span>
+                          {totalSec > 0 && <>
+                            <span style={{ color: '#cdcdda' }}>·</span>
+                            <span>est. {window.UI.formatDuration(totalSec)}</span>
+                          </>}
+                        </div>
+                        <div style={{ fontSize: 14, color: ink, fontWeight: 600 }}>{d.experimentName || '—'}</div>
+                      </div>
+                      <Pill kind={d.status} dotted={d.status === 'running'}/>
+                    </div>
+                    {d.status === 'running' && totalSec > 0 && (
+                      <div>
+                        <div style={{ position: 'relative', height: 6, background: '#f1eef9', borderRadius: 999, overflow: 'hidden', marginBottom: 4 }}>
+                          <div style={{ position: 'absolute', inset: 0, width: `${pct}%`, background: 'linear-gradient(90deg, #f4a8bf, #6c67b8)', borderRadius: 999 }}/>
+                        </div>
+                        <div style={{ fontSize: 11, color: accent, fontFamily: 'var(--font-mono)' }}>{remainLabel}</div>
+                      </div>
+                    )}
+                  </button>
+                );
+              })}
             </div>
           </Card>
 
@@ -845,25 +962,22 @@ const LabDashboard = ({ wafers, wips, dispatches, equipment, navigate }) => {
                   background: '#ecebf3', color: '#4f4a8f', fontSize: 11, fontWeight: 700,
                 }}>{toRecord.length}</span>
               </CardHeader>
-              {toRecord.map(d => {
-                const wip = findWip(d.wipId, wips);
-                return (
-                  <button key={d.id} onClick={() => navigate({ page: 'lab_dispatch_detail', id: d.id })} style={{
-                    display: 'grid', gridTemplateColumns: '90px 1fr 130px auto',
-                    alignItems: 'center', gap: 12, width: '100%',
-                    padding: '13px 22px', borderTop: `1px solid ${lineSoft}`,
-                    background: '#fff', border: 'none', cursor: 'pointer', textAlign: 'left',
-                    fontFamily: 'inherit',
-                  }}>
-                    <span style={{ fontFamily: 'var(--font-mono)', fontSize: 12.5, color: text2 }}>{d.id}</span>
-                    <span style={{ fontSize: 13.5, color: ink, fontWeight: 600 }}>{findExp(d.experimentId)?.name}</span>
-                    <Pill kind={d.status}/>
-                    <span style={{ fontSize: 12, color: accent, fontWeight: 700, display: 'inline-flex', alignItems: 'center', gap: 4 }}>
-                      Record <LF.ArrowRight size={12} color={accent}/>
-                    </span>
-                  </button>
-                );
-              })}
+              {toRecord.map(d => (
+                <button key={d.id} onClick={() => navigate({ page: 'lab_dispatch_detail', id: d.id })} style={{
+                  display: 'grid', gridTemplateColumns: '90px 1fr 130px auto',
+                  alignItems: 'center', gap: 12, width: '100%',
+                  padding: '13px 22px', borderTop: `1px solid ${lineSoft}`,
+                  background: '#fff', border: 'none', cursor: 'pointer', textAlign: 'left',
+                  fontFamily: 'inherit',
+                }}>
+                  <span style={{ fontFamily: 'var(--font-mono)', fontSize: 12.5, color: text2 }}>{d.code}</span>
+                  <span style={{ fontSize: 13.5, color: ink, fontWeight: 600 }}>{d.experimentName || '—'}</span>
+                  <Pill kind={d.status}/>
+                  <span style={{ fontSize: 12, color: accent, fontWeight: 700, display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                    Record <LF.ArrowRight size={12} color={accent}/>
+                  </span>
+                </button>
+              ))}
             </Card>
           )}
         </div>
@@ -873,13 +987,15 @@ const LabDashboard = ({ wafers, wips, dispatches, equipment, navigate }) => {
             <LF.Equipment size={13} color={text2}/>
             <span>Equipment</span>
             <span style={{ marginLeft: 'auto', fontSize: 11, color: muted, fontWeight: 600 }}>
-              {equipment.filter(e => e.status === 'running').length}/{equipment.length} live
+              {liveEquipmentIds.size}/{liveEquipment.length} live
             </span>
           </CardHeader>
           <div>
-            {equipment.map(e => {
-              const wip = e.currentWipId ? findWip(e.currentWipId, wips) : null;
-              const used = wip ? wip.waferIds.length : 0;
+            {liveEquipment.length === 0 && (
+              <div style={{ padding: '24px 20px', textAlign: 'center', color: muted, fontSize: 13 }}>No equipment defined</div>
+            )}
+            {liveEquipment.map(e => {
+              const isLive = liveEquipmentIds.has(e.id);
               return (
                 <button key={e.id} onClick={() => navigate({ page: 'lab_equipment' })} style={{
                   display: 'block', width: '100%', textAlign: 'left',
@@ -891,13 +1007,14 @@ const LabDashboard = ({ wafers, wips, dispatches, equipment, navigate }) => {
                   onMouseLeave={(ev) => ev.currentTarget.style.background = '#fff'}
                 >
                   <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, marginBottom: 4 }}>
-                    <span style={{ fontFamily: 'var(--font-mono)', fontSize: 12.5, fontWeight: 700, color: ink }}>{e.id}</span>
-                    <Pill kind={e.status} dotted={e.status === 'running'}/>
+                    <span style={{ fontFamily: 'var(--font-mono)', fontSize: 12.5, fontWeight: 700, color: ink }}>{e.name}</span>
+                    <Pill kind={e.status} dotted={isLive}/>
                   </div>
                   <div style={{ fontSize: 11.5, color: muted }}>
-                    {wip ? `${wip.id} · ${used}/${e.capacity}` : e.status === 'maintenance' ? 'Under maintenance' : `Idle · cap ${e.capacity}`}
+                    {isLive
+                      ? `Running · cap ${e.capacity}`
+                      : (e.status === 'maintenance' ? 'Under maintenance' : `Idle · cap ${e.capacity}`)}
                   </div>
-                  <EquipmentDots used={used} capacity={e.capacity}/>
                 </button>
               );
             })}
@@ -1122,65 +1239,111 @@ const LabSamples = ({ navigate, defaultTab = 'all', showToast }) => {
 };
 
 // ── Wafer detail ────────────────────────────────────────────────
-const LabWaferDetail = ({ id, wafers, wips, dispatches, navigate, onReceive, onReject }) => {
-  const w = findWaf(id, wafers);
-  if (!w) return <Page title="Wafer not found"/>;
-  const wip = w.wipId ? findWip(w.wipId, wips) : null;
-  const wipDispatches = wip ? dispatchesOf(wip.id, dispatches) : [];
+const LabWaferDetail = ({ id, navigate, showToast }) => {
+  const { data, loading, error, refresh } = useWaferDetail(id);
+  const [busy, setBusy] = lS(false);
+  const [actionError, setActionError] = lS(null);
 
-  // Resolve every required experiment + its execution state for this wafer.
-  // A dispatch with status=result_recorded against a WIP we passed through counts
-  // as "done"; running/pending counts as "in progress"; otherwise it's pending.
-  const expRows = (w.expIds || []).map(expId => {
-    const exp = findExp(expId);
-    // Look across all dispatches for this wafer's current WIP that match this experiment.
-    const dps = wipDispatches.filter(d => d.experimentId === expId);
+  const runAction = async (op, label) => {
+    setBusy(true);
+    setActionError(null);
+    try {
+      await op();
+      showToast && showToast(label);
+      refresh();
+    } catch (e) {
+      setActionError(e.message || String(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  if (loading && !data) {
+    return (
+      <Page title="Loading wafer…">
+        <div style={{ padding: '60px 20px', textAlign: 'center', color: muted, fontSize: 14 }}>Loading…</div>
+      </Page>
+    );
+  }
+  if (error || !data) {
+    return (
+      <Page
+        breadcrumb={<Breadcrumb items={[
+          { label: 'Samples', onClick: () => navigate({ page: 'lab_samples' }) },
+          { label: '?' },
+        ]}/>}
+        title="Wafer not found"
+      >
+        <div style={{ padding: 24, color: '#c0394a', fontSize: 14 }}>
+          {error || 'This wafer is no longer available.'}
+        </div>
+      </Page>
+    );
+  }
+
+  const { sample: w, request, wip } = data;
+  const urgency = request?.urgency || '1w';
+  const wipDispatches = wip?.dispatches || [];
+
+  // Experiments needed for this wafer come from the parent request's
+  // experiment_types. Resolve each to its execution state via the WIP's
+  // dispatches: result_recorded -> done, running/pending/dispatched ->
+  // in progress, otherwise pending.
+  const requestExps = request?.experiment_types || [];
+  const expRows = requestExps.map(et => {
+    const dps = wipDispatches.filter(d => d.experimentId === et.id);
     const recorded = dps.find(d => d.status === 'result_recorded');
     const running  = dps.find(d => d.status === 'running' || d.status === 'pending' || d.status === 'dispatched');
     let state = 'pending';
     if (recorded) state = 'recorded';
     else if (running) state = 'running';
-    return { exp, state, dispatch: recorded || running || null };
+    return { exp: et, state, dispatch: recorded || running || null };
   });
+
+  const onReceive = () => runAction(() => window.api.samples.receive(w.id), `${w.wafer} received`);
+  const onReject = () => runAction(() => window.api.samples.rejectReceiving(w.id, ''), `${w.wafer} rejected`);
 
   return (
     <Page
       breadcrumb={<Breadcrumb items={[
         { label: 'Samples', onClick: () => navigate({ page: 'lab_samples' }) },
-        { label: w.id },
+        { label: w.wafer },
       ]}/>}
-      title={w.id}
+      title={w.wafer}
       subtitle={<span style={{ display: 'inline-flex', alignItems: 'center', gap: 10 }}>
         <span style={{ fontFamily: 'var(--font-mono)', color: muted }}>Request #{String(w.requestId).padStart(4,'0')}</span>
         <Pill kind={w.status}/>
-        <Pill kind={w.urgency}/>
+        <Pill kind={urgency}/>
       </span>}
       right={w.status === 'incoming' && (<>
-        <SecondaryBtn danger onClick={() => onReject(w.id)} icon={<LF.X size={14}/>}>Reject</SecondaryBtn>
-        <PrimaryBtn onClick={() => onReceive(w.id)} icon={<LF.Check size={14}/>}>Receive</PrimaryBtn>
+        <SecondaryBtn danger disabled={busy} onClick={onReject} icon={<LF.X size={14}/>}>{busy ? '…' : 'Reject'}</SecondaryBtn>
+        <PrimaryBtn disabled={busy} onClick={onReceive} icon={<LF.Check size={14}/>}>{busy ? '…' : 'Receive'}</PrimaryBtn>
       </>)}
     >
+      {actionError && (
+        <div style={{
+          padding: '12px 16px', marginBottom: 14, borderRadius: 10,
+          background: '#fde4e4', color: '#c0394a', fontSize: 13.5, fontWeight: 500,
+          border: '1px solid #f6c4c4',
+        }}>{actionError}</div>
+      )}
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 320px', gap: 18, alignItems: 'flex-start' }}>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
           <Card padding={0}>
             <CardHeader>Wafer Info</CardHeader>
             <div style={{ padding: 22, display: 'grid', gridTemplateColumns: '120px 1fr', rowGap: 12 }}>
               <div style={{ fontSize: 13, color: text2 }}>Wafer ID</div>
-              <div style={{ fontFamily: 'var(--font-mono)', fontSize: 14, fontWeight: 700, color: ink }}>{w.id}</div>
+              <div style={{ fontFamily: 'var(--font-mono)', fontSize: 14, fontWeight: 700, color: ink }}>{w.wafer}</div>
               <div style={{ fontSize: 13, color: text2 }}>Size</div>
               <div style={{ fontSize: 14, color: ink }}>{w.size}</div>
               <div style={{ fontSize: 13, color: text2 }}>From request</div>
-              <div style={{ fontFamily: 'var(--font-mono)', fontSize: 14, color: ink }}>#{String(w.requestId).padStart(4,'0')}</div>
+              <div style={{ fontFamily: 'var(--font-mono)', fontSize: 14, color: ink }}>#{String(w.requestId).padStart(4,'0')}{request?.title ? ` — ${request.title}` : ''}</div>
               <div style={{ fontSize: 13, color: text2 }}>Urgency</div>
-              <div><Pill kind={w.urgency}/></div>
+              <div><Pill kind={urgency}/></div>
               <div style={{ fontSize: 13, color: text2 }}>Arrived at</div>
-              <div style={{ fontFamily: 'var(--font-mono)', fontSize: 14, color: ink }}>{w.arrivedAt}</div>
+              <div style={{ fontFamily: 'var(--font-mono)', fontSize: 14, color: ink }}>{w.arrivedAt || '—'}</div>
               <div style={{ fontSize: 13, color: text2 }}>Status</div>
               <div><Pill kind={w.status}/></div>
-              {w.reason && <>
-                <div style={{ fontSize: 13, color: text2 }}>Reject reason</div>
-                <div style={{ fontSize: 14, color: ink }}>{w.reason}</div>
-              </>}
             </div>
           </Card>
 
@@ -1205,10 +1368,6 @@ const LabWaferDetail = ({ id, wafers, wips, dispatches, navigate, onReceive, onR
                       display: 'flex', flexDirection: 'column', gap: 8,
                     }}>
                       <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                        <span style={{
-                          fontSize: 10.5, fontWeight: 700, padding: '3px 8px', borderRadius: 999,
-                          background: '#ecebf3', color: '#4f4a8f', letterSpacing: '0.05em',
-                        }}>{exp.code}</span>
                         <span style={{ fontSize: 13.5, fontWeight: 600, color: ink, flex: 1 }}>{exp.name}</span>
                         <span style={{
                           padding: '3px 9px', borderRadius: 999,
@@ -1224,7 +1383,7 @@ const LabWaferDetail = ({ id, wafers, wips, dispatches, navigate, onReceive, onR
                         }}>
                           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                             <Pill kind={dispatch.result.verdict}/>
-                            <span style={{ fontSize: 12, color: muted, fontFamily: 'var(--font-mono)' }}>{dispatch.id}</span>
+                            <span style={{ fontSize: 12, color: muted, fontFamily: 'var(--font-mono)' }}>{dispatch.code}</span>
                             <button onClick={() => navigate({ page: 'lab_dispatch_detail', id: dispatch.id })} style={{
                               marginLeft: 'auto', background: 'transparent', border: 'none', padding: 0,
                               cursor: 'pointer', color: accent, fontWeight: 600, fontSize: 12, fontFamily: 'inherit',
@@ -1239,7 +1398,7 @@ const LabWaferDetail = ({ id, wafers, wips, dispatches, navigate, onReceive, onR
                       {state === 'running' && dispatch && (
                         <div style={{ fontSize: 12.5, color: text2, display: 'inline-flex', alignItems: 'center', gap: 6 }}>
                           <span style={{ width: 6, height: 6, borderRadius: 999, background: '#4f4a8f', animation: 'pulse 1.4s infinite' }}/>
-                          Running on <strong style={{ color: ink, fontFamily: 'var(--font-mono)' }}>{dispatch.equipmentId}</strong> \u00b7 dispatch {dispatch.id}
+                          Running on <strong style={{ color: ink, fontFamily: 'var(--font-mono)' }}>{dispatch.equipmentName || '\u2014'}</strong> \u00b7 dispatch {dispatch.code}
                         </div>
                       )}
                     </div>
@@ -1258,9 +1417,9 @@ const LabWaferDetail = ({ id, wafers, wips, dispatches, navigate, onReceive, onR
                 display: 'grid', gridTemplateColumns: '1fr auto', gap: 12, alignItems: 'center',
               }}>
                 <div>
-                  <div style={{ fontFamily: 'var(--font-mono)', fontSize: 14, fontWeight: 700, color: ink }}>{wip.id}</div>
+                  <div style={{ fontFamily: 'var(--font-mono)', fontSize: 14, fontWeight: 700, color: ink }}>{wip.code}</div>
                   <div style={{ fontSize: 12.5, color: text2, marginTop: 4 }}>
-                    {findExp(wip.experimentId)?.name}{wip.equipmentId ? ` → ${wip.equipmentId}` : ''}
+                    {wip.experimentName || '—'}
                   </div>
                 </div>
                 <Pill kind={wip.status}/>
@@ -1275,8 +1434,8 @@ const LabWaferDetail = ({ id, wafers, wips, dispatches, navigate, onReceive, onR
                       background: '#fff', border: 'none', cursor: 'pointer', textAlign: 'left',
                       fontFamily: 'inherit',
                     }}>
-                      <span style={{ fontFamily: 'var(--font-mono)', fontSize: 12.5, color: text2 }}>{d.id}</span>
-                      <span style={{ fontSize: 13, color: ink }}>{findExp(d.experimentId)?.name}</span>
+                      <span style={{ fontFamily: 'var(--font-mono)', fontSize: 12.5, color: text2 }}>{d.code}</span>
+                      <span style={{ fontSize: 13, color: ink }}>{d.experimentName || '—'}</span>
                       <Pill kind={d.status}/>
                     </button>
                   ))}
@@ -1314,7 +1473,7 @@ const LabWaferDetail = ({ id, wafers, wips, dispatches, navigate, onReceive, onR
           })}
           {w.status === 'rejected' && (
             <div style={{ marginTop: 8, padding: 10, borderRadius: 8, background: '#fbe4e6', color: '#a93445', fontSize: 12.5 }}>
-              <strong>Rejected.</strong> {w.reason}
+              <strong>Rejected.</strong> Status set during receiving; see request detail for the reason.
             </div>
           )}
         </Card>
@@ -3097,104 +3256,25 @@ const NewEquipmentModal = ({ open, onClose, onSubmit, existingIds }) => {
 
 // ── Root container ───────────────────────────────────────────────
 const LabApp = ({ route, navigate, canManage = false }) => {
-  const [wafers, setWafers] = lS(WAFER_SEED);
-  const [wips, setWips] = lS(WIP_SEED);
-  const [dispatches, setDispatches] = lS(DISPATCH_SEED);
-  const [equipment, setEquipment] = lS(EQUIPMENT_SEED);
+  // All Lab pages now own their own data via dedicated hooks
+  // (useLabSamples, useLabWipDetail, useLabDispatches, useLabEquipment,
+  // useLabDashboardData, useWaferDetail). LabApp's only responsibility is
+  // routing + showing the page-level toast. The seed `*_SEED` constants
+  // up top stay around for the offline single-file build.
   const [toast, setToast] = lS(null);
-  // Legacy NewWipModal open-state is gone; WIP creation lives inside
-  // LabWipList (WipCreationModal) and posts to the live API directly.
-
   const showToast = (msg) => {
     setToast({ msg, t: Date.now() });
     setTimeout(() => setToast(null), 2200);
-  };
-  const now = () => new Date().toISOString().slice(0, 16).replace('T', ' ');
-  const nextId = (prefix, list) => {
-    const max = list.reduce((m, x) => {
-      const n = parseInt(String(x.id).replace(prefix, ''), 10);
-      return Number.isFinite(n) ? Math.max(m, n) : m;
-    }, 0);
-    return `${prefix}${max + 1}`;
-  };
-
-  const onReceive = (id) => {
-    setWafers(ws => ws.map(w => w.id === id ? { ...w, status: 'received' } : w));
-    showToast(`${id} received`);
-  };
-  const onReject = (id) => {
-    setWafers(ws => ws.map(w => w.id === id ? { ...w, status: 'rejected', reason: 'Manual reject' } : w));
-    showToast(`${id} rejected`);
-  };
-
-  // Legacy seed-based createWip removed — WipCreationModal posts to
-  // /wips/ directly and triggers a list refetch.
-
-  const onCompleteWip = (id) => {
-    const wip = findWip(id, wips);
-    if (!wip) return;
-    setWips(ws => ws.map(w => w.id === id ? { ...w, status: 'completed' } : w));
-    setWafers(ws => ws.map(w => wip.waferIds.includes(w.id) ? { ...w, status: 'completed', wipId: null } : w));
-    setEquipment(es => es.map(e => e.currentWipId === id ? { ...e, currentWipId: null } : e));
-    showToast(`${id} completed`);
-  };
-  const onAbortWip = (id) => {
-    const wip = findWip(id, wips);
-    if (!wip) return;
-    setWips(ws => ws.map(w => w.id === id ? { ...w, status: 'aborted' } : w));
-    setWafers(ws => ws.map(w => wip.waferIds.includes(w.id) ? { ...w, status: 'received', wipId: null } : w));
-    setEquipment(es => es.map(e => e.currentWipId === id ? { ...e, currentWipId: null } : e));
-    showToast(`${id} aborted`);
-  };
-
-  // Manager equipment create/edit now lives in the live EquipmentModal
-  // (lab.jsx). LabApp no longer owns that flow.
-
-  const createDispatch = (wipId, { experimentId, equipmentId, recipeId }) => {
-    const id = nextId('DP-', dispatches);
-    const dp = { id, wipId, experimentId, equipmentId, recipeId, operator: 'lab_member', status: 'dispatched', dispatchedAt: now(), startedAt: null, endedAt: null, result: null };
-    setDispatches(ds => [dp, ...ds]);
-    setWips(ws => ws.map(w => w.id === wipId ? {
-      ...w,
-      dispatchIds: [...w.dispatchIds, id],
-      // Lock in the equipment on the first dispatch — keeps the WIP's primary
-      // equipment tag in sync without overwriting if another dispatch chose differently.
-      equipmentId: w.equipmentId || equipmentId,
-    } : w));
-    setEquipment(es => es.map(e => e.id === equipmentId ? { ...e, currentWipId: wipId } : e));
-    showToast(`${id} dispatched`);
-  };
-  const advanceDispatch = (id, to) => {
-    setDispatches(ds => ds.map(d => {
-      if (d.id !== id) return d;
-      const u = { ...d, status: to };
-      if (to === 'running' && !u.startedAt) u.startedAt = now();
-      if (to === 'unloaded') u.endedAt = now();
-      return u;
-    }));
-    showToast(`${id} → ${PILL[to].label}`);
-  };
-  const abortDispatch = (id) => {
-    setDispatches(ds => ds.map(d => d.id === id ? { ...d, status: 'aborted', endedAt: now() } : d));
-    showToast(`${id} aborted`);
-  };
-  const exceptionDispatch = (id) => {
-    setDispatches(ds => ds.map(d => d.id === id ? { ...d, status: 'exception', endedAt: now() } : d));
-    showToast(`${id} flagged exception`);
-  };
-  const recordResult = (id, payload) => {
-    setDispatches(ds => ds.map(d => d.id === id ? { ...d, status: 'result_recorded', result: { ...payload, recordedAt: now() } } : d));
-    showToast(`${id} result recorded`);
   };
 
   let page = null;
   const p = route.page;
   if (p === 'lab_dashboard' || p === 'dashboard')
-    page = <LabDashboard wafers={wafers} wips={wips} dispatches={dispatches} equipment={equipment} navigate={navigate}/>;
+    page = <LabDashboard navigate={navigate}/>;
   else if (p === 'lab_samples' || p === 'samples')
     page = <LabSamples navigate={navigate} defaultTab={route.tab || 'all'} showToast={showToast}/>;
   else if (p === 'lab_wafer')
-    page = <LabWaferDetail id={route.id} wafers={wafers} wips={wips} dispatches={dispatches} navigate={navigate} onReceive={onReceive} onReject={onReject}/>;
+    page = <LabWaferDetail id={route.id} navigate={navigate} showToast={showToast}/>;
   else if (p === 'lab_wip' || p === 'wip')
     page = <LabWipList navigate={navigate} showToast={showToast}/>;
   else if (p === 'lab_wip_detail')
@@ -3206,7 +3286,7 @@ const LabApp = ({ route, navigate, canManage = false }) => {
   else if (p === 'lab_equipment' || p === 'equipment')
     page = <LabEquipment navigate={navigate} canManage={canManage} showToast={showToast}/>;
   else
-    page = <LabDashboard wafers={wafers} wips={wips} dispatches={dispatches} equipment={equipment} navigate={navigate}/>;
+    page = <LabDashboard navigate={navigate}/>;
 
   return (
     <>

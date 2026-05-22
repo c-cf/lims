@@ -181,11 +181,15 @@
     const mapped = SAMPLE_STATUS_MAP[s.status] || s.status;
     const hasWip = s.has_wip ?? false;
     const status = (mapped === 'received' && hasWip) ? 'in_wip' : mapped;
+    // SampleListOut carries `request_id` (int); SampleDetailOut nests
+    // `request: {id, title}` instead. Accept both shapes so callers don't
+    // care which endpoint produced the row.
     return {
       id: s.id,
       wafer: s.wafer_id,
       size: s.wafer_size,
-      requestId: s.request_id,
+      requestId: s.request_id ?? s.request?.id ?? null,
+      requestTitle: s.request?.title ?? null,
       status,
       raw_status: s.status,
       hasWip,
