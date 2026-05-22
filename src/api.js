@@ -177,25 +177,23 @@
   }
 
   // GET /samples/:id/experiments returns the wafer-side rollup that
-  // joins request.experiment_types with the latest dispatch + result for
+  // joins request.experiment_types with the latest dispatch + verdict for
   // each one. Backend shape per row:
   //   { experiment_type: {id, name}, status: 'done'|'pending'|'running',
-  //     dispatch_id: number|null,
-  //     result: {id, summary, verdict, data, data_source, created_at}|null }
-  // We surface dispatchId at the top level so the UI can link to the
-  // dispatch detail page without poking into nested shapes.
+  //     verdict: 'pass'|'fail'|null, dispatch_id: number|null,
+  //     result: {id, comment, created_at}|null }
+  // Verdict lives at the row level (per-sample/per-experiment); the
+  // dispatch-level `result` is just a free-text comment now.
   function normalizeSampleExperiments(rows) {
     return (rows || []).map(r => ({
       experimentTypeId: r.experiment_type?.id ?? null,
       experimentName:   r.experiment_type?.name ?? '',
       status:           r.status,
+      verdict:          r.verdict ?? null,
       dispatchId:       r.dispatch_id ?? null,
       result: r.result ? {
         id:        r.result.id,
-        summary:   r.result.summary ?? '',
-        verdict:   r.result.verdict ?? null,
-        data:      r.result.data ?? null,
-        dataSource: r.result.data_source ?? null,
+        comment:   r.result.comment ?? '',
         recordedAt: formatTimestamp(r.result.created_at),
       } : null,
     }));
@@ -293,11 +291,13 @@
       completedAtIso: d.completed_at ?? null,
       created: formatTimestamp(d.created_at),
       estimatedDurationSeconds: d.estimated_duration_seconds ?? null,
+      // Dispatch-level result is just a free-text comment now. Per-wafer
+      // verdicts live on SampleExperimentStatus.verdict (read via
+      // /samples/:id/experiments).
       result: d.result ? {
-        summary: d.result.summary,
-        verdict: d.result.verdict,
-        data: d.result.data,
-        source: d.result.data_source,
+        id: d.result.id,
+        comment: d.result.comment ?? '',
+        recordedAt: formatTimestamp(d.result.created_at),
       } : null,
     };
   }
@@ -695,24 +695,12 @@
       async unload(id) {
         return normalizeDispatch(await call(`/dispatches/${id}/unload/`, { method: 'POST' }));
       },
-      async recordResult(id, payload) {
-        // payload = { summary, verdict: 'pass'|'fail', data?, note? }
-        // Backend `ExperimentResultIn.data` is a dict — accept either an
-        // object or a JSON string from callers (the existing form UI emits
-        // a raw JSON string), and coerce to an object before POSTing.
-        let normalized = payload;
-        if (payload && typeof payload.data === 'string') {
-          let parsed = {};
-          try { parsed = payload.data.trim() ? JSON.parse(payload.data) : {}; }
-          catch (_e) {
-            const err = new Error('Result data must be valid JSON.');
-            err.status = 400;
-            throw err;
-          }
-          normalized = { ...payload, data: parsed };
-        }
+      async recordResult(id, { comment = '' } = {}) {
+        // payload = { comment } — backend record_result is now comment-only
+        // and closes the dispatch directly to `completed`. Per-wafer
+        // verdicts are owned by the SampleExperimentStatus rows.
         return normalizeDispatch(await call(`/dispatches/${id}/record-result/`, {
-          method: 'POST', body: normalized,
+          method: 'POST', body: { comment },
         }));
       },
       async complete(id) {

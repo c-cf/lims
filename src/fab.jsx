@@ -1878,7 +1878,10 @@ const FabRequestDetail = ({ id, navigate, showToast }) => {
         <PlainCardHeader right={
           <span style={{ display: 'inline-flex', alignItems: 'center', gap: 14, fontSize: 11.5, fontWeight: 600, color: 'var(--text-muted)' }}>
             <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}>
-              <span style={{ width: 9, height: 9, borderRadius: 999, background: '#157a4a' }}/>Done
+              <span style={{ width: 9, height: 9, borderRadius: 999, background: '#157a4a' }}/>Pass
+            </span>
+            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}>
+              <span style={{ width: 9, height: 9, borderRadius: 999, background: '#a93445' }}/>Fail
             </span>
             <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}>
               <span style={{ width: 9, height: 9, borderRadius: 999, background: 'transparent', border: '1.5px dashed #cbcbd6' }}/>Pending
@@ -1895,9 +1898,9 @@ const FabRequestDetail = ({ id, navigate, showToast }) => {
             // experiment-order and fall back to "pending" before the
             // per-sample fetch lands.
             const rollup = expsBySample[s.id] || [];
-            const statusByExpId = new Map(rollup.map(r => [r.experimentTypeId, r.status]));
+            const rollupByExpId = new Map(rollup.map(row => [row.experimentTypeId, row]));
             const total = exps.length;
-            const doneCount = exps.filter(e => statusByExpId.get(e.id) === 'done').length;
+            const doneCount = exps.filter(e => rollupByExpId.get(e.id)?.status === 'done').length;
             return (
               <div key={si} style={{
                 background: '#fff', borderRadius: 12,
@@ -1917,27 +1920,33 @@ const FabRequestDetail = ({ id, navigate, showToast }) => {
                   </div>
                   <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
                     {exps.map(e => {
-                      const st = statusByExpId.get(e.id) || 'pending';
+                      const row = rollupByExpId.get(e.id);
+                      const st  = row?.status || 'pending';
+                      const v   = row?.verdict || null;
                       const done = st === 'done';
+                      const pass = done && v === 'pass';
+                      const fail = done && v === 'fail';
                       return (
                         <span key={e.id} style={{
                           display: 'inline-flex', alignItems: 'center', gap: 7,
                           padding: '6px 12px 6px 7px', borderRadius: 999,
-                          background: done ? '#e7f6ec' : '#f4f4f7',
-                          border: `1px solid ${done ? '#9ad9b7' : 'rgba(0,0,0,0.08)'}`,
+                          background: fail ? '#fde4e4' : done ? '#e7f6ec' : '#f4f4f7',
+                          border: `1px solid ${fail ? '#f4b4b9' : done ? '#9ad9b7' : 'rgba(0,0,0,0.08)'}`,
                         }}>
                           <span style={{
                             fontSize: 10, fontWeight: 700, padding: '3px 7px', borderRadius: 999,
-                            background: done ? '#157a4a' : '#cbcbd6',
+                            background: fail ? '#a93445' : done ? '#157a4a' : '#cbcbd6',
                             color: '#fff', letterSpacing: '0.05em',
                           }}>{e.group}</span>
                           <span style={{
                             fontSize: 13, fontWeight: 500,
-                            color: done ? '#1f3d2c' : '#a8a8b8',
+                            color: fail ? '#5a1a22' : done ? '#1f3d2c' : '#a8a8b8',
                           }}>{e.name}</span>
-                          {done
-                            ? <F.Check size={13} color="#157a4a" strokeWidth={3}/>
-                            : <span style={{ width: 13, height: 13, borderRadius: 999, border: '1.5px dashed #cbcbd6' }}/>}
+                          {fail
+                            ? <F.X size={13} color="#a93445" strokeWidth={3}/>
+                            : done
+                              ? <F.Check size={13} color="#157a4a" strokeWidth={3}/>
+                              : <span style={{ width: 13, height: 13, borderRadius: 999, border: '1.5px dashed #cbcbd6' }}/>}
                         </span>
                       );
                     })}

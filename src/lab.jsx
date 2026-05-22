@@ -184,27 +184,64 @@ const useLabEquipment = () => {
 const useLabDispatchDetail = (id) => {
   const [d, setD] = lS(null);
   const [recipeById, setRecipeById] = lS(new Map());
+  // Per-wafer verdict rows for this dispatch. Pulled from each sample's
+  // /samples/:id/experiments rollup, filtered to rows where dispatch_id
+  // matches this dispatch — backend's dispatch detail doesn't carry
+  // per-sample verdicts, so we join client-side.
+  const [waferResults, setWaferResults] = lS([]);
   const [loading, setLoading] = lS(true);
   const [error, setError] = lS(null);
   const refresh = React.useCallback(() => {
     if (id == null || !window.api || !window.api.dispatches) { setLoading(false); return; }
     setLoading(true);
-    Promise.all([
-      window.api.dispatches.get(id),
-      window.api.recipes.list().catch(() => []),
-    ])
-      .then(([dp, rs]) => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const [dp, rs] = await Promise.all([
+          window.api.dispatches.get(id),
+          window.api.recipes.list().catch(() => []),
+        ]);
+        if (cancelled) return;
         setD(dp);
         setRecipeById(new Map(rs.map(r => [r.id, r])));
+        // Look up the parent WIP to enumerate the samples on this
+        // dispatch, then fetch each sample's rollup in parallel.
+        const wip = await window.api.wips.get(dp.wipId).catch(() => null);
+        if (cancelled) return;
+        const samples = wip?.samples || [];
+        const rollups = await Promise.all(samples.map(s =>
+          window.api.samples.getExperiments(s.id)
+            .then(rows => ({ sample: s, rows }))
+            .catch(() => ({ sample: s, rows: [] }))
+        ));
+        if (cancelled) return;
+        const wafers = rollups.map(({ sample, rows }) => {
+          const match = rows.find(r => r.dispatchId === dp.id);
+          return {
+            sampleId: sample.id,
+            wafer:    sample.wafer,
+            size:     sample.size,
+            verdict:  match?.verdict ?? null,
+            status:   match?.status ?? null,
+          };
+        });
+        setWaferResults(wafers);
         setError(null);
-      })
-      .catch(err => setError(err.message || String(err)))
-      .finally(() => setLoading(false));
+      } catch (e) {
+        if (!cancelled) setError(e.message || String(e));
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    })();
+    return () => { cancelled = true; };
   }, [id]);
-  React.useEffect(() => { refresh(); }, [refresh]);
+  React.useEffect(() => {
+    const cleanup = refresh();
+    return cleanup;
+  }, [refresh]);
   // Attach recipe params (if known) so the consumer doesn't have to look up.
   const dispatch = d ? { ...d, recipeParams: recipeById.get(d.recipeId)?.params || null } : null;
-  return { dispatch, loading, error, refresh };
+  return { dispatch, waferResults, loading, error, refresh };
 };
 
 // Live dispatch list. The /dispatches/ endpoint carries only ids, so the
@@ -1315,6 +1352,7 @@ const LabWaferDetail = ({ id, navigate, showToast }) => {
     name: e.experimentName,
     group: labCategoryById.get(e.experimentTypeId) || '',
     status: e.status,
+    verdict: e.verdict,
     dispatchId: e.dispatchId,
     result: e.result,
   }));
@@ -1379,14 +1417,17 @@ const LabWaferDetail = ({ id, navigate, showToast }) => {
                 {expRows.map(e => {
                   const done    = e.status === 'done';
                   const running = e.status === 'running';
-                  // Pending = grey dashed dot. Done = solid green check.
-                  // Running = pulsing purple dot. Clickable when there's
-                  // a dispatch to drill into (done or running).
+                  const pass    = done && e.verdict === 'pass';
+                  const fail    = done && e.verdict === 'fail';
+                  // Done+Pass = green check, Done+Fail = red X, Done+null
+                  // verdict = neutral green check (legacy or pending verdict).
+                  // Running = pulsing purple dot. Pending = grey dashed dot.
+                  // Clickable when there's a dispatch to drill into.
                   const clickable = e.dispatchId != null;
-                  const bg = done ? '#e7f6ec' : running ? '#ecebf3' : '#f4f4f7';
-                  const border = done ? '#9ad9b7' : running ? '#bcb8e2' : 'rgba(0,0,0,0.08)';
-                  const badgeBg = done ? '#157a4a' : running ? '#4f4a8f' : '#cbcbd6';
-                  const textCol = done ? '#1f3d2c' : running ? ink : '#7a7a8c';
+                  const bg     = fail ? '#fbe4e6' : done ? '#e7f6ec' : running ? '#ecebf3' : '#f4f4f7';
+                  const border = fail ? '#f4b4b9' : done ? '#9ad9b7' : running ? '#bcb8e2' : 'rgba(0,0,0,0.08)';
+                  const badgeBg = fail ? '#a93445' : done ? '#157a4a' : running ? '#4f4a8f' : '#cbcbd6';
+                  const textCol = fail ? '#5a1a22' : done ? '#1f3d2c' : running ? ink : '#7a7a8c';
                   return (
                     <button
                       key={e.id}
@@ -1405,11 +1446,13 @@ const LabWaferDetail = ({ id, navigate, showToast }) => {
                         background: badgeBg, color: '#fff', letterSpacing: '0.05em',
                       }}>{e.group || '\u2014'}</span>
                       <span style={{ fontSize: 13, fontWeight: 500, color: textCol }}>{e.name}</span>
-                      {done
-                        ? <LF.Check size={13} color="#157a4a" strokeWidth={3}/>
-                        : running
-                          ? <span style={{ width: 9, height: 9, borderRadius: 999, background: '#4f4a8f', animation: 'pulse 1.4s infinite' }}/>
-                          : <span style={{ width: 13, height: 13, borderRadius: 999, border: '1.5px dashed #cbcbd6' }}/>}
+                      {fail
+                        ? <LF.X size={13} color="#a93445" strokeWidth={3}/>
+                        : done
+                          ? <LF.Check size={13} color="#157a4a" strokeWidth={3}/>
+                          : running
+                            ? <span style={{ width: 9, height: 9, borderRadius: 999, background: '#4f4a8f', animation: 'pulse 1.4s infinite' }}/>
+                            : <span style={{ width: 13, height: 13, borderRadius: 999, border: '1.5px dashed #cbcbd6' }}/>}
                     </button>
                   );
                 })}
@@ -2354,7 +2397,7 @@ const LabDispatchList = ({ navigate, defaultTab = 'active' }) => {
 const STATUS_FLOW = ['dispatched', 'pending', 'running', 'unloaded', 'completed'];
 
 const LabDispatchDetail = ({ id, navigate, showToast }) => {
-  const { dispatch: d, loading, error, refresh } = useLabDispatchDetail(id);
+  const { dispatch: d, waferResults, loading, error, refresh } = useLabDispatchDetail(id);
   // 1Hz tick to drive the countdown re-render while the dispatch is
   // running. Mounts the timer only when needed so we don't churn on
   // closed dispatches.
@@ -2590,29 +2633,66 @@ const LabDispatchDetail = ({ id, navigate, showToast }) => {
             </div>
           </Card>
 
-          {d.result && (
+          {(d.result || waferResults.length > 0) && (
             <Card padding={0}>
               <CardHeader>
                 <span>Recorded Result</span>
-                <span style={{ marginLeft: 'auto' }}><Pill kind={d.result.verdict}/></span>
+                {d.result?.recordedAt && (
+                  <span style={{ marginLeft: 'auto', fontSize: 11.5, color: muted, fontFamily: 'var(--font-mono)' }}>
+                    {d.result.recordedAt}
+                  </span>
+                )}
               </CardHeader>
-              <div style={{ padding: 22, display: 'grid', gridTemplateColumns: '140px 1fr', rowGap: 12 }}>
-                <div style={{ fontSize: 13, color: text2 }}>Summary</div>
-                <div style={{ fontSize: 14, color: ink, lineHeight: 1.55 }}>{d.result.summary}</div>
-                <div style={{ fontSize: 13, color: text2 }}>Data</div>
-                <div style={{
-                  fontFamily: 'var(--font-mono)', fontSize: 12, color: text2,
-                  background: bgSoft, padding: '10px 12px', borderRadius: 8, lineHeight: 1.5,
-                  whiteSpace: 'pre-wrap', wordBreak: 'break-all',
-                }}>
-                  {d.result.data && Object.keys(d.result.data).length > 0
-                    ? JSON.stringify(d.result.data, null, 2)
-                    : '—'}
+              <div style={{ padding: '18px 22px', display: 'flex', flexDirection: 'column', gap: 14 }}>
+                <div>
+                  <div style={{ fontSize: 11.5, color: text2, fontWeight: 600, letterSpacing: '0.06em', textTransform: 'uppercase', marginBottom: 6 }}>
+                    Comment
+                  </div>
+                  <div style={{ fontSize: 14, color: ink, lineHeight: 1.55 }}>
+                    {d.result?.comment ? d.result.comment : <span style={{ color: muted, fontStyle: 'italic' }}>No comment recorded.</span>}
+                  </div>
                 </div>
-                {d.result.source && <>
-                  <div style={{ fontSize: 13, color: text2 }}>Source</div>
-                  <div style={{ fontFamily: 'var(--font-mono)', fontSize: 13, color: ink }}>{d.result.source}</div>
-                </>}
+                {waferResults.length > 0 && (
+                  <div>
+                    <div style={{ fontSize: 11.5, color: text2, fontWeight: 600, letterSpacing: '0.06em', textTransform: 'uppercase', marginBottom: 8 }}>
+                      Per-Wafer Results ({waferResults.length})
+                    </div>
+                    <div style={{
+                      border: `1px solid ${lineSoft}`, borderRadius: 8, overflow: 'hidden',
+                    }}>
+                      <div style={{
+                        display: 'grid', gridTemplateColumns: '1fr 90px 110px',
+                        background: bgSoft, padding: '8px 14px',
+                        fontSize: 11, fontWeight: 700, color: muted, textTransform: 'uppercase', letterSpacing: '0.06em',
+                      }}>
+                        <div>Wafer</div><div>Size</div><div style={{ textAlign: 'right' }}>Verdict</div>
+                      </div>
+                      {waferResults.map(w => {
+                        const v = w.verdict;
+                        const pillBg = v === 'pass' ? '#e7f0e9' : v === 'fail' ? '#fbe4e6' : '#f1f1f5';
+                        const pillFg = v === 'pass' ? '#2e6a47' : v === 'fail' ? '#a93445' : muted;
+                        const pillLabel = v === 'pass' ? '✓ Pass' : v === 'fail' ? '✗ Fail' : '—';
+                        return (
+                          <div key={w.sampleId} style={{
+                            display: 'grid', gridTemplateColumns: '1fr 90px 110px',
+                            alignItems: 'center', gap: 8,
+                            padding: '12px 14px', borderTop: `1px solid ${lineSoft}`,
+                          }}>
+                            <span style={{ fontFamily: 'var(--font-mono)', fontSize: 13, fontWeight: 700, color: ink }}>{w.wafer}</span>
+                            <span style={{ fontSize: 12.5, color: text2 }}>{w.size}</span>
+                            <span style={{ textAlign: 'right' }}>
+                              <span style={{
+                                display: 'inline-block', padding: '3px 10px', borderRadius: 999,
+                                background: pillBg, color: pillFg,
+                                fontSize: 11.5, fontWeight: 700,
+                              }}>{pillLabel}</span>
+                            </span>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
               </div>
             </Card>
           )}
@@ -2647,16 +2727,16 @@ const LabDispatchDetail = ({ id, navigate, showToast }) => {
   );
 };
 
-// ── Record Result modal (screenshot 2) ──────────────────────────
+// ── Record Result modal ─────────────────────────────────────────
+// Backend record_result is comment-only now — per-wafer verdicts are
+// computed on the backend from the dispatch run and exposed via each
+// sample's experiment rollup. The modal just captures the operator's
+// observations and closes the dispatch.
 const RecordResultModal = ({ open, onClose, dispatch, onSubmit }) => {
-  const [summary, setSummary] = lS('');
-  const [verdict, setVerdict] = lS('');
-  const [data, setData] = lS('{}');
-  const [note, setNote] = lS('');
-  const valid = summary.trim().length > 0 && (verdict === 'pass' || verdict === 'fail');
+  const [comment, setComment] = lS('');
 
   React.useEffect(() => {
-    if (open) { setSummary(''); setVerdict(''); setData('{}'); setNote(''); }
+    if (open) setComment('');
   }, [open]);
 
   return (
@@ -2664,35 +2744,23 @@ const RecordResultModal = ({ open, onClose, dispatch, onSubmit }) => {
       open={open}
       onClose={onClose}
       title="Record Experiment Result"
-      width={560}
+      width={520}
       footer={<>
         <SecondaryBtn onClick={onClose}>Cancel</SecondaryBtn>
-        <PrimaryBtn disabled={!valid} onClick={() => onSubmit({ summary, verdict, data, note })}>Submit Result</PrimaryBtn>
+        <PrimaryBtn onClick={() => onSubmit({ comment: comment.trim() })}>Submit Result</PrimaryBtn>
       </>}
     >
       <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
         <div>
-          <FieldLabel required>Summary</FieldLabel>
-          <TextArea placeholder="Outcome in one or two sentences" value={summary} onChange={(e) => setSummary(e.target.value)}/>
-        </div>
-        <div>
-          <FieldLabel required>Verdict</FieldLabel>
-          <div style={{ display: 'flex', gap: 18 }}>
-            {['pass', 'fail'].map(v => (
-              <label key={v} style={{ display: 'inline-flex', alignItems: 'center', gap: 7, cursor: 'pointer', fontSize: 14, fontWeight: 600, color: v === 'pass' ? '#2e6a47' : '#a93445' }}>
-                <input type="radio" name="verdict" value={v} checked={verdict === v} onChange={() => setVerdict(v)} style={{ accentColor: v === 'pass' ? '#2e6a47' : '#a93445' }}/>
-                {v === 'pass' ? 'Pass' : 'Fail'}
-              </label>
-            ))}
+          <FieldLabel>Comment</FieldLabel>
+          <TextArea
+            placeholder="Observations from the run (optional)"
+            value={comment}
+            onChange={(e) => setComment(e.target.value)}
+          />
+          <div style={{ fontSize: 12, color: muted, marginTop: 6 }}>
+            Per-wafer pass/fail is determined automatically — this is just for operator notes.
           </div>
-        </div>
-        <div>
-          <FieldLabel>Data (JSON, optional)</FieldLabel>
-          <TextArea value={data} onChange={(e) => setData(e.target.value)} style={{ fontFamily: 'var(--font-mono)', fontSize: 12.5 }}/>
-        </div>
-        <div>
-          <FieldLabel>Note</FieldLabel>
-          <TextInput value={note} onChange={(e) => setNote(e.target.value)}/>
         </div>
       </div>
     </Modal>
