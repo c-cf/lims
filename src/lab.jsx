@@ -917,6 +917,13 @@ const URGENCY_DAYS = { '3d': 3, '1w': 7, '2w': 14 };
 // opened — matches the TODAY const used elsewhere on the lab side.
 const TODAY_MS = new Date(TODAY + 'T12:00:00').getTime();
 const computeRemaining = (w) => {
+  // No arrival timestamp — countdown can't start. Catches samples that
+  // jumped to a terminal state (`lost` / `voided` / `returned` /
+  // `processing_exception` etc.) without ever transitioning through
+  // `received`, so `arrivedAt` is null. Prior to this guard, calling
+  // `.replace()` on null blew up the whole Samples page with a white
+  // screen.
+  if (!w.arrivedAt) return null;
   // Until a wafer is received the countdown hasn't started — show nothing.
   // Rejected wafers also don't carry a meaningful deadline.
   if (w.status === 'incoming' || w.status === 'rejected') return null;
