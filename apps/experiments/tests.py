@@ -491,3 +491,48 @@ class TestExperimentTypeEdgeCases:
         )
 
         assert response.status_code == 403
+
+
+@pytest.mark.django_db
+class TestSeedExperimentTypesCommand:
+    """seed_experiment_types is idempotent — second run should be a no-op."""
+
+    def test_first_run_creates_all_seed_types(self):
+        from io import StringIO
+
+        from django.core.management import call_command
+
+        from apps.experiments.management.commands.seed_experiment_types import (
+            SEED_TYPES,
+        )
+        from apps.experiments.models import ExperimentType
+
+        out = StringIO()
+        call_command("seed_experiment_types", stdout=out)
+
+        # Every catalogue row landed.
+        assert ExperimentType.objects.count() == len(SEED_TYPES)
+        names = set(ExperimentType.objects.values_list("name", flat=True))
+        assert names == {name for name, _, _ in SEED_TYPES}
+
+    def test_rerun_is_idempotent_and_updates_in_place(self):
+        from django.core.management import call_command
+
+        from apps.experiments.models import ExperimentType
+
+        call_command("seed_experiment_types")
+        first_count = ExperimentType.objects.count()
+        first_ids = set(ExperimentType.objects.values_list("pk", flat=True))
+
+        # Mutate a description to verify update_or_create refreshes it.
+        ExperimentType.objects.filter(name="TCT").update(description="stale")
+
+        call_command("seed_experiment_types")
+        assert ExperimentType.objects.count() == first_count
+        # PKs preserved — update_or_create, not delete+recreate.
+        assert set(ExperimentType.objects.values_list("pk", flat=True)) == first_ids
+        # Description refreshed to seed value.
+        assert (
+            ExperimentType.objects.get(name="TCT").description
+            == "Temperature Cycling Test (JESD22-A104)"
+        )
