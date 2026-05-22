@@ -95,6 +95,82 @@ def _check_all_dispatches_done(wip: WIP) -> bool:
     return not wip.dispatches.filter(status__in=active_statuses).exists()
 
 
+# Statuses that count as "active" for the single-active-dispatch rule.
+# Strictly per spec: COMPLETED and ABORTED are the only non-active ones.
+# PENDING_REDISPATCH is considered active here — by design, redispatch
+# creates the replacement dispatch in the same transaction, so the
+# create_dispatch single-active gate never sees an "orphan"
+# PENDING_REDISPATCH without a sibling active dispatch.
+_ACTIVE_DISPATCH_STATUSES = frozenset(
+    s
+    for s in DispatchStatus.values
+    if s not in (DispatchStatus.COMPLETED, DispatchStatus.ABORTED)
+)
+
+
+def _maybe_auto_complete_wip(wip: WIP) -> bool:
+    """If every dispatch on this WIP is in (COMPLETED, ABORTED) AND at
+    least one is COMPLETED, transition the WIP to COMPLETED and cascade
+    sample/request auto-completion. Returns True iff the WIP was
+    transitioned. Caller must hold a select_for_update lock on the WIP.
+
+    Aborted-only WIPs are intentionally NOT auto-completed — operators
+    decide whether to manually complete or create a fresh dispatch.
+    """
+    if wip.status != WIPStatus.IN_PROGRESS:
+        return False
+
+    statuses = list(wip.dispatches.values_list("status", flat=True))
+    if not statuses:
+        return False
+    terminal = {DispatchStatus.COMPLETED, DispatchStatus.ABORTED}
+    if any(s not in terminal for s in statuses):
+        return False
+    if DispatchStatus.COMPLETED not in statuses:
+        return False
+
+    wip.status = WIPStatus.COMPLETED
+    wip.completed_at = timezone.now()
+    wip.save(update_fields=["status", "completed_at", "updated_at"])
+
+    # Cascade per-sample / per-request auto-completion — same logic as
+    # the manual /wips/{id}/complete/ endpoint.
+    for sample in Sample.objects.select_for_update().filter(
+        pk__in=wip.samples.values_list("pk", flat=True)
+    ):
+        if sample.status != SampleStatus.PROCESSING:
+            continue
+        total = SampleExperimentStatus.objects.filter(sample=sample).count()
+        completed = SampleExperimentStatus.objects.filter(
+            sample=sample, status=SampleExperimentProgress.COMPLETED
+        ).count()
+        if total <= 0 or completed < total:
+            continue
+        try:
+            sample_target = validate_sample_transition(sample.status, "complete")
+        except SampleInvalidTransitionError:
+            continue
+        sample.status = sample_target
+        sample.save(update_fields=["status", "updated_at"])
+
+        req = Request.objects.select_for_update().get(pk=sample.request_id)
+        if req.status != RequestStatus.IN_PROGRESS:
+            continue
+        terminal_sample_statuses = {
+            SampleStatus.COMPLETED,
+            SampleStatus.VOIDED,
+            SampleStatus.RETURNED,
+        }
+        total_samples = req.samples.count()
+        terminal_count = req.samples.filter(status__in=terminal_sample_statuses).count()
+        if total_samples > 0 and terminal_count == total_samples:
+            req.status = RequestStatus.COMPLETED
+            req.completed_at = timezone.now()
+            req.save(update_fields=["status", "completed_at", "updated_at"])
+
+    return True
+
+
 def _equipment_remaining_capacity(
     equipment: Equipment, exclude_dispatch_id: int | None = None
 ) -> int:
@@ -372,7 +448,13 @@ def add_samples_to_wip(request: HttpRequest, wip_id: int, payload: WIPAddSamples
 
 @router.post(
     "/{wip_id}/dispatches/",
-    response={201: WIPDetailOut, 400: ErrorOut, 403: ErrorOut, 404: ErrorOut},
+    response={
+        201: WIPDetailOut,
+        400: ErrorOut,
+        403: ErrorOut,
+        404: ErrorOut,
+        422: ErrorOut,
+    },
 )
 def create_dispatch(request: HttpRequest, wip_id: int, payload: DispatchIn):
     """Create a dispatch for a WIP using the chosen equipment + recipe.
@@ -381,6 +463,10 @@ def create_dispatch(request: HttpRequest, wip_id: int, payload: DispatchIn):
     payload only carries equipment_id, recipe_id, and an optional note.
     Validates that the equipment supports the WIP's experiment_type, the
     recipe targets the same experiment_type, and the equipment has room.
+
+    Rejects with 422 if the WIP already has an active dispatch (anything
+    other than COMPLETED or ABORTED). A WIP can accumulate many
+    dispatches over its lifetime, but only one at a time.
 
     Automatically transitions WIP to in_progress on first dispatch.
     """
@@ -396,6 +482,18 @@ def create_dispatch(request: HttpRequest, wip_id: int, payload: DispatchIn):
             )
         except WIP.DoesNotExist:
             return 404, {"detail": "Not found"}
+
+        # Single-active-dispatch rule: refuse if any existing dispatch
+        # is still active (status NOT IN COMPLETED, ABORTED). Done
+        # after the WIP select_for_update so concurrent create_dispatch
+        # calls serialize through the same row lock.
+        if wip.dispatches.filter(status__in=_ACTIVE_DISPATCH_STATUSES).exists():
+            return 422, {
+                "detail": (
+                    "WIP already has an active dispatch — only one "
+                    "non-terminal dispatch is allowed at a time"
+                )
+            }
 
         experiment_type = wip.experiment_type
 
@@ -743,6 +841,13 @@ def record_result(request: HttpRequest, dispatch_id: int, payload: ExperimentRes
         # live in the standalone /complete/ endpoint.
         _update_experiment_statuses_on_dispatch_complete(dispatch)
 
+        # If this was the last active dispatch on the WIP and ≥1
+        # dispatch is COMPLETED, auto-complete the WIP (with sample/
+        # request cascade) so the operator doesn't have to POST a
+        # separate /wips/{id}/complete/.
+        wip = WIP.objects.select_for_update().get(pk=dispatch.wip_id)
+        _maybe_auto_complete_wip(wip)
+
     dispatch = _dispatch_detail_queryset().get(pk=dispatch_id)
     return 200, DispatchDetailOut.from_dispatch(dispatch)
 
@@ -828,7 +933,15 @@ def redispatch(request: HttpRequest, dispatch_id: int):
     response={200: DispatchDetailOut, 400: ErrorOut, 403: ErrorOut, 404: ErrorOut},
 )
 def abort_dispatch(request: HttpRequest, dispatch_id: int):
-    """Abort a dispatch. Lab staff and managers allowed."""
+    """Abort a dispatch. Lab staff and managers allowed.
+
+    Aborting clears one active dispatch — if the WIP had a prior
+    COMPLETED dispatch and this abort closes out the last in-flight
+    one, the WIP auto-completes via the same gate as record_result.
+    An all-aborted WIP (no COMPLETED at all) is intentionally NOT
+    auto-completed; the operator decides whether to manually complete
+    or open a fresh dispatch.
+    """
     if not has_lab_role(request):
         return 403, {"detail": "Permission denied"}
 
@@ -845,6 +958,9 @@ def abort_dispatch(request: HttpRequest, dispatch_id: int):
 
         dispatch.status = target
         dispatch.save()
+
+        wip = WIP.objects.select_for_update().get(pk=dispatch.wip_id)
+        _maybe_auto_complete_wip(wip)
 
     dispatch = _dispatch_detail_queryset().get(pk=dispatch_id)
     return 200, DispatchDetailOut.from_dispatch(dispatch)
@@ -900,6 +1016,10 @@ def submit_equipment_result(request: HttpRequest, payload: AutomationResultIn):
 
         # Update experiment statuses for all samples in the WIP.
         _update_experiment_statuses_on_dispatch_complete(dispatch)
+
+        # Same auto-complete trigger as the manual record_result path.
+        wip = WIP.objects.select_for_update().get(pk=dispatch.wip_id)
+        _maybe_auto_complete_wip(wip)
 
     dispatch = _dispatch_detail_queryset().get(pk=payload.dispatch_id)
     return 200, DispatchDetailOut.from_dispatch(dispatch)

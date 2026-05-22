@@ -427,6 +427,82 @@ class TestWIPCreateDispatch:
         )
         assert resp.status_code == 403
 
+    # ------------------------------------------------------------------
+    # Single-active-dispatch rule: a WIP can have many dispatches across
+    # its lifetime, but at most one with status NOT IN (COMPLETED, ABORTED)
+    # at a time. Predates this guard: the SPA could let an operator
+    # stack two PENDING dispatches on the same WIP if they double-clicked.
+    # ------------------------------------------------------------------
+
+    def test_create_dispatch_rejected_when_active_exists(
+        self,
+        client,
+        auth_headers,
+        lab_staff,
+        wip_in_progress,
+        dispatch,
+        equipment,
+        recipe,
+    ):
+        """The `dispatch` fixture leaves the WIP with one PENDING dispatch
+        already; a second create attempt must 422."""
+        # Sanity: precondition has a PENDING dispatch.
+        assert dispatch.status == DispatchStatus.PENDING
+
+        resp = client.post(
+            f"/api/wips/{wip_in_progress.pk}/dispatches/",
+            data={"equipment_id": equipment.pk, "recipe_id": recipe.pk},
+            content_type="application/json",
+            **auth_headers(lab_staff),
+        )
+        assert resp.status_code == 422, resp.json()
+        assert "active" in resp.json()["detail"].lower()
+
+    def test_create_dispatch_allowed_when_only_completed_exists(
+        self,
+        client,
+        auth_headers,
+        lab_staff,
+        wip_in_progress,
+        dispatch,
+        equipment,
+        recipe,
+    ):
+        """Past COMPLETED dispatches don't count as active — a new
+        dispatch (e.g. a re-run) can be created."""
+        dispatch.status = DispatchStatus.COMPLETED
+        dispatch.save(update_fields=["status"])
+
+        resp = client.post(
+            f"/api/wips/{wip_in_progress.pk}/dispatches/",
+            data={"equipment_id": equipment.pk, "recipe_id": recipe.pk},
+            content_type="application/json",
+            **auth_headers(lab_staff),
+        )
+        assert resp.status_code == 201, resp.json()
+
+    def test_create_dispatch_allowed_when_only_aborted_exists(
+        self,
+        client,
+        auth_headers,
+        lab_staff,
+        wip_in_progress,
+        dispatch,
+        equipment,
+        recipe,
+    ):
+        """Past ABORTED dispatches don't count as active either."""
+        dispatch.status = DispatchStatus.ABORTED
+        dispatch.save(update_fields=["status"])
+
+        resp = client.post(
+            f"/api/wips/{wip_in_progress.pk}/dispatches/",
+            data={"equipment_id": equipment.pk, "recipe_id": recipe.pk},
+            content_type="application/json",
+            **auth_headers(lab_staff),
+        )
+        assert resp.status_code == 201, resp.json()
+
     def test_create_dispatch_with_estimated_duration(
         self, client, auth_headers, lab_staff, wip, equipment, recipe
     ):
@@ -871,6 +947,152 @@ class TestDispatchRecordResult:
             **auth_headers(lab_staff),
         )
         assert resp.status_code == 400
+
+
+@pytest.mark.django_db
+class TestWIPAutoCompleteOnDispatchTerminate:
+    """When the LAST active dispatch on a WIP transitions to COMPLETED,
+    the WIP auto-completes (no manual POST /wips/{id}/complete/ needed).
+
+    Auto-complete only triggers when:
+      - every dispatch is in (COMPLETED, ABORTED)
+      - at least one dispatch is COMPLETED
+
+    Aborting the only / last dispatch does NOT auto-complete the WIP —
+    operators decide whether to manually complete or create a new
+    dispatch.
+    """
+
+    def test_record_result_on_only_dispatch_auto_completes_wip(
+        self, client, auth_headers, lab_staff, wip_in_progress, dispatch
+    ):
+        """Drive the single PENDING dispatch through start → unload →
+        record-result; the WIP auto-transitions to COMPLETED on the
+        record-result call."""
+        # start
+        resp = client.post(
+            f"/api/dispatches/{dispatch.pk}/start/", **auth_headers(lab_staff)
+        )
+        assert resp.status_code == 200, resp.json()
+        # unload
+        resp = client.post(
+            f"/api/dispatches/{dispatch.pk}/unload/", **auth_headers(lab_staff)
+        )
+        assert resp.status_code == 200, resp.json()
+        # record-result → dispatch lands in COMPLETED → WIP auto-completes
+        resp = client.post(
+            f"/api/dispatches/{dispatch.pk}/record-result/",
+            data={"summary": "ok", "verdict": "pass"},
+            content_type="application/json",
+            **auth_headers(lab_staff),
+        )
+        assert resp.status_code == 200, resp.json()
+
+        wip_in_progress.refresh_from_db()
+        assert wip_in_progress.status == WIPStatus.COMPLETED
+        assert wip_in_progress.completed_at is not None
+
+    def test_record_result_with_prior_aborted_auto_completes_wip(
+        self,
+        client,
+        auth_headers,
+        lab_staff,
+        wip_in_progress,
+        dispatch,
+        experiment_type,
+        equipment,
+        recipe,
+    ):
+        """An aborted historical dispatch + a fresh dispatch driven to
+        COMPLETED should auto-complete the WIP (all-terminal + ≥1
+        COMPLETED)."""
+        # Make the existing fixture dispatch ABORTED — historical.
+        dispatch.status = DispatchStatus.ABORTED
+        dispatch.save(update_fields=["status"])
+
+        # Create a fresh dispatch via the API (passes the single-active
+        # check because the old one is ABORTED).
+        resp = client.post(
+            f"/api/wips/{wip_in_progress.pk}/dispatches/",
+            data={"equipment_id": equipment.pk, "recipe_id": recipe.pk},
+            content_type="application/json",
+            **auth_headers(lab_staff),
+        )
+        assert resp.status_code == 201, resp.json()
+        new_dispatch_id = next(
+            d["id"] for d in resp.json()["dispatches"] if d["id"] != dispatch.pk
+        )
+
+        # Drive it to COMPLETED.
+        client.post(
+            f"/api/dispatches/{new_dispatch_id}/start/", **auth_headers(lab_staff)
+        )
+        client.post(
+            f"/api/dispatches/{new_dispatch_id}/unload/", **auth_headers(lab_staff)
+        )
+        resp = client.post(
+            f"/api/dispatches/{new_dispatch_id}/record-result/",
+            data={"summary": "ok", "verdict": "pass"},
+            content_type="application/json",
+            **auth_headers(lab_staff),
+        )
+        assert resp.status_code == 200, resp.json()
+
+        wip_in_progress.refresh_from_db()
+        assert wip_in_progress.status == WIPStatus.COMPLETED
+
+    def test_abort_only_dispatch_does_not_auto_complete_wip(
+        self, client, auth_headers, lab_staff, wip_in_progress, dispatch
+    ):
+        """Aborting the only dispatch leaves the WIP in_progress — no
+        COMPLETED dispatch exists, so auto-complete doesn't fire."""
+        resp = client.post(
+            f"/api/dispatches/{dispatch.pk}/abort/", **auth_headers(lab_staff)
+        )
+        assert resp.status_code == 200, resp.json()
+
+        wip_in_progress.refresh_from_db()
+        assert wip_in_progress.status == WIPStatus.IN_PROGRESS
+        assert wip_in_progress.completed_at is None
+
+    def test_all_aborted_does_not_auto_complete_wip(
+        self,
+        client,
+        auth_headers,
+        lab_staff,
+        wip_in_progress,
+        dispatch,
+        experiment_type,
+        equipment,
+        recipe,
+    ):
+        """Even with multiple historical aborted dispatches, the WIP must
+        not auto-complete unless ≥1 dispatch is COMPLETED. Operators
+        manually decide what to do with an all-aborted WIP."""
+        # Abort the existing one.
+        resp = client.post(
+            f"/api/dispatches/{dispatch.pk}/abort/", **auth_headers(lab_staff)
+        )
+        assert resp.status_code == 200
+
+        # Create + abort a second one.
+        resp = client.post(
+            f"/api/wips/{wip_in_progress.pk}/dispatches/",
+            data={"equipment_id": equipment.pk, "recipe_id": recipe.pk},
+            content_type="application/json",
+            **auth_headers(lab_staff),
+        )
+        assert resp.status_code == 201, resp.json()
+        second_id = next(
+            d["id"] for d in resp.json()["dispatches"] if d["id"] != dispatch.pk
+        )
+        resp = client.post(
+            f"/api/dispatches/{second_id}/abort/", **auth_headers(lab_staff)
+        )
+        assert resp.status_code == 200
+
+        wip_in_progress.refresh_from_db()
+        assert wip_in_progress.status == WIPStatus.IN_PROGRESS
 
 
 @pytest.mark.django_db
