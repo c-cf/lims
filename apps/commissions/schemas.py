@@ -82,11 +82,21 @@ class RequestIn(Schema):
 
 
 class RequestUpdateIn(Schema):
-    """Input schema for updating a draft/returned request."""
+    """Input schema for updating a draft/returned request.
+
+    title/note/urgency are partial-update fields that work on both
+    DRAFT and RETURNED requests. samples and experiment_type_ids are
+    DRAFT-only — reviewing a request locks the sample + experiment
+    set. None means "don't change this field"; an empty list is a
+    business-rule violation (samples need ≥1) and is rejected with
+    422 by update_request rather than slipping past as a no-op.
+    """
 
     title: str | None = Field(None, min_length=1, max_length=300)
     note: str | None = None
     urgency: RequestUrgency | None = None
+    samples: list[SampleIn] | None = None
+    experiment_type_ids: list[int] | None = None
 
 
 # --- Action input schemas ---

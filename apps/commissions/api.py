@@ -302,10 +302,22 @@ def get_request(request: HttpRequest, request_id: int):
 
 @router.patch(
     "/{request_id}",
-    response={200: RequestDetailOut, 400: ErrorOut, 403: ErrorOut, 404: ErrorOut},
+    response={
+        200: RequestDetailOut,
+        400: ErrorOut,
+        403: ErrorOut,
+        404: ErrorOut,
+        422: ErrorOut,
+    },
 )
 def update_request(request: HttpRequest, request_id: int, payload: RequestUpdateIn):
-    """Update a draft or returned request. Only the requester (fab user) allowed."""
+    """Update a draft or returned request. Only the requester (fab user) allowed.
+
+    Scalar fields (title/note/urgency) can be patched on DRAFT and
+    RETURNED. samples and experiment_type_ids are draft-only — once a
+    reviewer has seen the request, the sample set and required
+    experiments are locked, even after a return. INTEGRATION_GAPS §2.9.
+    """
     role = _get_user_role(request)
     req = _get_request_for_user(request_id, request.auth, role)
     if req is None:
@@ -314,15 +326,66 @@ def update_request(request: HttpRequest, request_id: int, payload: RequestUpdate
     if req.requester != request.auth:
         return 403, {"detail": "Only the requester can update this request"}
 
+    # model_dump(exclude_unset=True) keeps explicit None/[] values so
+    # we can distinguish "no field sent" from "field sent as empty".
+    sent = payload.model_dump(exclude_unset=True)
+
     with transaction.atomic():
         req = Request.objects.select_for_update().get(pk=req.pk)
 
         if req.status not in (RequestStatus.DRAFT, RequestStatus.RETURNED):
             return 400, {"detail": "Can only update draft or returned requests"}
 
-        for field, value in payload.model_dump(exclude_unset=True).items():
+        samples_in = sent.pop("samples", None)
+        exp_type_ids_in = sent.pop("experiment_type_ids", None)
+
+        # Draft-only gate for the relational fields.
+        if (samples_in is not None or exp_type_ids_in is not None) and (
+            req.status != RequestStatus.DRAFT
+        ):
+            return 422, {
+                "detail": (
+                    "samples and experiment_type_ids can only be modified "
+                    "while request is in draft state"
+                )
+            }
+
+        if samples_in is not None and len(samples_in) == 0:
+            return 422, {"detail": "samples cannot be empty — at least one required"}
+
+        # Validate experiment_type_ids before any DB mutation so the
+        # whole PATCH rolls back together on bad input.
+        new_exp_types = None
+        if exp_type_ids_in is not None:
+            unique_ids = list(dict.fromkeys(exp_type_ids_in))
+            new_exp_types = list(
+                ExperimentType.objects.filter(pk__in=unique_ids, is_active=True)
+            )
+            if len(new_exp_types) != len(unique_ids):
+                return 422, {
+                    "detail": "One or more experiment_type_ids not found or inactive"
+                }
+
+        # Scalar partial update (title/note/urgency).
+        for field, value in sent.items():
             setattr(req, field, value)
         req.save()
+
+        # Replace experiment_types through-table.
+        if new_exp_types is not None:
+            req.request_experiments.all().delete()
+            for et in new_exp_types:
+                RequestExperiment.objects.create(request=req, experiment_type=et)
+
+        # Replace samples — safe in DRAFT because no WIPs reference them.
+        if samples_in is not None:
+            req.samples.all().delete()
+            for s in samples_in:
+                Sample.objects.create(
+                    request=req,
+                    wafer_id=s["wafer_id"],
+                    wafer_size=s["wafer_size"],
+                )
 
     req = _request_detail_queryset().get(pk=req.pk)
     return 200, RequestDetailOut.from_request(req)

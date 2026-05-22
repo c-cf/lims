@@ -366,6 +366,170 @@ class TestRequestUpdate:
         req.refresh_from_db()
         assert req.urgency == "3d"
 
+    # ------------------------------------------------------------------
+    # INTEGRATION_GAPS §2.9 — PATCH samples + experiment_type_ids on
+    # draft requests. Draft is the only state where samples can change;
+    # other states (RETURNED, PENDING_APPROVAL, …) must 422.
+    # ------------------------------------------------------------------
+
+    def test_update_returned_request_with_samples_rejected(
+        self, client, auth_headers, fab_user, experiment_type
+    ):
+        """RETURNED is editable for title/note/urgency but NOT for samples —
+        once a request has been seen by a reviewer, the sample list is
+        locked. 422 with a clear detail string."""
+        req = RequestFactory(requester=fab_user, status=RequestStatus.RETURNED)
+        SampleFactory(request=req, wafer_id="WF-OLD")
+        before_ids = list(req.samples.values_list("pk", flat=True))
+
+        resp = client.patch(
+            f"/api/requests/{req.pk}",
+            data={
+                "samples": [{"wafer_id": "WF-NEW", "wafer_size": "300mm"}],
+            },
+            content_type="application/json",
+            **auth_headers(fab_user),
+        )
+        assert resp.status_code == 422
+        assert "draft" in resp.json()["detail"].lower()
+        # Samples untouched.
+        assert list(req.samples.values_list("pk", flat=True)) == before_ids
+
+    def test_update_draft_request_samples_replaces_set(
+        self, client, auth_headers, fab_user
+    ):
+        """Draft PATCH samples wipes the existing set and rebuilds from
+        payload (full replacement, not partial)."""
+        req = RequestFactory(requester=fab_user, status=RequestStatus.DRAFT)
+        SampleFactory(request=req, wafer_id="WF-A")
+        SampleFactory(request=req, wafer_id="WF-B")
+        assert req.samples.count() == 2
+
+        resp = client.patch(
+            f"/api/requests/{req.pk}",
+            data={
+                "samples": [
+                    {"wafer_id": "WF-NEW-1", "wafer_size": "300mm"},
+                    {"wafer_id": "WF-NEW-2", "wafer_size": "200mm"},
+                    {"wafer_id": "WF-NEW-3", "wafer_size": "300mm"},
+                ],
+            },
+            content_type="application/json",
+            **auth_headers(fab_user),
+        )
+        assert resp.status_code == 200, resp.json()
+        req.refresh_from_db()
+        wafer_ids = sorted(req.samples.values_list("wafer_id", flat=True))
+        assert wafer_ids == ["WF-NEW-1", "WF-NEW-2", "WF-NEW-3"]
+        # Old samples are gone, not co-existing.
+        assert not req.samples.filter(wafer_id__in=["WF-A", "WF-B"]).exists()
+
+    def test_update_draft_request_experiment_type_ids_replaces_set(
+        self, client, auth_headers, fab_user, experiment_type
+    ):
+        """Draft PATCH experiment_type_ids resets the RequestExperiment
+        through-table."""
+        from apps.experiments.factories import ExperimentTypeFactory
+
+        req = RequestFactory(requester=fab_user, status=RequestStatus.DRAFT)
+        # Start with experiment_type already attached.
+        RequestExperiment.objects.create(request=req, experiment_type=experiment_type)
+        new_et_a = ExperimentTypeFactory(name="ET-NEW-A")
+        new_et_b = ExperimentTypeFactory(name="ET-NEW-B")
+
+        resp = client.patch(
+            f"/api/requests/{req.pk}",
+            data={"experiment_type_ids": [new_et_a.pk, new_et_b.pk]},
+            content_type="application/json",
+            **auth_headers(fab_user),
+        )
+        assert resp.status_code == 200, resp.json()
+        attached_ids = sorted(
+            req.request_experiments.values_list("experiment_type_id", flat=True)
+        )
+        assert attached_ids == sorted([new_et_a.pk, new_et_b.pk])
+        # Original experiment_type is gone.
+        assert experiment_type.pk not in attached_ids
+
+    def test_update_draft_combined_patch_applies_all(
+        self, client, auth_headers, fab_user
+    ):
+        """Title + samples + experiment_type_ids in one PATCH all land
+        atomically."""
+        from apps.experiments.factories import ExperimentTypeFactory
+
+        req = RequestFactory(
+            requester=fab_user, status=RequestStatus.DRAFT, title="Original"
+        )
+        SampleFactory(request=req, wafer_id="WF-OLD")
+        new_et = ExperimentTypeFactory(name="ET-COMBO")
+
+        resp = client.patch(
+            f"/api/requests/{req.pk}",
+            data={
+                "title": "Combined Update",
+                "samples": [{"wafer_id": "WF-COMBO", "wafer_size": "300mm"}],
+                "experiment_type_ids": [new_et.pk],
+            },
+            content_type="application/json",
+            **auth_headers(fab_user),
+        )
+        assert resp.status_code == 200, resp.json()
+        req.refresh_from_db()
+        assert req.title == "Combined Update"
+        assert list(req.samples.values_list("wafer_id", flat=True)) == ["WF-COMBO"]
+        assert list(
+            req.request_experiments.values_list("experiment_type_id", flat=True)
+        ) == [new_et.pk]
+
+    def test_update_draft_samples_empty_list_rejected(
+        self, client, auth_headers, fab_user
+    ):
+        """Empty samples list violates the business rule (every request
+        needs at least one sample, same as on create)."""
+        req = RequestFactory(requester=fab_user, status=RequestStatus.DRAFT)
+        SampleFactory(request=req, wafer_id="WF-EXISTING")
+
+        resp = client.patch(
+            f"/api/requests/{req.pk}",
+            data={"samples": []},
+            content_type="application/json",
+            **auth_headers(fab_user),
+        )
+        assert resp.status_code == 422
+        req.refresh_from_db()
+        # Original sample untouched (atomic).
+        assert req.samples.count() == 1
+
+    def test_update_draft_invalid_experiment_type_rolls_back(
+        self, client, auth_headers, fab_user, experiment_type
+    ):
+        """An invalid experiment_type_id in a combined PATCH must roll
+        back EVERY change — no partial application."""
+        req = RequestFactory(
+            requester=fab_user, status=RequestStatus.DRAFT, title="Untouched"
+        )
+        SampleFactory(request=req, wafer_id="WF-ORIG")
+        RequestExperiment.objects.create(request=req, experiment_type=experiment_type)
+
+        resp = client.patch(
+            f"/api/requests/{req.pk}",
+            data={
+                "title": "Should Not Land",
+                "samples": [{"wafer_id": "WF-SHOULD-NOT-LAND", "wafer_size": "300mm"}],
+                "experiment_type_ids": [experiment_type.pk, 99999],
+            },
+            content_type="application/json",
+            **auth_headers(fab_user),
+        )
+        assert resp.status_code == 422
+        req.refresh_from_db()
+        assert req.title == "Untouched"
+        assert list(req.samples.values_list("wafer_id", flat=True)) == ["WF-ORIG"]
+        assert list(
+            req.request_experiments.values_list("experiment_type_id", flat=True)
+        ) == [experiment_type.pk]
+
 
 @pytest.mark.django_db
 class TestRequestSubmit:
