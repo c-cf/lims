@@ -219,21 +219,50 @@ const SamplePill = ({ status, size = 'sm' }) => {
   return <Pill {...m} size={size}/>;
 };
 
-// ── Workflow dots: 4-stage pipeline based on wafer completeness ───
-// Stages: submitted → received (≥1 sample received) → in_progress → completed.
-// Returned / rejected / cancelled = aborted track (red).
-const WORKFLOW_STEPS = ['submitted', 'received', 'in_progress', 'completed'];
+// ── Workflow dots: 4-stage pipeline based on wafer state ──────────
+// Stages: Approved → Shipped → In Progress → Done. Returned /
+// rejected / cancelled fall onto the aborted track (red). Submitted
+// requests still awaiting approval render with every dot grey.
+const WORKFLOW_STEPS = ['approved', 'shipped', 'in_progress', 'done'];
+const WORKFLOW_LABELS = ['Approved', 'Shipped', 'In Progress', 'Done'];
 const stepFromRequest = (r) => {
-  if (r.status === 'draft' || r.status === 'cancelled' || r.status === 'rejected' || r.status === 'returned') {
+  if (r.status === 'draft' || r.status === 'cancelled' ||
+      r.status === 'rejected' || r.status === 'returned') {
     return { aborted: true, status: r.status };
   }
-  if (r.status === 'completed') return { idx: 3 };
-  // in_progress: gauge by sample receipt
-  const total = r.samples.length || 1;
-  const received = r.samples.filter(s => s.status === 'received').length;
-  if (received === 0) return { idx: 0 };           // submitted
-  if (received < total) return { idx: 1 };          // some received
-  return { idx: 2 };                                // all received → in progress
+  // Pre-approval: no dot is lit. FlowDots renders all-grey when the
+  // `current` value isn't in `steps`.
+  const raw = r.rawStatus || r.status;
+  if (raw === 'submitted' || raw === 'pending_approval') {
+    return { idx: -1 };
+  }
+  if (r.status === 'completed' || raw === 'completed' || raw === 'closed') return { idx: 3 };
+
+  const samples = r.samples || [];
+  // Detail view — samples are populated, so we can do per-wafer fine
+  // splitting (Shipped if any received-not-yet-processing, In Progress
+  // once anything's processing).
+  if (samples.length > 0) {
+    const allDone = samples.every(s => s.status === 'completed');
+    if (allDone) return { idx: 3 };
+    const anyProcessing = samples.some(s =>
+      s.status === 'processing' || s.status === 'in_wip' || s.status === 'completed'
+    );
+    if (anyProcessing) return { idx: 2 };
+    const anyShipped = samples.some(s =>
+      s.raw_status === 'shipped' || s.status === 'received' || s.raw_status === 'received'
+    );
+    if (anyShipped) return { idx: 1 };
+    return { idx: 0 };
+  }
+  // List view fallback — RequestListOut doesn't include samples, so we
+  // drive the dot off the raw backend status. FE REQUEST_STATUS_MAP
+  // collapses approved + sample_shipped + in_progress + exception to
+  // the same FE value, but rawStatus is preserved so we can split.
+  if (raw === 'approved') return { idx: 0 };
+  if (raw === 'sample_shipped') return { idx: 1 };
+  if (raw === 'in_progress' || raw === 'exception') return { idx: 2 };
+  return { idx: 0 };
 };
 const RequestFlow = ({ request, label = false }) => {
   const s = stepFromRequest(request);
@@ -260,19 +289,20 @@ const RequestFlow = ({ request, label = false }) => {
     );
   }
   const idx = s.idx;
-  const total = request.samples.length;
-  const received = request.samples.filter(x => x.status === 'received').length;
-  const labels = ['Submitted', `Received ${received}/${total}`, 'In progress', 'Completed'];
+  // Pre-approval renders every dot grey by passing a `current` value
+  // that isn't in WORKFLOW_STEPS (FlowDots short-circuits to indexOf=-1).
+  const current = idx >= 0 ? WORKFLOW_STEPS[idx] : null;
+  const labelText = idx >= 0 ? WORKFLOW_LABELS[idx] : 'Awaiting approval';
   return (
     <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
       <FUI.FlowDots
         steps={WORKFLOW_STEPS}
-        current={WORKFLOW_STEPS[idx]}
+        current={current}
         size={6} gap={4}
         doneColor="#6c67b8"
         currentColor="#6c67b8"
       />
-      {label && <span style={{ fontSize: 11.5, color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>{labels[idx]}</span>}
+      {label && <span style={{ fontSize: 11.5, color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>{labelText}</span>}
     </span>
   );
 };

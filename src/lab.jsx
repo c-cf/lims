@@ -871,6 +871,16 @@ const LabDashboard = ({ navigate }) => {
   // Result, Equipment — now read from the live snapshot. No more seed
   // props from LabApp.
   const { samples: liveSamples, wips: liveWips, dispatches: liveDispatches, equipment: liveEquipment, loading: countsLoading, error: countsError } = useLabDashboardData();
+  // 1Hz tick keeps the Now Running countdown bars advancing visibly.
+  // Mount the interval only when at least one dispatch is currently
+  // running — same pattern as LabDispatchList / LabDispatchDetail.
+  const [, setTick] = lS(0);
+  const hasRunning = liveDispatches.some(d => d.status === 'running');
+  React.useEffect(() => {
+    if (!hasRunning) return;
+    const h = setInterval(() => setTick(t => t + 1), 1000);
+    return () => clearInterval(h);
+  }, [hasRunning]);
   const incoming   = liveSamples.filter(s => s.status === 'incoming').length;
   const activeWips = liveWips.filter(w => w.status === 'in_progress').length;
   const runningDps = liveDispatches.filter(d => d.status === 'running').length;
@@ -2240,6 +2250,17 @@ const LabDispatchList = ({ navigate, defaultTab = 'active' }) => {
   const filtered = groups[tab] === null
     ? dispatches
     : dispatches.filter(d => groups[tab].includes(d.status));
+  // 1Hz tick so the per-row running countdown advances visibly. Same
+  // pattern as LabDispatchDetail — only mount the interval when there's
+  // a running row in the current view, and clear it as soon as there
+  // isn't (avoids churn on the Closed tab and stale dashboards).
+  const [, setTick] = lS(0);
+  const hasRunning = filtered.some(d => d.status === 'running');
+  React.useEffect(() => {
+    if (!hasRunning) return;
+    const h = setInterval(() => setTick(t => t + 1), 1000);
+    return () => clearInterval(h);
+  }, [hasRunning]);
 
   const tabs = [
     { id: 'active', label: 'Active' },
