@@ -494,13 +494,21 @@ const StatusBars = ({ requests }) => {
 const WAFER_PHASES = ['Approved', 'Shipped', 'Received', 'Processing', 'Done'];
 const phaseIndexFor = (sample, request) => {
   // Pre-approval states: nothing in the pipeline is true yet. Returning
-  // -1 tells PhasePipeline to leave every dot/connector grey (the adapter
-  // collapses backend `pending_approval` → FE `submitted`, but we accept
-  // either spelling for defensive belt-and-braces).
-  if (request.status === 'draft' || request.status === 'submitted' || request.status === 'pending_approval') return -1;
+  // -1 tells PhasePipeline to leave every dot/connector grey. The adapter
+  // collapses backend `pending_approval` → FE `submitted`, so check both
+  // the rawStatus and the FE status to stay safe across call sites.
+  const rawReq = request.rawStatus || request.status;
+  if (rawReq === 'draft' || rawReq === 'submitted' || rawReq === 'pending_approval') return -1;
   if (request.status === 'completed' || sample.status === 'completed') return 4;
-  if (sample.status === 'received') return 2; // arrived at lab, not yet processed
-  if (sample.status === 'pending')  return 1; // approved + en route to lab
+  // Processing: sample is in a non-terminal WIP, or backend split/process-exception.
+  if (sample.status === 'in_wip'
+      || sample.raw_status === 'processing_exception'
+      || sample.raw_status === 'split') return 3;
+  // Received: physically at the lab, not yet pulled into a WIP.
+  if (sample.status === 'received' || sample.raw_status === 'received') return 2;
+  // Shipped: backend marked the sample as shipped (request transitioned via /ship).
+  if (sample.raw_status === 'shipped') return 1;
+  // Otherwise we're approved-but-not-yet-shipped (sample still `created`/`incoming`).
   return 0;
 };
 
@@ -547,8 +555,29 @@ const PhasePipeline = ({ idx, compact = false }) => {
 };
 
 const InProgressRow = ({ request, navigate, open, onToggle }) => {
-  const wafers = request.samples;
-  const overallIdx = Math.min(...wafers.map(s => phaseIndexFor(s, request)));
+  // List endpoint doesn't carry the samples array — `request.sampleCount`
+  // is the only count we have until we load the detail. The detail fetch
+  // is lazy: only when the row is first opened, and cached in local state
+  // so collapsing + re-opening doesn't re-hit the API.
+  const sampleCount = request.sampleCount ?? request.samples?.length ?? 0;
+  const [detail, setDetail] = uS(null);
+  const [detailLoading, setDetailLoading] = uS(false);
+  const [detailError, setDetailError] = uS(null);
+  React.useEffect(() => {
+    if (!open || detail || detailLoading || !window.api?.requests) return;
+    setDetailLoading(true);
+    setDetailError(null);
+    window.api.requests.get(request.id)
+      .then(d => setDetail(d))
+      .catch(e => setDetailError(e.message || String(e)))
+      .finally(() => setDetailLoading(false));
+  }, [open, detail, detailLoading, request.id]);
+
+  const wafers = detail?.samples || [];
+  const overallIdx = wafers.length
+    ? Math.min(...wafers.map(s => phaseIndexFor(s, detail || request)))
+    : null;
+
   return (
     <div style={{ borderTop: '1px solid #f5f5f9' }}>
       <button onClick={onToggle} style={{
@@ -565,10 +594,12 @@ const InProgressRow = ({ request, navigate, open, onToggle }) => {
         <div style={{ minWidth: 0 }}>
           <div style={{ fontSize: 14, fontWeight: 600, color: '#6c67b8' }}>{request.title}</div>
           <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 2 }}>
-            Currently: <span style={{ color: 'var(--text-secondary)', fontWeight: 600 }}>{WAFER_PHASES[overallIdx]}</span>
+            Currently: <span style={{ color: 'var(--text-secondary)', fontWeight: 600 }}>
+              {overallIdx == null ? '—' : (overallIdx >= 0 ? WAFER_PHASES[overallIdx] : '—')}
+            </span>
           </div>
         </div>
-        <span style={{ fontSize: 13.5, color: 'var(--text-secondary)' }}>{wafers.length} wafer{wafers.length === 1 ? '' : 's'}</span>
+        <span style={{ fontSize: 13.5, color: 'var(--text-secondary)' }}>{sampleCount} wafer{sampleCount === 1 ? '' : 's'}</span>
         <span style={{ fontFamily: 'var(--font-mono)', fontSize: 12.5, color: 'var(--text-muted)' }}>{request.submitted ? request.submitted.split(' ')[0] : '—'}</span>
         <F.ChevronDown size={15} color="#a8a8b8" style={{
           transform: open ? 'rotate(180deg)' : 'rotate(0)',
@@ -582,26 +613,45 @@ const InProgressRow = ({ request, navigate, open, onToggle }) => {
             textTransform: 'uppercase', letterSpacing: '0.08em',
             padding: '14px 0 12px',
           }}>Wafer Phases</div>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-            {wafers.map((w, i) => {
-              const idx = phaseIndexFor(w, request);
-              return (
-                <div key={i} style={{
-                  display: 'grid', gridTemplateColumns: '160px 1fr',
-                  alignItems: 'center', gap: 18,
-                  padding: '12px 16px',
-                  background: '#fff', borderRadius: 10,
-                  border: '1px solid rgba(0,0,0,0.06)',
-                }}>
-                  <div>
-                    <div style={{ fontFamily: 'var(--font-mono)', fontSize: 13, fontWeight: 700, color: 'var(--text-primary)' }}>{w.wafer}</div>
-                    <div style={{ fontSize: 11.5, color: 'var(--text-muted)', marginTop: 2 }}>{w.size}</div>
+          {detailLoading && (
+            <div style={{ padding: '20px 0', textAlign: 'center', color: 'var(--text-muted)', fontSize: 13 }}>
+              Loading wafer phases…
+            </div>
+          )}
+          {detailError && (
+            <div style={{
+              padding: '10px 12px', borderRadius: 8,
+              background: '#fde4e4', color: '#c0394a', fontSize: 13, fontWeight: 500,
+              border: '1px solid #f6c4c4',
+            }}>{detailError}</div>
+          )}
+          {!detailLoading && !detailError && wafers.length === 0 && (
+            <div style={{ padding: '12px 0', color: 'var(--text-muted)', fontSize: 13, fontStyle: 'italic' }}>
+              No wafers on this request.
+            </div>
+          )}
+          {wafers.length > 0 && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+              {wafers.map((w, i) => {
+                const idx = phaseIndexFor(w, detail || request);
+                return (
+                  <div key={w.id ?? i} style={{
+                    display: 'grid', gridTemplateColumns: '160px 1fr',
+                    alignItems: 'center', gap: 18,
+                    padding: '12px 16px',
+                    background: '#fff', borderRadius: 10,
+                    border: '1px solid rgba(0,0,0,0.06)',
+                  }}>
+                    <div>
+                      <div style={{ fontFamily: 'var(--font-mono)', fontSize: 13, fontWeight: 700, color: 'var(--text-primary)' }}>{w.wafer}</div>
+                      <div style={{ fontSize: 11.5, color: 'var(--text-muted)', marginTop: 2 }}>{w.size}</div>
+                    </div>
+                    <PhasePipeline idx={idx}/>
                   </div>
-                  <PhasePipeline idx={idx}/>
-                </div>
-              );
-            })}
-          </div>
+                );
+              })}
+            </div>
+          )}
           <div style={{ marginTop: 14, display: 'flex', justifyContent: 'flex-end' }}>
             <button onClick={(e) => { e.stopPropagation(); navigate({ page: 'fab_request', id: request.id }); }} style={{
               fontSize: 13, fontWeight: 600, color: '#6c67b8',
@@ -1221,7 +1271,7 @@ const ExpCard = ({ exp, active, onClick }) => (
   </button>
 );
 
-const FabNewRequest = ({ navigate, onSubmit, onSaveDraft, draft, isEdit = false, showToast }) => {
+const FabNewRequest = ({ navigate, draft, isEdit = false, showToast }) => {
   // Edit mode still runs on the seed-backed local-state path (FabApp callbacks)
   // because the backend's RequestUpdateIn only accepts title/note/urgency —
   // it can't replace experiment_type_ids or samples. New-request creation goes
@@ -1253,33 +1303,44 @@ const FabNewRequest = ({ navigate, onSubmit, onSaveDraft, draft, isEdit = false,
   const totalExp = wafers.reduce((acc, w) => acc + w.expIds.length, 0);
   const basicValid = title.trim().length > 0;
   const samplesValid = wafers.every(w => w.wafer.trim() && w.expIds.length > 0);
-  const valid = basicValid && samplesValid;
+  // In edit mode the wafer/experiment block is locked (backend
+  // RequestUpdateIn doesn't accept those — gap §2.9), so validity only
+  // depends on the basic fields.
+  const valid = isEdit ? basicValid : (basicValid && samplesValid);
 
   const handle = async (publish) => {
-    if (isEdit) {
-      // Legacy local-state path — backend can't yet replay wafer/experiment
-      // edits on a draft. Keep using FabApp's callbacks for now.
-      const expIdsAll = Array.from(new Set(wafers.flatMap(w => w.expIds)));
-      const samples = wafers.map(w => ({ wafer: w.wafer.trim(), size: w.size, status: 'pending' }));
-      const payload = { title: title.trim(), note: note.trim(), urgency, expIds: expIdsAll, samples };
-      if (publish) onSubmit(payload);
-      else onSaveDraft(payload);
-      return;
-    }
-
-    const expIdsAll = Array.from(new Set(wafers.flatMap(w => w.expIds)));
-    const samples = wafers.map(w => ({ wafer_id: w.wafer.trim(), wafer_size: w.size }));
-    const payload = {
-      title: title.trim(),
-      note: note.trim(),
-      urgency,
-      experiment_type_ids: expIdsAll,
-      samples,
-    };
-
     setBusy(true);
     setApiError(null);
     try {
+      if (isEdit) {
+        // Backend `RequestUpdateIn` only accepts title/note/urgency — gap §2.9.
+        // Wafer + experiment changes can't round-trip yet, so the UI keeps
+        // them visible but read-only. Only the three editable fields ship.
+        await window.api.requests.update(draft.id, {
+          title: title.trim(),
+          note: note.trim(),
+          urgency,
+        });
+        if (publish) {
+          await window.api.requests.submit(draft.id);
+          showToast && showToast(`Draft #${draft.id} submitted — awaiting approval`);
+          navigate({ page: 'fab_request', id: draft.id });
+        } else {
+          showToast && showToast(`Draft #${draft.id} updated`);
+          navigate({ page: 'fab_drafts' });
+        }
+        return;
+      }
+
+      const expIdsAll = Array.from(new Set(wafers.flatMap(w => w.expIds)));
+      const samples = wafers.map(w => ({ wafer_id: w.wafer.trim(), wafer_size: w.size }));
+      const payload = {
+        title: title.trim(),
+        note: note.trim(),
+        urgency,
+        experiment_type_ids: expIdsAll,
+        samples,
+      };
       const created = await window.api.requests.create(payload);
       if (publish) {
         await window.api.requests.submit(created.id);
@@ -1337,8 +1398,19 @@ const FabNewRequest = ({ navigate, onSubmit, onSaveDraft, draft, isEdit = false,
           </SectionStep>
 
           {/* Section 2 — Samples & Experiments */}
-          <SectionStep n={2} title="Samples & Experiments" subtitle={`${wafers.length} wafer${wafers.length === 1 ? '' : 's'} · ${totalExp} experiment${totalExp === 1 ? '' : 's'} total — pick experiments for each wafer`}>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+          <SectionStep n={2} title="Samples & Experiments" subtitle={`${wafers.length} wafer${wafers.length === 1 ? '' : 's'} · ${totalExp} experiment${totalExp === 1 ? '' : 's'} total${isEdit ? ' — locked for edits (backend gap §2.9)' : ' — pick experiments for each wafer'}`}>
+            {isEdit && (
+              <div style={{
+                padding: '10px 14px', marginBottom: 12, borderRadius: 8,
+                background: '#fef4dd', color: '#8c5a14', fontSize: 12.5, fontWeight: 500,
+                border: '1px solid #f5dca0',
+              }}>
+                Wafer and experiment edits aren't supported on existing requests yet —
+                backend <code>RequestUpdateIn</code> only accepts title / note / urgency
+                (gap §2.9). To change the wafer list, cancel this request and create a new one.
+              </div>
+            )}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 12, opacity: isEdit ? 0.6 : 1, pointerEvents: isEdit ? 'none' : 'auto' }}>
               {wafers.map((w, i) => (
                 <div key={i} style={{
                   border: '1px solid rgba(0,0,0,0.08)', borderRadius: 12,
@@ -1349,11 +1421,11 @@ const FabNewRequest = ({ navigate, onSubmit, onSaveDraft, draft, isEdit = false,
                       fontFamily: 'var(--font-mono)', fontSize: 12, fontWeight: 700,
                       color: 'var(--text-secondary)', textAlign: 'center',
                     }}>#{String(i + 1).padStart(2, '0')}</span>
-                    <input value={w.wafer} onChange={(e) => updateWafer(i, 'wafer', e.target.value)}
+                    <input value={w.wafer} onChange={(e) => updateWafer(i, 'wafer', e.target.value)} disabled={isEdit}
                       placeholder="Wafer ID (e.g. W001)"
                       style={inputBase} onFocus={onFocus} onBlur={onBlur}/>
-                    <select value={w.size} onChange={(e) => updateWafer(i, 'size', e.target.value)} style={{
-                      ...inputBase, paddingRight: 32, appearance: 'none', cursor: 'pointer',
+                    <select value={w.size} onChange={(e) => updateWafer(i, 'size', e.target.value)} disabled={isEdit} style={{
+                      ...inputBase, paddingRight: 32, appearance: 'none', cursor: isEdit ? 'not-allowed' : 'pointer',
                       backgroundImage: 'url("data:image/svg+xml,%3Csvg xmlns=\'http://www.w3.org/2000/svg\' width=\'12\' height=\'12\' viewBox=\'0 0 24 24\' fill=\'none\' stroke=\'%23777788\' stroke-width=\'2.5\' stroke-linecap=\'round\' stroke-linejoin=\'round\'%3E%3Cpath d=\'M6 9l6 6 6-6\'/%3E%3C/svg%3E")',
                       backgroundRepeat: 'no-repeat', backgroundPosition: 'right 10px center',
                     }}>
@@ -1362,24 +1434,24 @@ const FabNewRequest = ({ navigate, onSubmit, onSaveDraft, draft, isEdit = false,
                       <option value="200mm">200mm</option>
                       <option value="300mm">300mm</option>
                     </select>
-                    <button onClick={() => removeWafer(i)} disabled={wafers.length === 1}
+                    <button onClick={() => removeWafer(i)} disabled={isEdit || wafers.length === 1}
                       title="Remove wafer" style={{
                         width: 36, height: 36, borderRadius: 8,
-                        color: wafers.length === 1 ? '#cbcbd6' : '#a8a8b8',
-                        cursor: wafers.length === 1 ? 'not-allowed' : 'pointer',
+                        color: (isEdit || wafers.length === 1) ? '#cbcbd6' : '#a8a8b8',
+                        cursor: (isEdit || wafers.length === 1) ? 'not-allowed' : 'pointer',
                         display: 'flex', alignItems: 'center', justifyContent: 'center', transition: 'background 0.1s, color 0.1s',
                       }}
-                      onMouseEnter={(e) => { if (wafers.length > 1) { e.currentTarget.style.background = '#fde4e4'; e.currentTarget.style.color = '#c0394a'; } }}
-                      onMouseLeave={(e) => { if (wafers.length > 1) { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = '#a8a8b8'; } }}
+                      onMouseEnter={(e) => { if (!isEdit && wafers.length > 1) { e.currentTarget.style.background = '#fde4e4'; e.currentTarget.style.color = '#c0394a'; } }}
+                      onMouseLeave={(e) => { if (!isEdit && wafers.length > 1) { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = '#a8a8b8'; } }}
                     ><F.Trash size={15}/></button>
                   </div>
 
                   <div style={{ marginTop: 14, paddingLeft: 48 }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10 }}>
                       <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-secondary)', letterSpacing: '0.08em', textTransform: 'uppercase' }}>
-                        Experiments <span style={{ color: '#c0394a' }}>*</span>
+                        Experiments {!isEdit && <span style={{ color: '#c0394a' }}>*</span>}
                       </span>
-                      {w.expIds.length === 0 && <span style={{ fontSize: 12, fontWeight: 600, color: '#c0394a' }}>Pick at least one</span>}
+                      {!isEdit && w.expIds.length === 0 && <span style={{ fontSize: 12, fontWeight: 600, color: '#c0394a' }}>Pick at least one</span>}
                     </div>
                     <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 10 }}>
                       {experimentChoices.length === 0 && experimentsError && (
@@ -1388,22 +1460,24 @@ const FabNewRequest = ({ navigate, onSubmit, onSaveDraft, draft, isEdit = false,
                         </div>
                       )}
                       {experimentChoices.map(e => (
-                        <ExpCard key={e.id} exp={e} active={w.expIds.includes(e.id)} onClick={() => toggleExp(i, e.id)}/>
+                        <ExpCard key={e.id} exp={e} active={w.expIds.includes(e.id)} onClick={isEdit ? undefined : (() => toggleExp(i, e.id))}/>
                       ))}
                     </div>
                   </div>
                 </div>
               ))}
-              <button onClick={addWafer} style={{
-                display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
-                padding: '14px 16px', borderRadius: 12,
-                border: '1px dashed rgba(0,0,0,0.18)', background: 'transparent',
-                color: 'var(--text-secondary)', fontSize: 13.5, fontWeight: 600,
-                cursor: 'pointer', fontFamily: 'inherit', transition: 'border-color 0.12s, color 0.12s',
-              }}
-                onMouseEnter={(e) => { e.currentTarget.style.borderColor = '#6c67b8'; e.currentTarget.style.color = '#6c67b8'; }}
-                onMouseLeave={(e) => { e.currentTarget.style.borderColor = 'rgba(0,0,0,0.18)'; e.currentTarget.style.color = 'var(--text-secondary)'; }}
-              ><F.Plus size={14}/> Add another wafer</button>
+              {!isEdit && (
+                <button onClick={addWafer} style={{
+                  display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
+                  padding: '14px 16px', borderRadius: 12,
+                  border: '1px dashed rgba(0,0,0,0.18)', background: 'transparent',
+                  color: 'var(--text-secondary)', fontSize: 13.5, fontWeight: 600,
+                  cursor: 'pointer', fontFamily: 'inherit', transition: 'border-color 0.12s, color 0.12s',
+                }}
+                  onMouseEnter={(e) => { e.currentTarget.style.borderColor = '#6c67b8'; e.currentTarget.style.color = '#6c67b8'; }}
+                  onMouseLeave={(e) => { e.currentTarget.style.borderColor = 'rgba(0,0,0,0.18)'; e.currentTarget.style.color = 'var(--text-secondary)'; }}
+                ><F.Plus size={14}/> Add another wafer</button>
+              )}
             </div>
           </SectionStep>
         </div>
@@ -1414,7 +1488,8 @@ const FabNewRequest = ({ navigate, onSubmit, onSaveDraft, draft, isEdit = false,
             <SectionLabel style={{ marginBottom: 10 }}>Summary</SectionLabel>
             <div style={{ display: 'flex', gap: 6, marginBottom: 18 }}>
               <span style={{ flex: 1, height: 4, borderRadius: 999, background: basicValid ? '#6c67b8' : '#ebebf0' }}/>
-              <span style={{ flex: 1, height: 4, borderRadius: 999, background: samplesValid ? '#6c67b8' : '#ebebf0' }}/>
+              {/* In edit mode the wafer/exp section is locked — count it complete. */}
+              <span style={{ flex: 1, height: 4, borderRadius: 999, background: (isEdit || samplesValid) ? '#6c67b8' : '#ebebf0' }}/>
             </div>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
               <div>
@@ -1460,8 +1535,9 @@ const FabNewRequest = ({ navigate, onSubmit, onSaveDraft, draft, isEdit = false,
         display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 16,
       }}>
         <div style={{ fontSize: 13, color: 'var(--text-secondary)' }}>
-          <strong style={{ color: 'var(--text-primary)' }}>{(basicValid ? 1 : 0) + (samplesValid ? 1 : 0)}/2</strong> sections complete
-          {!valid && ' — every wafer needs an ID and at least one experiment'}
+          <strong style={{ color: 'var(--text-primary)' }}>{(basicValid ? 1 : 0) + (isEdit || samplesValid ? 1 : 0)}/2</strong> sections complete
+          {!valid && !isEdit && ' — every wafer needs an ID and at least one experiment'}
+          {!valid && isEdit && ' — title is required'}
         </div>
         <div style={{ display: 'flex', gap: 10 }}>
           <SecondaryBtn onClick={() => navigate(isEdit ? { page: 'fab_drafts' } : { page: 'fab_requests' })}>Cancel</SecondaryBtn>
@@ -1591,6 +1667,22 @@ const FabRequestDetail = ({ id, navigate, showToast }) => {
   const { data: r, loading, error, refresh } = useRequestDetail(id);
   const { data: liveTypes } = useExperimentTypes();
   const [cancelOpen, setCancelOpen] = uS(false);
+  const [shipBusy, setShipBusy] = uS(false);
+
+  const onShip = async () => {
+    if (!r) return;
+    if (!window.confirm('Ship all wafers for this request to the lab?')) return;
+    setShipBusy(true);
+    try {
+      await window.api.requests.ship(r.id);
+      showToast && showToast('Wafers shipped');
+      refresh();
+    } catch (e) {
+      showToast && showToast(`Ship failed: ${e.message || e}`);
+    } finally {
+      setShipBusy(false);
+    }
+  };
 
   if (loading && !r) {
     return (
@@ -1672,16 +1764,30 @@ const FabRequestDetail = ({ id, navigate, showToast }) => {
           )}
         </span>
       }
-      right={canCancel && (
-        <button onClick={() => setCancelOpen(true)} style={{
-          padding: '9px 15px', borderRadius: 8,
-          background: '#fff', color: '#c0394a',
-          fontWeight: 600, fontSize: 13, cursor: 'pointer',
-          border: '1px solid #f4c8c8',
-          display: 'inline-flex', alignItems: 'center', gap: 6,
-          fontFamily: 'inherit',
-        }}><F.X size={14} strokeWidth={2.5}/> Cancel Request</button>
-      )}
+      right={
+        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 10 }}>
+          {r.rawStatus === 'approved' && (
+            <button onClick={onShip} disabled={shipBusy} style={{
+              padding: '9px 15px', borderRadius: 8,
+              background: shipBusy ? '#cbcbd6' : '#6c67b8', color: '#fff',
+              fontWeight: 600, fontSize: 13, cursor: shipBusy ? 'not-allowed' : 'pointer',
+              border: 'none',
+              display: 'inline-flex', alignItems: 'center', gap: 6,
+              fontFamily: 'inherit',
+            }}><F.Package size={14} strokeWidth={2.5}/> {shipBusy ? 'Shipping…' : 'Ship Wafers'}</button>
+          )}
+          {canCancel && (
+            <button onClick={() => setCancelOpen(true)} style={{
+              padding: '9px 15px', borderRadius: 8,
+              background: '#fff', color: '#c0394a',
+              fontWeight: 600, fontSize: 13, cursor: 'pointer',
+              border: '1px solid #f4c8c8',
+              display: 'inline-flex', alignItems: 'center', gap: 6,
+              fontFamily: 'inherit',
+            }}><F.X size={14} strokeWidth={2.5}/> Cancel Request</button>
+          )}
+        </span>
+      }
     >
       {/* Overview card — metrics + approval history all in the first block */}
       <FabCard padding={0} style={{ marginBottom: 18 }}>
@@ -1851,8 +1957,42 @@ const FabRequestDetail = ({ id, navigate, showToast }) => {
 };
 
 // ── Root container ────────────────────────────────────────────
+const FabDraftEdit = ({ id, navigate, showToast }) => {
+  // Fetch the draft via the live API and hand it to FabNewRequest in edit
+  // mode. The legacy path looked up the draft on FabApp's seed-only local
+  // state, so anything created after login was unreachable from the
+  // Drafts → Continue button.
+  const { data: draft, loading, error } = useRequestDetail(id);
+  if (loading && !draft) {
+    return (
+      <FabPage title="Loading draft…">
+        <div style={{ padding: '60px 20px', textAlign: 'center', color: 'var(--text-muted)', fontSize: 14 }}>
+          Loading…
+        </div>
+      </FabPage>
+    );
+  }
+  if (error || !draft) {
+    return (
+      <FabPage
+        breadcrumb={
+          <button onClick={() => navigate({ page: 'fab_drafts' })} style={{
+            display: 'inline-flex', alignItems: 'center', gap: 4,
+            fontSize: 13, fontWeight: 600, color: '#6c67b8', marginBottom: 14, cursor: 'pointer',
+          }}><F.ChevronLeft size={14}/> Drafts</button>
+        }
+        title="Draft not found"
+      >
+        <div style={{ padding: 24, color: '#c0394a', fontSize: 14 }}>
+          {error || 'This draft is no longer available.'}
+        </div>
+      </FabPage>
+    );
+  }
+  return <FabNewRequest navigate={navigate} draft={draft} isEdit showToast={showToast}/>;
+};
+
 const FabApp = ({ route, navigate }) => {
-  const [requests, setRequests] = uS(REQUEST_SEED);
   const [toast, setToast] = uS(null);
 
   const showToast = (msg) => {
@@ -1860,47 +2000,12 @@ const FabApp = ({ route, navigate }) => {
     setTimeout(() => setToast(null), 2200);
   };
 
-  const submitNew = (payload, editingId = null) => {
-    const now = new Date().toISOString().slice(0, 16).replace('T', ' ');
-    if (editingId != null) {
-      setRequests(rs => rs.map(r => r.id === editingId ? {
-        ...r, ...payload, status: 'submitted', submitted: now,
-        history: [...(r.history || []), { action: 'SUBMIT', by: 'fab_user', at: now }],
-      } : r));
-      showToast(`Draft #${editingId} submitted — awaiting approval`);
-      navigate({ page: 'fab_request', id: editingId });
-      return;
-    }
-    const id = Math.max(...requests.map(r => r.id), 0) + 1;
-    setRequests(rs => [{ id, ...payload, status: 'submitted', created: now, submitted: now, history: [{ action: 'SUBMIT', by: 'fab_user', at: now }] }, ...rs]);
-    showToast(`Request #${id} submitted — awaiting approval`);
-    navigate({ page: 'fab_request', id });
-  };
-  const saveDraft = (payload, editingId = null) => {
-    const now = new Date().toISOString().slice(0, 16).replace('T', ' ');
-    if (editingId != null) {
-      setRequests(rs => rs.map(r => r.id === editingId ? { ...r, ...payload, status: 'draft' } : r));
-      showToast(`Draft #${editingId} updated`);
-      navigate({ page: 'fab_drafts' });
-      return;
-    }
-    const id = Math.max(...requests.map(r => r.id), 0) + 1;
-    setRequests(rs => [{ id, ...payload, status: 'draft', created: now, submitted: null, history: [] }, ...rs]);
-    showToast(`Draft #${id} saved`);
-    navigate({ page: 'fab_drafts' });
-  };
   let page = null;
   if (route.page === 'fab_dashboard') page = <FabDashboard navigate={navigate}/>;
   else if (route.page === 'fab_requests') page = <FabRequestList navigate={navigate} initialTab={route.tab || 'all'}/>;
   else if (route.page === 'fab_drafts') page = <FabRequestList navigate={navigate} drafts titleOverride="Drafts"/>;
-  else if (route.page === 'fab_new')      page = <FabNewRequest navigate={navigate} onSubmit={submitNew} onSaveDraft={saveDraft} showToast={showToast}/>;
-  else if (route.page === 'fab_draft_edit') {
-    const d = requests.find(r => r.id === route.id);
-    page = d
-      ? <FabNewRequest navigate={navigate} draft={d} isEdit showToast={showToast}
-          onSubmit={(p) => submitNew(p, d.id)} onSaveDraft={(p) => saveDraft(p, d.id)}/>
-      : <FabRequestList navigate={navigate} drafts titleOverride="Drafts"/>;
-  }
+  else if (route.page === 'fab_new')      page = <FabNewRequest navigate={navigate} showToast={showToast}/>;
+  else if (route.page === 'fab_draft_edit') page = <FabDraftEdit id={route.id} navigate={navigate} showToast={showToast}/>;
   else if (route.page === 'fab_request')  page = <FabRequestDetail id={route.id} navigate={navigate} showToast={showToast}/>;
   else page = <FabDashboard navigate={navigate}/>;
 

@@ -119,10 +119,11 @@ The branch keeps the 6 existing commits and adds new commits on top that reshape
   `experiment_type_ids` + `samples`, not just title/note. Backend
   `RequestUpdateIn` (`apps/commissions/schemas.py`) only accepts
   `title`, `note`, `urgency`.
-- **Surfaced during Fab New Request wiring smoke-test 2026-05-19.** The
-  current commit (8d440bf) keeps draft-edit on the legacy local-state path
-  to avoid a crash; it cannot round-trip wafer/experiment changes against
-  the live API yet.
+- **Surfaced during Fab New Request wiring smoke-test 2026-05-19.** Confirmed
+  again 2026-05-22: PATCH `/requests/29` with a `samples` array silently
+  dropped the field and only persisted `title`. Until the resolution below
+  lands, the frontend Drafts → Continue editing flow locks the wafer /
+  experiment block as read-only and only ships title / note / urgency.
 - **Resolution:** widen `RequestUpdateIn`:
   ```python
   experiment_type_ids: list[int] | None = None

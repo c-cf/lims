@@ -128,7 +128,11 @@
       id: r.id,
       title: r.title,
       status: REQUEST_STATUS_MAP[r.status] || r.status,
-      raw_status: r.status,                                  // keep for state-machine calls
+      // `status` collapses three backend states into FE `in_progress`; pages
+      // that need to disambiguate (e.g. show Ship only on `approved`) should
+      // read `rawStatus`. `raw_status` snake alias kept for legacy consumers.
+      rawStatus: r.status,
+      raw_status: r.status,
       urgency: r.urgency || '1w',                            // backend default since §2.2
       requester: r.requester,
       note: r.note,
