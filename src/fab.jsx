@@ -493,6 +493,11 @@ const StatusBars = ({ requests }) => {
 // Phases: Approved → Shipped → Processing → Done.
 const WAFER_PHASES = ['Approved', 'Shipped', 'Received', 'Processing', 'Done'];
 const phaseIndexFor = (sample, request) => {
+  // Pre-approval states: nothing in the pipeline is true yet. Returning
+  // -1 tells PhasePipeline to leave every dot/connector grey (the adapter
+  // collapses backend `pending_approval` → FE `submitted`, but we accept
+  // either spelling for defensive belt-and-braces).
+  if (request.status === 'draft' || request.status === 'submitted' || request.status === 'pending_approval') return -1;
   if (request.status === 'completed' || sample.status === 'completed') return 4;
   if (sample.status === 'received') return 2; // arrived at lab, not yet processed
   if (sample.status === 'pending')  return 1; // approved + en route to lab
@@ -541,13 +546,12 @@ const PhasePipeline = ({ idx, compact = false }) => {
   );
 };
 
-const InProgressRow = ({ request, navigate, defaultExpanded = false }) => {
-  const [open, setOpen] = uS(defaultExpanded);
+const InProgressRow = ({ request, navigate, open, onToggle }) => {
   const wafers = request.samples;
   const overallIdx = Math.min(...wafers.map(s => phaseIndexFor(s, request)));
   return (
     <div style={{ borderTop: '1px solid #f5f5f9' }}>
-      <button onClick={() => setOpen(o => !o)} style={{
+      <button onClick={onToggle} style={{
         width: '100%', textAlign: 'left',
         display: 'grid', gridTemplateColumns: '80px 1fr 130px 130px 24px',
         padding: '14px 24px', alignItems: 'center', gap: 16,
@@ -616,6 +620,14 @@ const FabDashboard = ({ navigate }) => {
   const drafts = requests.filter(r => r.status === 'draft');
   const attention = requests.filter(r => r.status === 'returned' || r.status === 'rejected').slice(0, 3);
   const waitingApproval = requests.filter(r => r.status === 'submitted');
+  // Accordion exclusivity: only one row open at a time. `undefined` means
+  // "not yet initialised" (we'll seed it with the first id once the list
+  // resolves); `null` is the user-driven "collapse everything" state and
+  // must persist — don't re-open the first row when that happens.
+  const [expandedId, setExpandedId] = uS(undefined);
+  React.useEffect(() => {
+    if (expandedId === undefined && inProgress.length > 0) setExpandedId(inProgress[0].id);
+  }, [inProgress, expandedId]);
   const activity = uM(() => {
     const items = [];
     requests.forEach(r => {
@@ -710,8 +722,14 @@ const FabDashboard = ({ navigate }) => {
         }}>
           <div>ID</div><div>Title · Phase</div><div>Wafers</div><div>Submitted</div><div/>
         </div>
-        {inProgress.map((r, i) => (
-          <InProgressRow key={r.id} request={r} navigate={navigate} defaultExpanded={i === 0}/>
+        {inProgress.map(r => (
+          <InProgressRow
+            key={r.id}
+            request={r}
+            navigate={navigate}
+            open={expandedId === r.id}
+            onToggle={() => setExpandedId(prev => prev === r.id ? null : r.id)}
+          />
         ))}
       </FabCard>
 
@@ -1647,7 +1665,7 @@ const FabRequestDetail = ({ id, navigate, showToast }) => {
           }}>#{String(r.id).padStart(4, '0')}</span>
           <StatusPill status={r.status} size="md"/>
           <UrgencyPill urgency={r.urgency} size="md"/>
-          {r.status !== 'draft' && r.status !== 'cancelled' && (
+          {r.status !== 'draft' && r.status !== 'cancelled' && r.status !== 'submitted' && overallIdx >= 0 && (
             <span style={{ fontSize: 13, color: 'var(--text-secondary)' }}>
               Currently at <strong style={{ color: 'var(--text-primary)' }}>{WAFER_PHASES[overallIdx]}</strong>
             </span>
