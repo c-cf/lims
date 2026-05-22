@@ -1789,7 +1789,11 @@ const WipCreationModalInner = ({ onClose, onSaved }) => {
             onChange={(e) => setExperimentTypeId(e.target.value ? Number(e.target.value) : '')}
           >
             <option value="">— pick an experiment type —</option>
-            {experimentTypes.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
+            {experimentTypes.map(t => (
+              <option key={t.id} value={t.id}>
+                {t.labCategory ? `${t.name} (${t.labCategory})` : t.name}
+              </option>
+            ))}
           </SelectInput>
         </div>
         <div>
@@ -2736,6 +2740,7 @@ const LabDispatchDetail = ({ id, navigate, showToast }) => {
         open={recordOpen}
         onClose={() => setRecordOpen(false)}
         dispatch={d}
+        waferResults={waferResults}
         onSubmit={async (payload) => {
           setRecordOpen(false);
           await runAction(
@@ -2749,11 +2754,12 @@ const LabDispatchDetail = ({ id, navigate, showToast }) => {
 };
 
 // ── Record Result modal ─────────────────────────────────────────
-// Backend record_result is comment-only now — per-wafer verdicts are
-// computed on the backend from the dispatch run and exposed via each
-// sample's experiment rollup. The modal just captures the operator's
-// observations and closes the dispatch.
-const RecordResultModal = ({ open, onClose, dispatch, onSubmit }) => {
+// Backend rolls per-wafer verdicts at unload time, so by the time
+// this modal opens (Record Result → Unloaded → record_result) the
+// verdicts are already populated. We surface them as a read-only
+// preview alongside the comment textarea — submit still posts
+// { comment }-only.
+const RecordResultModal = ({ open, onClose, dispatch, waferResults = [], onSubmit }) => {
   const [comment, setComment] = lS('');
 
   React.useEffect(() => {
@@ -2765,13 +2771,42 @@ const RecordResultModal = ({ open, onClose, dispatch, onSubmit }) => {
       open={open}
       onClose={onClose}
       title="Record Experiment Result"
-      width={520}
+      width={560}
       footer={<>
         <SecondaryBtn onClick={onClose}>Cancel</SecondaryBtn>
         <PrimaryBtn onClick={() => onSubmit({ comment: comment.trim() })}>Submit Result</PrimaryBtn>
       </>}
     >
       <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+        {waferResults.length > 0 && (
+          <div>
+            <FieldLabel>Per-Wafer Results</FieldLabel>
+            <div style={{
+              border: `1px solid ${lineSoft}`, borderRadius: 8, overflow: 'hidden',
+            }}>
+              {waferResults.map(w => {
+                const v = w.verdict;
+                const pillBg = v === 'pass' ? '#e7f0e9' : v === 'fail' ? '#fbe4e6' : '#f1f1f5';
+                const pillFg = v === 'pass' ? '#2e6a47' : v === 'fail' ? '#a93445' : muted;
+                const pillLabel = v === 'pass' ? '✓ Pass' : v === 'fail' ? '✗ Fail' : '—';
+                return (
+                  <div key={w.sampleId} style={{
+                    display: 'grid', gridTemplateColumns: '1fr auto',
+                    alignItems: 'center', gap: 10,
+                    padding: '10px 14px', borderTop: `1px solid ${lineSoft}`,
+                  }}>
+                    <span style={{ fontFamily: 'var(--font-mono)', fontSize: 13, fontWeight: 700, color: ink }}>{w.wafer}</span>
+                    <span style={{
+                      padding: '3px 10px', borderRadius: 999,
+                      background: pillBg, color: pillFg,
+                      fontSize: 11.5, fontWeight: 700,
+                    }}>{pillLabel}</span>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
         <div>
           <FieldLabel>Comment</FieldLabel>
           <TextArea

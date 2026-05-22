@@ -1273,37 +1273,45 @@ const UrgencyTile = ({ opt, active, onClick }) => (
   </button>
 );
 
-// Expanded card-style picker — shows description so engineers can pick without
-// remembering the acronyms.
-const ExpCard = ({ exp, active, onClick }) => (
-  <button onClick={onClick} style={{
-    display: 'block', textAlign: 'left', width: '100%', padding: '14px 16px',
-    borderRadius: 12, fontFamily: 'inherit', cursor: 'pointer',
-    background: active ? '#f5f4fb' : '#fff',
-    border: `1px solid ${active ? '#6c67b8' : 'rgba(0,0,0,0.12)'}`,
-    boxShadow: active ? '0 0 0 3px rgba(108,103,184,0.10)' : 'none',
-    transition: 'all 0.12s',
-  }}>
-    <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-      <span style={{
-        fontSize: 10.5, fontWeight: 700, padding: '3px 8px', borderRadius: 999,
-        background: exp.group === 'RA' ? '#e8e7f6' : '#d4eaf0',
-        color: exp.group === 'RA' ? '#5550a0' : '#2a7a91',
-        letterSpacing: '0.05em',
-      }}>{exp.group}</span>
-      <span style={{ fontSize: 14.5, color: 'var(--text-primary)', fontWeight: 700, flex: 1 }}>{exp.name}</span>
-      <span style={{
-        width: 18, height: 18, borderRadius: 999, flexShrink: 0,
-        border: `2px solid ${active ? '#6c67b8' : 'rgba(0,0,0,0.16)'}`,
-        background: active ? '#6c67b8' : '#fff',
-        display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-      }}>{active && <F.Check size={10} color="#fff" strokeWidth={3}/>}</span>
-    </div>
-    {exp.desc && (
-      <div style={{ fontSize: 12.5, color: 'var(--text-secondary)', marginTop: 8, lineHeight: 1.5 }}>{exp.desc}</div>
-    )}
-  </button>
-);
+// Expanded card-style picker — category badge + full experiment name +
+// description. No short-code chip: backend collapsed to 7 full-name
+// records and the names are descriptive enough on their own.
+const CATEGORY_BADGE = {
+  RA: { bg: '#e8e7f6', fg: '#5550a0' },  // Reliability / stress
+  TM: { bg: '#d4eaf0', fg: '#2a7a91' },  // Test & measurement
+  MA: { bg: '#dfe8d9', fg: '#3f6a32' },  // Materials analysis
+  FA: { bg: '#fbe1d1', fg: '#9a4715' },  // Failure analysis
+};
+const ExpCard = ({ exp, active, onClick }) => {
+  const badge = CATEGORY_BADGE[exp.group] || { bg: '#ecedf0', fg: '#5a5a6e' };
+  return (
+    <button onClick={onClick} style={{
+      display: 'block', textAlign: 'left', width: '100%', padding: '14px 16px',
+      borderRadius: 12, fontFamily: 'inherit', cursor: 'pointer',
+      background: active ? '#f5f4fb' : '#fff',
+      border: `1px solid ${active ? '#6c67b8' : 'rgba(0,0,0,0.12)'}`,
+      boxShadow: active ? '0 0 0 3px rgba(108,103,184,0.10)' : 'none',
+      transition: 'all 0.12s',
+    }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+        <span style={{
+          fontSize: 10.5, fontWeight: 700, padding: '3px 8px', borderRadius: 999,
+          background: badge.bg, color: badge.fg, letterSpacing: '0.05em',
+        }}>{exp.group || '—'}</span>
+        <span style={{ fontSize: 14.5, color: 'var(--text-primary)', fontWeight: 700, flex: 1 }}>{exp.name}</span>
+        <span style={{
+          width: 18, height: 18, borderRadius: 999, flexShrink: 0,
+          border: `2px solid ${active ? '#6c67b8' : 'rgba(0,0,0,0.16)'}`,
+          background: active ? '#6c67b8' : '#fff',
+          display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+        }}>{active && <F.Check size={10} color="#fff" strokeWidth={3}/>}</span>
+      </div>
+      {exp.desc && (
+        <div style={{ fontSize: 12.5, color: 'var(--text-secondary)', marginTop: 8, lineHeight: 1.5 }}>{exp.desc}</div>
+      )}
+    </button>
+  );
+};
 
 const FabNewRequest = ({ navigate, draft, isEdit = false, showToast }) => {
   // Edit mode now POSTs the same shape as create — backend lims-backend
