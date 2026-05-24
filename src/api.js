@@ -294,6 +294,7 @@
       // Dispatch-level result is just a free-text comment now. Per-wafer
       // verdicts live on SampleExperimentStatus.verdict (read via
       // /samples/:id/experiments).
+      note: d.note ?? '',
       result: d.result ? {
         id: d.result.id,
         comment: d.result.comment ?? '',
