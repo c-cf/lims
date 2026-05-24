@@ -55,7 +55,7 @@ def equipment(experiment_type):
 
 @pytest.fixture
 def recipe(equipment, experiment_type):
-    return RecipeFactory(equipment=equipment, experiment_type=experiment_type)
+    return RecipeFactory(experiment_type=experiment_type)
 
 
 # =============================================================================
@@ -84,7 +84,9 @@ def _get(client, url, user) -> object:
 def _run_dispatch_to_complete(client, dispatch_id, lab_staff_user) -> dict:
     """Drive a dispatch from PENDING to COMPLETED via the API.
 
-    Steps: start (PENDING→RUNNING) → unload → record-result → complete.
+    Steps: start (PENDING→RUNNING) → unload → record-result.
+    record-result is the terminal step now — it lands in COMPLETED
+    directly; there is no separate /complete/ call.
     """
     r = _post(client, f"/api/dispatches/{dispatch_id}/start/", lab_staff_user)
     assert r.status_code == 200, r.json()
@@ -94,10 +96,8 @@ def _run_dispatch_to_complete(client, dispatch_id, lab_staff_user) -> dict:
         client,
         f"/api/dispatches/{dispatch_id}/record-result/",
         lab_staff_user,
-        {"summary": "E2E test result", "verdict": "pass"},
+        {"comment": "E2E test result"},
     )
-    assert r.status_code == 200, r.json()
-    r = _post(client, f"/api/dispatches/{dispatch_id}/complete/", lab_staff_user)
     assert r.status_code == 200, r.json()
     return r.json()
 
@@ -187,7 +187,10 @@ class TestFullWorkflow:
             client,
             "/api/wips/",
             lab_staff,
-            {"sample_ids": [sample_id], "equipment_id": equipment.pk},
+            {
+                "sample_ids": [sample_id],
+                "experiment_type_id": experiment_type.pk,
+            },
         )
         assert r.status_code == 201, r.json()
         wip_id = r.json()["id"]
@@ -199,7 +202,6 @@ class TestFullWorkflow:
             f"/api/wips/{wip_id}/dispatches/",
             lab_staff,
             {
-                "experiment_type_id": experiment_type.pk,
                 "equipment_id": equipment.pk,
                 "recipe_id": recipe.pk,
             },
@@ -216,9 +218,10 @@ class TestFullWorkflow:
         r = _get(client, f"/api/dispatches/{dispatch_id}/", lab_staff)
         assert r.json()["status"] == DispatchStatus.COMPLETED
 
-        # --- Phase 6: Complete WIP (cascades to sample and request) ---
-        r = _post(client, f"/api/wips/{wip_id}/complete/", lab_staff)
-        assert r.status_code == 200, r.json()
+        # --- Phase 6: WIP auto-completes after the last dispatch lands in
+        # COMPLETED (cascades to sample and request). No manual
+        # /wips/{id}/complete/ POST needed.
+        r = _get(client, f"/api/wips/{wip_id}/", lab_staff)
         assert r.json()["status"] == WIPStatus.COMPLETED
 
         r = _get(client, f"/api/samples/{sample_id}", lab_staff)
@@ -240,11 +243,17 @@ class TestFullWorkflow:
 
 @pytest.mark.django_db
 class TestMultiDispatchWorkflow:
-    """One WIP with two dispatches; WIP can only complete after all dispatches finish."""
+    """One WIP with multiple dispatches over its lifetime — single-active
+    rule means dispatches must be sequential. WIP auto-completes when
+    the final dispatch lands in COMPLETED (and at least one COMPLETED
+    dispatch exists)."""
 
-    def test_wip_requires_all_dispatches_complete(
+    def test_abort_then_redo_then_auto_complete(
         self, client, lab_staff, lab_manager, experiment_type, equipment, recipe
     ):
+        """Operator creates a dispatch, aborts it, then creates a fresh
+        one and drives it to COMPLETED. The WIP auto-completes on that
+        second dispatch's record-result call."""
         from apps.commissions.factories import SampleFactory
         from apps.wip.factories import WIPFactory
         from apps.wip.models import WIPSample
@@ -254,56 +263,57 @@ class TestMultiDispatchWorkflow:
             request=sample.request, experiment_type=experiment_type
         )
         wip = WIPFactory(
-            equipment=equipment, status=WIPStatus.IN_PROGRESS, created_by=lab_staff
+            experiment_type=experiment_type,
+            status=WIPStatus.IN_PROGRESS,
+            created_by=lab_staff,
         )
         WIPSample.objects.create(wip=wip, sample=sample)
         wip_id = wip.pk
 
-        # Create first dispatch
+        # First dispatch — gets aborted before run.
         r = _post(
             client,
             f"/api/wips/{wip_id}/dispatches/",
             lab_staff,
-            {
-                "experiment_type_id": experiment_type.pk,
-                "recipe_id": recipe.pk,
-            },
+            {"equipment_id": equipment.pk, "recipe_id": recipe.pk},
         )
         assert r.status_code == 201, r.json()
         dispatch1_id = r.json()["dispatches"][0]["id"]
 
-        # Create second dispatch
+        # Trying to create a second dispatch while #1 is still active is
+        # blocked by the single-active rule.
         r = _post(
             client,
             f"/api/wips/{wip_id}/dispatches/",
             lab_staff,
-            {
-                "experiment_type_id": experiment_type.pk,
-                "recipe_id": recipe.pk,
-            },
+            {"equipment_id": equipment.pk, "recipe_id": recipe.pk},
         )
-        assert r.status_code == 201, r.json()
-        dispatch_ids = [d["id"] for d in r.json()["dispatches"]]
-        dispatch2_id = next(d for d in dispatch_ids if d != dispatch1_id)
+        assert r.status_code == 422, r.json()
+        assert "active" in r.json()["detail"].lower()
 
-        # Complete only the first dispatch
-        _run_dispatch_to_complete(client, dispatch1_id, lab_staff)
-
-        # WIP completion should fail (second dispatch still active)
-        r = _post(client, f"/api/wips/{wip_id}/complete/", lab_staff)
-        assert r.status_code == 400
-        assert "dispatches must be completed" in r.json()["detail"].lower()
-
-        # WIP is still in_progress
+        # Abort the first dispatch. WIP stays in_progress because no
+        # COMPLETED dispatch exists yet.
+        r = _post(client, f"/api/dispatches/{dispatch1_id}/abort/", lab_staff)
+        assert r.status_code == 200
         r = _get(client, f"/api/wips/{wip_id}/", lab_staff)
         assert r.json()["status"] == WIPStatus.IN_PROGRESS
 
-        # Complete the second dispatch
-        _run_dispatch_to_complete(client, dispatch2_id, lab_staff)
+        # Now create a fresh dispatch — allowed because the aborted one
+        # is terminal.
+        r = _post(
+            client,
+            f"/api/wips/{wip_id}/dispatches/",
+            lab_staff,
+            {"equipment_id": equipment.pk, "recipe_id": recipe.pk},
+        )
+        assert r.status_code == 201, r.json()
+        dispatch2_id = next(
+            d["id"] for d in r.json()["dispatches"] if d["id"] != dispatch1_id
+        )
 
-        # Now WIP can complete
-        r = _post(client, f"/api/wips/{wip_id}/complete/", lab_staff)
-        assert r.status_code == 200, r.json()
+        # Drive it to COMPLETED — WIP auto-completes.
+        _run_dispatch_to_complete(client, dispatch2_id, lab_staff)
+        r = _get(client, f"/api/wips/{wip_id}/", lab_staff)
         assert r.json()["status"] == WIPStatus.COMPLETED
 
 
@@ -328,7 +338,9 @@ class TestExceptionRedispatch:
             request=sample.request, experiment_type=experiment_type
         )
         wip = WIPFactory(
-            equipment=equipment, status=WIPStatus.IN_PROGRESS, created_by=lab_staff
+            experiment_type=experiment_type,
+            status=WIPStatus.IN_PROGRESS,
+            created_by=lab_staff,
         )
         WIPSample.objects.create(wip=wip, sample=sample)
         wip_id = wip.pk
@@ -339,7 +351,7 @@ class TestExceptionRedispatch:
             f"/api/wips/{wip_id}/dispatches/",
             lab_staff,
             {
-                "experiment_type_id": experiment_type.pk,
+                "equipment_id": equipment.pk,
                 "recipe_id": recipe.pk,
             },
         )
@@ -372,12 +384,12 @@ class TestExceptionRedispatch:
         ).latest("created_at")
         new_dispatch_id = new_dispatch.pk
 
-        # Complete the new dispatch
+        # Complete the new dispatch — WIP auto-completes because the
+        # original is PENDING_REDISPATCH (terminal) and the new one is
+        # COMPLETED, so all dispatches are terminal + ≥1 COMPLETED.
         _run_dispatch_to_complete(client, new_dispatch_id, lab_staff)
 
-        # WIP can now be completed (original is PENDING_REDISPATCH=terminal, new is COMPLETED)
-        r = _post(client, f"/api/wips/{wip_id}/complete/", lab_staff)
-        assert r.status_code == 200, r.json()
+        r = _get(client, f"/api/wips/{wip_id}/", lab_staff)
         assert r.json()["status"] == WIPStatus.COMPLETED
 
 
@@ -543,7 +555,9 @@ class TestAutomationWorkflow:
             request=sample.request, experiment_type=experiment_type
         )
         wip = WIPFactory(
-            equipment=equipment, status=WIPStatus.IN_PROGRESS, created_by=lab_staff
+            experiment_type=experiment_type,
+            status=WIPStatus.IN_PROGRESS,
+            created_by=lab_staff,
         )
         WIPSample.objects.create(wip=wip, sample=sample)
         wip_id = wip.pk
@@ -554,7 +568,7 @@ class TestAutomationWorkflow:
             f"/api/wips/{wip_id}/dispatches/",
             lab_staff,
             {
-                "experiment_type_id": experiment_type.pk,
+                "equipment_id": equipment.pk,
                 "recipe_id": recipe.pk,
             },
         )
@@ -564,16 +578,16 @@ class TestAutomationWorkflow:
         r = _post(client, f"/api/dispatches/{dispatch_id}/start/", lab_staff)
         assert r.status_code == 200
 
-        # Equipment submits result automatically
+        # Equipment submits result automatically — payload is just
+        # {dispatch_id, comment} now; per-wafer verdicts are rolled
+        # server-side on SampleExperimentStatus.
         r = _post(
             client,
             "/api/automation/equipment-result/",
             lab_staff,
             {
                 "dispatch_id": dispatch_id,
-                "summary": "Auto-measurement complete",
-                "verdict": "pass",
-                "data": {"thickness_nm": 120.5},
+                "comment": "Auto-measurement complete",
             },
         )
         assert r.status_code == 200, r.json()
@@ -581,17 +595,15 @@ class TestAutomationWorkflow:
 
         assert data["status"] == DispatchStatus.COMPLETED
         assert data["result"] is not None
-        assert data["result"]["data_source"] == ExperimentResult.DataSource.AUTOMATED
-        assert data["result"]["verdict"] == ExperimentResult.Verdict.PASS
-        assert data["result"]["data"] == {"thickness_nm": 120.5}
+        assert data["result"]["comment"] == "Auto-measurement complete"
 
         # Verify ExperimentResult is stored correctly
         result = ExperimentResult.objects.get(dispatch_id=dispatch_id)
-        assert result.data_source == ExperimentResult.DataSource.AUTOMATED
+        assert result.comment == "Auto-measurement complete"
 
-        # Lab staff completes the WIP
-        r = _post(client, f"/api/wips/{wip_id}/complete/", lab_staff)
-        assert r.status_code == 200
+        # WIP auto-completes when the only active dispatch finishes via
+        # the automation endpoint — no manual /wips/{id}/complete/ POST.
+        r = _get(client, f"/api/wips/{wip_id}/", lab_staff)
         assert r.json()["status"] == WIPStatus.COMPLETED
 
     def test_automation_accepts_dispatched_state(
@@ -607,13 +619,16 @@ class TestAutomationWorkflow:
             request=sample.request, experiment_type=experiment_type
         )
         wip = WIPFactory(
-            equipment=equipment, status=WIPStatus.IN_PROGRESS, created_by=lab_staff
+            experiment_type=experiment_type,
+            status=WIPStatus.IN_PROGRESS,
+            created_by=lab_staff,
         )
         WIPSample.objects.create(wip=wip, sample=sample)
 
         dispatch = DispatchFactory(
             wip=wip,
             experiment_type=experiment_type,
+            equipment=equipment,
             recipe=recipe,
             status=DispatchStatus.DISPATCHED,
             created_by=lab_staff,
@@ -625,10 +640,9 @@ class TestAutomationWorkflow:
             lab_staff,
             {
                 "dispatch_id": dispatch.pk,
-                "summary": "Auto result from dispatched state",
-                "verdict": "fail",
+                "comment": "Auto result from dispatched state",
             },
         )
         assert r.status_code == 200
         assert r.json()["status"] == DispatchStatus.COMPLETED
-        assert r.json()["result"]["verdict"] == ExperimentResult.Verdict.FAIL
+        assert r.json()["result"]["comment"] == "Auto result from dispatched state"

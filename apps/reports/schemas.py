@@ -48,3 +48,21 @@ class RequestStatisticsOut(Schema):
     status_distribution: dict[str, int]
     average_tat_hours: float | None
     total_requests: int
+
+
+# --- Trends schemas ---
+
+
+class TrendPointOut(Schema):
+    """One day's count on a trend series."""
+
+    date: str
+    count: int
+
+
+class TrendsOut(Schema):
+    """Output schema for the trends endpoint."""
+
+    metric: str
+    days: int
+    points: list[TrendPointOut]

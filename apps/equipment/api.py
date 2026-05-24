@@ -84,6 +84,7 @@ def create_equipment(request: HttpRequest, payload: EquipmentIn):
             name=payload.name,
             model_name=payload.model_name,
             capacity=payload.capacity,
+            parameters=payload.parameters,
         )
 
         if valid_ids:
@@ -187,7 +188,6 @@ def set_equipment_capabilities(
 @recipe_router.get("/", response={200: list[RecipeOut], 403: ErrorOut})
 def list_recipes(
     request: HttpRequest,
-    equipment_id: int | None = Query(None),
     experiment_type_id: int | None = Query(None),
     is_active: bool | None = Query(None),
 ):
@@ -195,16 +195,13 @@ def list_recipes(
     if not has_lab_role(request):
         return 403, {"detail": "Permission denied"}
 
-    qs = Recipe.objects.select_related("equipment", "experiment_type").order_by("name")
+    qs = Recipe.objects.select_related("experiment_type").order_by("name")
 
     # Default to active-only unless explicitly specified
     if is_active is None:
         qs = qs.filter(is_active=True)
     else:
         qs = qs.filter(is_active=is_active)
-
-    if equipment_id is not None:
-        qs = qs.filter(equipment_id=equipment_id)
 
     if experiment_type_id is not None:
         qs = qs.filter(experiment_type_id=experiment_type_id)
@@ -219,11 +216,6 @@ def create_recipe(request: HttpRequest, payload: RecipeIn):
         return 403, {"detail": "Permission denied"}
 
     try:
-        equipment = Equipment.objects.get(pk=payload.equipment_id)
-    except Equipment.DoesNotExist:
-        return 404, {"detail": "Equipment not found"}
-
-    try:
         experiment_type = ExperimentType.objects.get(pk=payload.experiment_type_id)
     except ExperimentType.DoesNotExist:
         return 404, {"detail": "Experiment type not found"}
@@ -231,7 +223,6 @@ def create_recipe(request: HttpRequest, payload: RecipeIn):
     recipe = Recipe.objects.create(
         name=payload.name,
         description=payload.description,
-        equipment=equipment,
         experiment_type=experiment_type,
         parameters=payload.parameters,
     )
@@ -248,7 +239,7 @@ def get_recipe(request: HttpRequest, recipe_id: int):
         return 403, {"detail": "Permission denied"}
 
     try:
-        recipe = Recipe.objects.select_related("equipment", "experiment_type").get(
+        recipe = Recipe.objects.select_related("experiment_type").get(
             pk=recipe_id, is_active=True
         )
     except Recipe.DoesNotExist:
@@ -271,7 +262,7 @@ def update_recipe(
         return 403, {"detail": "Permission denied"}
 
     try:
-        recipe = Recipe.objects.select_related("equipment", "experiment_type").get(
+        recipe = Recipe.objects.select_related("experiment_type").get(
             pk=recipe_id, is_active=True
         )
     except Recipe.DoesNotExist:
@@ -297,7 +288,7 @@ def delete_recipe(request: HttpRequest, recipe_id: int):
         return 403, {"detail": "Permission denied"}
 
     try:
-        recipe = Recipe.objects.select_related("equipment", "experiment_type").get(
+        recipe = Recipe.objects.select_related("experiment_type").get(
             pk=recipe_id, is_active=True
         )
     except Recipe.DoesNotExist:

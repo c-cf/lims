@@ -27,12 +27,11 @@ def equipment(experiment_type):
 
 
 @pytest.fixture
-def recipe(equipment, experiment_type):
+def recipe(experiment_type):
     from apps.equipment.models import Recipe
 
     return Recipe.objects.create(
         name="測試 Recipe",
-        equipment=equipment,
         experiment_type=experiment_type,
     )
 
@@ -55,21 +54,23 @@ def sample(request_obj):
 
 @pytest.mark.django_db
 class TestWIP:
-    def test_create_wip(self, lab_user, equipment, sample):
-        """WIP can be created with equipment and samples via M2M."""
+    def test_create_wip(self, lab_user, equipment, experiment_type, sample):
+        """WIP can be created with experiment_type and samples via M2M."""
         from apps.wip.models import WIP, WIPSample, WIPStatus
 
-        wip = WIP.objects.create(equipment=equipment, created_by=lab_user)
+        wip = WIP.objects.create(experiment_type=experiment_type, created_by=lab_user)
         WIPSample.objects.create(wip=wip, sample=sample)
 
-        assert wip.equipment == equipment
+        assert wip.experiment_type == experiment_type
         assert wip.status == WIPStatus.CREATED
         assert wip.created_by == lab_user
         assert wip.completed_at is None
         assert wip.samples.count() == 1
         assert wip.samples.first() == sample
 
-    def test_wip_multiple_samples(self, lab_user, equipment, request_obj):
+    def test_wip_multiple_samples(
+        self, lab_user, equipment, experiment_type, request_obj
+    ):
         """A WIP can have multiple samples from different requests."""
         from apps.commissions.models import Request, Sample, WaferSize
         from apps.wip.models import WIP, WIPSample
@@ -82,33 +83,33 @@ class TestWIP:
             request=req2, wafer_id="WF-002", wafer_size=WaferSize.SIZE_200MM
         )
 
-        wip = WIP.objects.create(equipment=equipment, created_by=lab_user)
+        wip = WIP.objects.create(experiment_type=experiment_type, created_by=lab_user)
         WIPSample.objects.create(wip=wip, sample=s1)
         WIPSample.objects.create(wip=wip, sample=s2)
 
         assert wip.samples.count() == 2
 
-    def test_sample_in_multiple_wips(self, lab_user, equipment, sample):
+    def test_sample_in_multiple_wips(
+        self, lab_user, equipment, experiment_type, sample
+    ):
         """A sample can participate in multiple WIPs."""
-        from apps.equipment.models import Equipment
         from apps.wip.models import WIP, WIPSample
 
-        wip1 = WIP.objects.create(equipment=equipment, created_by=lab_user)
+        wip1 = WIP.objects.create(experiment_type=experiment_type, created_by=lab_user)
         WIPSample.objects.create(wip=wip1, sample=sample)
 
-        equip2 = Equipment.objects.create(
-            name="烤箱 B-01", model_name="OV-5000", capacity=10
-        )
-        wip2 = WIP.objects.create(equipment=equip2, created_by=lab_user)
+        wip2 = WIP.objects.create(experiment_type=experiment_type, created_by=lab_user)
         WIPSample.objects.create(wip=wip2, sample=sample)
 
         assert sample.wips.count() == 2
 
-    def test_wip_sample_unique_together(self, lab_user, equipment, sample):
+    def test_wip_sample_unique_together(
+        self, lab_user, equipment, experiment_type, sample
+    ):
         """Same sample cannot be added to same WIP twice."""
         from apps.wip.models import WIP, WIPSample
 
-        wip = WIP.objects.create(equipment=equipment, created_by=lab_user)
+        wip = WIP.objects.create(experiment_type=experiment_type, created_by=lab_user)
         WIPSample.objects.create(wip=wip, sample=sample)
 
         with pytest.raises(IntegrityError):
@@ -127,6 +128,14 @@ class TestWIP:
 
         assert WIP._meta.db_table == "wip"
 
+    def test_wip_experiment_type_required(self, lab_user, experiment_type):
+        """WIP.experiment_type is required (chat-design: every WIP is bound
+        to exactly one experiment_type at creation time)."""
+        from apps.wip.models import WIP
+
+        wip = WIP.objects.create(experiment_type=experiment_type, created_by=lab_user)
+        assert wip.experiment_type == experiment_type
+
 
 @pytest.mark.django_db
 class TestDispatch:
@@ -136,11 +145,12 @@ class TestDispatch:
         """Dispatch links WIP to recipe + experiment_type (equipment on WIP)."""
         from apps.wip.models import WIP, Dispatch, DispatchStatus, WIPSample
 
-        wip = WIP.objects.create(equipment=equipment, created_by=lab_user)
+        wip = WIP.objects.create(experiment_type=experiment_type, created_by=lab_user)
         WIPSample.objects.create(wip=wip, sample=sample)
         dispatch = Dispatch.objects.create(
             wip=wip,
             experiment_type=experiment_type,
+            equipment=equipment,
             recipe=recipe,
             created_by=lab_user,
         )
@@ -160,11 +170,12 @@ class TestDispatch:
         from apps.experiments.models import ExperimentType, LabCategory
         from apps.wip.models import WIP, Dispatch, WIPSample
 
-        wip = WIP.objects.create(equipment=equipment, created_by=lab_user)
+        wip = WIP.objects.create(experiment_type=experiment_type, created_by=lab_user)
         WIPSample.objects.create(wip=wip, sample=sample)
         Dispatch.objects.create(
             wip=wip,
             experiment_type=experiment_type,
+            equipment=equipment,
             recipe=recipe,
             created_by=lab_user,
         )
@@ -173,12 +184,11 @@ class TestDispatch:
             name="材料分析", lab_category=LabCategory.MA
         )
         EquipmentCapability.objects.create(equipment=equipment, experiment_type=et2)
-        recipe2 = Recipe.objects.create(
-            name="Recipe 2", equipment=equipment, experiment_type=et2
-        )
+        recipe2 = Recipe.objects.create(name="Recipe 2", experiment_type=et2)
         Dispatch.objects.create(
             wip=wip,
             experiment_type=et2,
+            equipment=equipment,
             recipe=recipe2,
             created_by=lab_user,
         )
@@ -208,6 +218,58 @@ class TestDispatch:
 
         assert Dispatch._meta.db_table == "dispatch"
 
+    def test_dispatch_equipment_required(
+        self, lab_user, sample, experiment_type, equipment, recipe
+    ):
+        """Dispatch.equipment is required (chat-design: equipment is chosen
+        per-dispatch and stored on the Dispatch row directly)."""
+        from apps.wip.models import WIP, Dispatch, WIPSample
+
+        wip = WIP.objects.create(experiment_type=experiment_type, created_by=lab_user)
+        WIPSample.objects.create(wip=wip, sample=sample)
+        dispatch = Dispatch.objects.create(
+            wip=wip,
+            experiment_type=experiment_type,
+            equipment=equipment,
+            recipe=recipe,
+            created_by=lab_user,
+        )
+        assert dispatch.equipment == equipment
+
+    def test_dispatch_estimated_duration_round_trip(
+        self, lab_user, sample, experiment_type, equipment, recipe
+    ):
+        """estimated_duration_seconds is nullable and round-trips. Large
+        values (e.g. multi-day burn-in runs) are accepted — it's a
+        PositiveIntegerField with no upper cap by design."""
+        from apps.wip.models import WIP, Dispatch, WIPSample
+
+        wip = WIP.objects.create(experiment_type=experiment_type, created_by=lab_user)
+        WIPSample.objects.create(wip=wip, sample=sample)
+
+        no_estimate = Dispatch.objects.create(
+            wip=wip,
+            experiment_type=experiment_type,
+            equipment=equipment,
+            recipe=recipe,
+            created_by=lab_user,
+        )
+        assert no_estimate.estimated_duration_seconds is None
+
+        seven_days = 7 * 24 * 60 * 60
+        long_run = Dispatch.objects.create(
+            wip=wip,
+            experiment_type=experiment_type,
+            equipment=equipment,
+            recipe=recipe,
+            estimated_duration_seconds=seven_days,
+            created_by=lab_user,
+        )
+        assert (
+            Dispatch.objects.get(pk=long_run.pk).estimated_duration_seconds
+            == seven_days
+        )
+
 
 @pytest.mark.django_db
 class TestExperimentResult:
@@ -217,23 +279,22 @@ class TestExperimentResult:
         """ExperimentResult can be created with OneToOne relation to Dispatch."""
         from apps.wip.models import WIP, Dispatch, ExperimentResult, WIPSample
 
-        wip = WIP.objects.create(equipment=equipment, created_by=lab_user)
+        wip = WIP.objects.create(experiment_type=experiment_type, created_by=lab_user)
         WIPSample.objects.create(wip=wip, sample=sample)
         dispatch = Dispatch.objects.create(
             wip=wip,
             experiment_type=experiment_type,
+            equipment=equipment,
             recipe=recipe,
             created_by=lab_user,
         )
         result = ExperimentResult.objects.create(
             dispatch=dispatch,
-            summary="測試完成，所有樣品通過",
-            verdict=ExperimentResult.Verdict.PASS,
+            comment="測試完成，所有樣品通過",
         )
 
         assert result.dispatch == dispatch
-        assert result.verdict == ExperimentResult.Verdict.PASS
-        assert result.data_source == ExperimentResult.DataSource.MANUAL
+        assert result.comment == "測試完成，所有樣品通過"
 
     def test_experiment_result_one_to_one(
         self, lab_user, sample, experiment_type, equipment, recipe
@@ -241,52 +302,41 @@ class TestExperimentResult:
         """A Dispatch can have at most one ExperimentResult."""
         from apps.wip.models import WIP, Dispatch, ExperimentResult, WIPSample
 
-        wip = WIP.objects.create(equipment=equipment, created_by=lab_user)
+        wip = WIP.objects.create(experiment_type=experiment_type, created_by=lab_user)
         WIPSample.objects.create(wip=wip, sample=sample)
         dispatch = Dispatch.objects.create(
             wip=wip,
             experiment_type=experiment_type,
+            equipment=equipment,
             recipe=recipe,
             created_by=lab_user,
         )
-        ExperimentResult.objects.create(
-            dispatch=dispatch,
-            summary="第一次結果",
-            verdict=ExperimentResult.Verdict.PASS,
-        )
+        ExperimentResult.objects.create(dispatch=dispatch, comment="第一次結果")
 
         with pytest.raises(IntegrityError):
-            ExperimentResult.objects.create(
-                dispatch=dispatch,
-                summary="重複結果",
-                verdict=ExperimentResult.Verdict.FAIL,
-            )
+            ExperimentResult.objects.create(dispatch=dispatch, comment="重複結果")
 
-    def test_experiment_result_json_data(
+    def test_experiment_result_comment_round_trip(
         self, lab_user, sample, experiment_type, equipment, recipe
     ):
-        """data JSONField can be written and read back correctly."""
+        """comment TextField can be written and read back correctly —
+        replaces the old test_experiment_result_json_data (data field gone)."""
         from apps.wip.models import WIP, Dispatch, ExperimentResult, WIPSample
 
-        wip = WIP.objects.create(equipment=equipment, created_by=lab_user)
+        wip = WIP.objects.create(experiment_type=experiment_type, created_by=lab_user)
         WIPSample.objects.create(wip=wip, sample=sample)
         dispatch = Dispatch.objects.create(
             wip=wip,
             experiment_type=experiment_type,
+            equipment=equipment,
             recipe=recipe,
             created_by=lab_user,
         )
-        data = {"temperature_actual": 150.2, "defect_count": 0}
-        result = ExperimentResult.objects.create(
-            dispatch=dispatch,
-            summary="帶數據的結果",
-            verdict=ExperimentResult.Verdict.PASS,
-            data=data,
-        )
+        comment = "Run completed cleanly. Wafer 2 had minor visual artefacts."
+        result = ExperimentResult.objects.create(dispatch=dispatch, comment=comment)
 
         fresh = ExperimentResult.objects.get(pk=result.pk)
-        assert fresh.data["temperature_actual"] == 150.2
-        assert fresh.data["defect_count"] == 0
+        assert fresh.comment == comment
 
     def test_experiment_result_db_table_name(self):
         """Database table name is experiment_result."""

@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 from ninja import Field, Schema
+
+from apps.commissions.schemas import RequesterOut
 
 if TYPE_CHECKING:
     from apps.wip.models import WIP, Dispatch
@@ -30,22 +32,28 @@ class DispatchBriefOut(Schema):
     id: int
     experiment_type_id: int
     experiment_type_name: str
+    equipment_id: int
+    equipment_name: str
     recipe_id: int
     recipe_name: str
     status: str
+    estimated_duration_seconds: int | None
     dispatched_at: datetime | None
     completed_at: datetime | None
     created_at: datetime
 
 
 class ExperimentResultOut(Schema):
-    """Experiment result details nested in dispatch responses."""
+    """Experiment result details nested in dispatch responses.
+
+    Pass/fail verdict lives per-wafer on SampleExperimentStatus.verdict
+    (exposed via SampleExperimentStatusOut + the sample-experiments
+    rollup). This block only carries the dispatch-level operator
+    comment.
+    """
 
     id: int
-    summary: str
-    verdict: str
-    data: dict[str, Any]
-    data_source: str
+    comment: str
     created_at: datetime
 
 
@@ -53,10 +61,14 @@ class ExperimentResultOut(Schema):
 
 
 class WIPIn(Schema):
-    """Input schema for creating a WIP."""
+    """Input schema for creating a WIP.
+
+    Chat-design: a WIP is bound to one experiment_type at creation time.
+    Equipment is chosen later, per dispatch.
+    """
 
     sample_ids: list[int] = Field(..., min_length=1)
-    equipment_id: int
+    experiment_type_id: int
     note: str = ""
 
 
@@ -70,20 +82,34 @@ class WIPAddSamplesIn(Schema):
 
 
 class DispatchIn(Schema):
-    """Input schema for creating a dispatch."""
+    """Input schema for creating a dispatch.
 
-    experiment_type_id: int
+    Chat-design: experiment_type is derived from the parent WIP; the
+    payload only carries the per-dispatch choices (equipment + recipe).
+    estimated_duration_seconds is optional — operators can leave it
+    blank, and the SPA falls back to a hardcoded 24h countdown.
+    Seconds (not minutes) so demo scenarios can specify sub-minute runs.
+    """
+
+    equipment_id: int
     recipe_id: int
     note: str = ""
+    estimated_duration_seconds: int | None = Field(None, gt=0)
 
 
-class ExperimentResultIn(Schema):
-    """Input schema for recording an experiment result."""
+class RecordResultIn(Schema):
+    """Input schema for recording a dispatch result.
 
-    summary: str = Field(..., min_length=1)
-    verdict: str = Field(..., pattern="^(pass|fail)$")
-    data: dict[str, Any] = {}
-    note: str = ""
+    Server randomises the per-wafer verdict (80% pass / 20% fail) — the
+    client never sends one. extra="forbid" so stale clients still
+    posting verdict/data/summary fail loudly (422) instead of silently
+    losing those fields' intent.
+    """
+
+    comment: str = ""
+
+    class Config:
+        extra = "forbid"
 
 
 class ExceptionReportIn(Schema):
@@ -93,12 +119,18 @@ class ExceptionReportIn(Schema):
 
 
 class AutomationResultIn(Schema):
-    """Input schema for automated equipment result submission."""
+    """Input schema for automated equipment result submission.
+
+    Same simplification as the manual record_result path — server
+    randomises per-wafer verdict; the equipment integration only needs
+    to identify the dispatch and optionally attach a comment string.
+    """
 
     dispatch_id: int
-    summary: str = Field(..., min_length=1)
-    verdict: str = Field(..., pattern="^(pass|fail)$")
-    data: dict[str, Any] = {}
+    comment: str = ""
+
+    class Config:
+        extra = "forbid"
 
 
 # --- WIP output schemas ---
@@ -108,9 +140,10 @@ class WIPListOut(Schema):
     """Output schema for WIP list responses."""
 
     id: int
-    equipment_id: int
-    equipment_name: str
+    experiment_type_id: int
+    experiment_type_name: str
     sample_count: int
+    dispatch_count: int
     status: str
     note: str
     completed_at: datetime | None
@@ -119,12 +152,20 @@ class WIPListOut(Schema):
 
     @staticmethod
     def from_wip(wip: WIP) -> dict:
-        """Build a dict from a WIP instance."""
+        """Build a dict from a WIP instance.
+
+        Expects the queryset to annotate ``dispatch_count`` (see
+        list_wips in apps/wip/api.py) so the list endpoint doesn't
+        incur a per-row COUNT(*). sample_count comes from a count on
+        the M2M; we don't annotate it because WIP detail / state
+        transition paths reuse this builder without the annotation.
+        """
         return {
             "id": wip.pk,
-            "equipment_id": wip.equipment_id,
-            "equipment_name": wip.equipment.name,
+            "experiment_type_id": wip.experiment_type_id,
+            "experiment_type_name": wip.experiment_type.name,
             "sample_count": wip.samples.count(),
+            "dispatch_count": getattr(wip, "dispatch_count", wip.dispatches.count()),
             "status": wip.status,
             "note": wip.note,
             "completed_at": wip.completed_at,
@@ -137,8 +178,8 @@ class WIPDetailOut(Schema):
     """Output schema for WIP detail responses."""
 
     id: int
-    equipment_id: int
-    equipment_name: str
+    experiment_type_id: int
+    experiment_type_name: str
     samples: list[SampleBriefOut]
     status: str
     note: str
@@ -157,9 +198,12 @@ class WIPDetailOut(Schema):
                     "id": d.pk,
                     "experiment_type_id": d.experiment_type_id,
                     "experiment_type_name": d.experiment_type.name,
+                    "equipment_id": d.equipment_id,
+                    "equipment_name": d.equipment.name,
                     "recipe_id": d.recipe_id,
                     "recipe_name": d.recipe.name,
                     "status": d.status,
+                    "estimated_duration_seconds": d.estimated_duration_seconds,
                     "dispatched_at": d.dispatched_at,
                     "completed_at": d.completed_at,
                     "created_at": d.created_at,
@@ -177,8 +221,8 @@ class WIPDetailOut(Schema):
         ]
         return {
             "id": wip.pk,
-            "equipment_id": wip.equipment_id,
-            "equipment_name": wip.equipment.name,
+            "experiment_type_id": wip.experiment_type_id,
+            "experiment_type_name": wip.experiment_type.name,
             "samples": samples,
             "status": wip.status,
             "note": wip.note,
@@ -190,6 +234,25 @@ class WIPDetailOut(Schema):
 
 
 # --- Dispatch output schemas ---
+
+
+def _build_created_by(dispatch: Dispatch) -> dict | None:
+    """Shape a Dispatch.created_by user into RequesterOut form.
+
+    Returns None if created_by is unset (defensive — the FK is non-null
+    on the model, but ORM instances created in some test paths could
+    plausibly leave it dangling, and we'd rather render a null operator
+    than 500). department falls back to '' when the user has no profile.
+    """
+    user = dispatch.created_by
+    if user is None:
+        return None
+    profile = getattr(user, "profile", None)
+    return {
+        "id": user.pk,
+        "username": user.username,
+        "department": profile.department if profile else "",
+    }
 
 
 class DispatchDetailOut(Schema):
@@ -205,9 +268,11 @@ class DispatchDetailOut(Schema):
     recipe_name: str
     status: str
     note: str
+    estimated_duration_seconds: int | None
     dispatched_at: datetime | None
     completed_at: datetime | None
     result: ExperimentResultOut | None
+    created_by: RequesterOut | None
     created_at: datetime
     updated_at: datetime
 
@@ -219,10 +284,7 @@ class DispatchDetailOut(Schema):
             r = dispatch.result
             result = {
                 "id": r.pk,
-                "summary": r.summary,
-                "verdict": r.verdict,
-                "data": r.data,
-                "data_source": r.data_source,
+                "comment": r.comment,
                 "created_at": r.created_at,
             }
         return {
@@ -230,15 +292,17 @@ class DispatchDetailOut(Schema):
             "wip_id": dispatch.wip_id,
             "experiment_type_id": dispatch.experiment_type_id,
             "experiment_type_name": dispatch.experiment_type.name,
-            "equipment_id": dispatch.wip.equipment_id,
-            "equipment_name": dispatch.wip.equipment.name,
+            "equipment_id": dispatch.equipment_id,
+            "equipment_name": dispatch.equipment.name,
             "recipe_id": dispatch.recipe_id,
             "recipe_name": dispatch.recipe.name,
             "status": dispatch.status,
             "note": dispatch.note,
+            "estimated_duration_seconds": dispatch.estimated_duration_seconds,
             "dispatched_at": dispatch.dispatched_at,
             "completed_at": dispatch.completed_at,
             "result": result,
+            "created_by": _build_created_by(dispatch),
             "created_at": dispatch.created_at,
             "updated_at": dispatch.updated_at,
         }
@@ -250,9 +314,35 @@ class DispatchListOut(Schema):
     id: int
     wip_id: int
     experiment_type_id: int
+    equipment_id: int
     recipe_id: int
     status: str
+    estimated_duration_seconds: int | None
     dispatched_at: datetime | None
     completed_at: datetime | None
+    created_by: RequesterOut | None
     created_at: datetime
     updated_at: datetime
+
+    @staticmethod
+    def from_dispatch(dispatch: Dispatch) -> dict:
+        """Build a dict from a Dispatch instance for the list response.
+
+        The list endpoint switched from raw queryset auto-serialization
+        to an explicit builder once we needed nested created_by — Ninja
+        can't infer a {id, username, department} dict from a Django User
+        FK on its own."""
+        return {
+            "id": dispatch.pk,
+            "wip_id": dispatch.wip_id,
+            "experiment_type_id": dispatch.experiment_type_id,
+            "equipment_id": dispatch.equipment_id,
+            "recipe_id": dispatch.recipe_id,
+            "status": dispatch.status,
+            "estimated_duration_seconds": dispatch.estimated_duration_seconds,
+            "dispatched_at": dispatch.dispatched_at,
+            "completed_at": dispatch.completed_at,
+            "created_by": _build_created_by(dispatch),
+            "created_at": dispatch.created_at,
+            "updated_at": dispatch.updated_at,
+        }

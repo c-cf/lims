@@ -36,7 +36,7 @@
           <a href="{% url 'web:wip-detail' d.wip.pk %}" class="text-blue-600 hover:text-blue-700 text-xs font-medium">WIP #{{ d.wip.pk }}</a>
         </td>
         <td class="px-4 py-3 text-slate-700">{{ d.experiment_type.name }}</td>
-        <td class="px-4 py-3 text-slate-600">{{ d.wip.equipment.name }}</td>
+        <td class="px-4 py-3 text-slate-600">{{ d.equipment.name }}</td>
         <td class="px-4 py-3">{% include "web/_status_badge.html" with status=d.status %}</td>
         <td class="px-4 py-3 text-slate-400">{{ d.created_at|date:"Y-m-d" }}</td>
         <td class="px-4 py-3">

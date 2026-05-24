@@ -28,6 +28,5 @@ class RecipeFactory(DjangoModelFactory):
     name = factory.Sequence(lambda n: f"recipe_{n}")
     description = "Test recipe description"
     parameters = {"temperature_celsius": 150, "duration_hours": 300}
-    equipment = factory.SubFactory(EquipmentFactory)
     experiment_type = factory.SubFactory(ExperimentTypeFactory)
     is_active = True

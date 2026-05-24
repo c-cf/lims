@@ -491,3 +491,182 @@ class TestExperimentTypeEdgeCases:
         )
 
         assert response.status_code == 403
+
+
+@pytest.mark.django_db
+class TestSeedExperimentTypesCommand:
+    """seed_experiment_types is idempotent — second run should be a no-op."""
+
+    def test_first_run_creates_all_seed_types(self):
+        from io import StringIO
+
+        from django.core.management import call_command
+
+        from apps.experiments.management.commands.seed_experiment_types import (
+            SEED_TYPES,
+        )
+        from apps.experiments.models import ExperimentType
+
+        out = StringIO()
+        call_command("seed_experiment_types", stdout=out)
+
+        # Every catalogue row landed.
+        assert ExperimentType.objects.count() == len(SEED_TYPES)
+        names = set(ExperimentType.objects.values_list("name", flat=True))
+        assert names == {name for name, _, _ in SEED_TYPES}
+
+    def test_rerun_is_idempotent_and_updates_in_place(self):
+        from django.core.management import call_command
+
+        from apps.experiments.models import ExperimentType
+
+        call_command("seed_experiment_types")
+        first_count = ExperimentType.objects.count()
+        first_ids = set(ExperimentType.objects.values_list("pk", flat=True))
+
+        # Mutate a description to verify update_or_create refreshes it.
+        ExperimentType.objects.filter(name="Temperature Cycling Test").update(
+            description="stale"
+        )
+
+        call_command("seed_experiment_types")
+        assert ExperimentType.objects.count() == first_count
+        # PKs preserved — update_or_create, not delete+recreate.
+        assert set(ExperimentType.objects.values_list("pk", flat=True)) == first_ids
+        # Description refreshed to seed value.
+        assert ExperimentType.objects.get(
+            name="Temperature Cycling Test"
+        ).description.startswith("JESD22-A104")
+
+
+@pytest.mark.django_db
+class TestConsolidateExperimentTypesMigration:
+    """0002_consolidate_experiment_types — collapses pre-existing
+    abbreviation-named rows into the canonical full-name set, merges
+    family-related deprecated rows (BTC → TCT family), and either
+    drops or aborts on unrecognised deprecated rows."""
+
+    def _forwards(self):
+        """Import + call the migration's forwards function with the
+        real ORM (test DB is migrated, so no historical models needed)."""
+        from importlib import import_module
+
+        from django.apps import apps as django_apps
+
+        mod = import_module(
+            "apps.experiments.migrations.0002_consolidate_experiment_types"
+        )
+        mod.forwards(django_apps, None)
+
+    def test_merges_abbreviation_into_full_name_keeping_fks(self):
+        from apps.commissions.factories import RequestFactory
+        from apps.commissions.models import RequestExperiment
+        from apps.experiments.models import ExperimentType, LabCategory
+
+        # Pre-existing duplicates: an abbreviation row + a full-name row.
+        tct_abbrev = ExperimentType.objects.create(
+            name="TCT", lab_category=LabCategory.RA
+        )
+        tct_full = ExperimentType.objects.create(
+            name="Temperature Cycling Test", lab_category=LabCategory.RA
+        )
+
+        # FKs split across both — both should end up on the full-name row.
+        req_a = RequestFactory()
+        req_b = RequestFactory()
+        RequestExperiment.objects.create(request=req_a, experiment_type=tct_abbrev)
+        RequestExperiment.objects.create(request=req_b, experiment_type=tct_full)
+
+        self._forwards()
+
+        # Abbreviation row gone; full-name row keeps the canonical name.
+        assert not ExperimentType.objects.filter(name="TCT").exists()
+        survivor = ExperimentType.objects.get(name="Temperature Cycling Test")
+        # Both RequestExperiment rows point to the survivor.
+        assert RequestExperiment.objects.filter(experiment_type=survivor).count() == 2
+
+    def test_renames_abbreviation_in_place_when_no_full_name_exists(self):
+        from apps.experiments.models import ExperimentType, LabCategory
+
+        et = ExperimentType.objects.create(name="HAST", lab_category=LabCategory.RA)
+        original_pk = et.pk
+
+        self._forwards()
+
+        # Same PK, new name. No FK churn.
+        survivor = ExperimentType.objects.get(pk=original_pk)
+        assert survivor.name == "Highly Accelerated Stress Test"
+        assert not ExperimentType.objects.filter(name="HAST").exists()
+
+    def test_drops_deprecated_without_references(self):
+        from apps.experiments.models import ExperimentType, LabCategory
+
+        ExperimentType.objects.create(name="THB", lab_category=LabCategory.RA)
+        ExperimentType.objects.create(name="FIB", lab_category=LabCategory.FA)
+
+        self._forwards()
+
+        assert not ExperimentType.objects.filter(name="THB").exists()
+        assert not ExperimentType.objects.filter(name="FIB").exists()
+
+    def test_auto_merges_family_related_deprecated_with_fks(self):
+        """BTC has an in-family merge target (Temperature Cycling Test).
+        Existing FKs migrate to the target rather than aborting."""
+        from apps.commissions.factories import RequestFactory
+        from apps.commissions.models import RequestExperiment
+        from apps.experiments.models import ExperimentType, LabCategory
+
+        btc = ExperimentType.objects.create(name="BTC", lab_category=LabCategory.RA)
+        req = RequestFactory()
+        RequestExperiment.objects.create(request=req, experiment_type=btc)
+
+        self._forwards()
+
+        assert not ExperimentType.objects.filter(name="BTC").exists()
+        survivor = ExperimentType.objects.get(name="Temperature Cycling Test")
+        assert RequestExperiment.objects.filter(
+            request=req, experiment_type=survivor
+        ).exists()
+
+    def test_aborts_on_unmergeable_deprecated_with_references(self):
+        """FIB / XRD have no in-family canonical target. If they still
+        have FK refs at migration time, the migration aborts with an
+        informative message rather than silently dropping data."""
+        from apps.commissions.factories import RequestFactory
+        from apps.commissions.models import RequestExperiment
+        from apps.experiments.models import ExperimentType, LabCategory
+
+        fib = ExperimentType.objects.create(name="FIB", lab_category=LabCategory.FA)
+        req = RequestFactory()
+        RequestExperiment.objects.create(request=req, experiment_type=fib)
+
+        with pytest.raises(RuntimeError, match="FIB"):
+            self._forwards()
+
+        # Nothing dropped on abort.
+        assert ExperimentType.objects.filter(name="FIB").exists()
+
+
+@pytest.mark.django_db
+class TestSeedExperimentTypesUsesFullNames:
+    """After the consolidation, seed_experiment_types only lists the 7
+    canonical full names."""
+
+    EXPECTED_NAMES = {
+        "Temperature Cycling Test",
+        "Highly Accelerated Stress Test",
+        "High Temperature Operating Life",
+        "Circuit Probe",
+        "Final Test",
+        "Scanning Electron Microscopy",
+        "Energy Dispersive X-ray Spectroscopy",
+    }
+
+    def test_seed_creates_exactly_the_canonical_set(self):
+        from django.core.management import call_command
+
+        from apps.experiments.models import ExperimentType
+
+        call_command("seed_experiment_types")
+        names = set(ExperimentType.objects.values_list("name", flat=True))
+        assert names == self.EXPECTED_NAMES

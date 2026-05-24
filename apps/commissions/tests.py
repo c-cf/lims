@@ -71,6 +71,35 @@ class TestRequest:
 
         assert Request._meta.db_table == "request"
 
+    def test_request_urgency_default_one_week(self, user):
+        """urgency defaults to '1w'."""
+        from apps.commissions.models import Request, RequestUrgency
+
+        req = Request.objects.create(title="緊急度預設", requester=user)
+        assert req.urgency == RequestUrgency.ONE_WEEK
+        assert req.urgency == "1w"
+
+    def test_request_urgency_choices(self, user):
+        """Request accepts '3d', '1w', '2w' as urgency values."""
+        from apps.commissions.models import Request, RequestUrgency
+
+        assert RequestUrgency.THREE_DAYS == "3d"
+        assert RequestUrgency.ONE_WEEK == "1w"
+        assert RequestUrgency.TWO_WEEKS == "2w"
+
+        req = Request.objects.create(
+            title="緊急委託", requester=user, urgency=RequestUrgency.THREE_DAYS
+        )
+        assert req.urgency == "3d"
+
+    def test_request_factory_default_urgency(self):
+        """RequestFactory creates instances with the default urgency."""
+        from apps.commissions.factories import RequestFactory
+        from apps.commissions.models import RequestUrgency
+
+        req = RequestFactory()
+        assert req.urgency == RequestUrgency.ONE_WEEK
+
 
 @pytest.mark.django_db
 class TestSample:
@@ -139,6 +168,16 @@ class TestSample:
 
         assert sample.status == SampleStatus.LOST
         assert SampleStatus.LOST.value == "lost"
+
+    def test_sample_received_at_defaults_to_none(self, user):
+        """received_at is null until the sample is explicitly received."""
+        from apps.commissions.models import Request, Sample, WaferSize
+
+        req = Request.objects.create(title="received_at 預設", requester=user)
+        sample = Sample.objects.create(
+            request=req, wafer_id="WF-RX-001", wafer_size=WaferSize.SIZE_300MM
+        )
+        assert sample.received_at is None
 
     def test_sample_status_choices_count(self):
         """SampleStatus has exactly 10 states."""

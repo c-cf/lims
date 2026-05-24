@@ -60,9 +60,9 @@ class TestEquipmentUtilization:
     def test_lab_manager_can_access(self, client, auth_headers, lab_manager):
         """Lab manager can access the endpoint and get valid utilization data."""
         equipment = EquipmentFactory()
-        wip = WIPFactory(equipment=equipment)
-        DispatchFactory(wip=wip, status=DispatchStatus.COMPLETED)
-        DispatchFactory(wip=wip, status=DispatchStatus.COMPLETED)
+        wip = WIPFactory()
+        DispatchFactory(wip=wip, equipment=equipment, status=DispatchStatus.COMPLETED)
+        DispatchFactory(wip=wip, equipment=equipment, status=DispatchStatus.COMPLETED)
 
         params = "?period=week&start_date=2000-01-01&end_date=2099-12-31"
         resp = client.get(
@@ -108,10 +108,14 @@ class TestEquipmentUtilization:
         equipment_a = EquipmentFactory()
         equipment_b = EquipmentFactory()
 
-        wip_a = WIPFactory(equipment=equipment_a)
-        wip_b = WIPFactory(equipment=equipment_b)
-        DispatchFactory(wip=wip_a, status=DispatchStatus.COMPLETED)
-        DispatchFactory(wip=wip_b, status=DispatchStatus.COMPLETED)
+        wip_a = WIPFactory()
+        wip_b = WIPFactory()
+        DispatchFactory(
+            wip=wip_a, equipment=equipment_a, status=DispatchStatus.COMPLETED
+        )
+        DispatchFactory(
+            wip=wip_b, equipment=equipment_b, status=DispatchStatus.COMPLETED
+        )
 
         params = (
             f"?period=month&start_date=2000-01-01&end_date=2099-12-31"
@@ -143,13 +147,13 @@ class TestEquipmentUtilization:
     def test_sample_count_counts_distinct_wips(self, client, auth_headers, lab_manager):
         """sample_count reflects the number of distinct WIPs (each WIP = 1 sample)."""
         equipment = EquipmentFactory()
-        wip_a = WIPFactory(equipment=equipment)
-        wip_b = WIPFactory(equipment=equipment)
+        wip_a = WIPFactory()
+        wip_b = WIPFactory()
         # Two dispatches on the same WIP — should count as 1 unique WIP/sample
-        DispatchFactory(wip=wip_a, status=DispatchStatus.COMPLETED)
-        DispatchFactory(wip=wip_a, status=DispatchStatus.COMPLETED)
+        DispatchFactory(wip=wip_a, equipment=equipment, status=DispatchStatus.COMPLETED)
+        DispatchFactory(wip=wip_a, equipment=equipment, status=DispatchStatus.COMPLETED)
         # One dispatch on a different WIP
-        DispatchFactory(wip=wip_b, status=DispatchStatus.COMPLETED)
+        DispatchFactory(wip=wip_b, equipment=equipment, status=DispatchStatus.COMPLETED)
 
         params = "?period=week&start_date=2000-01-01&end_date=2099-12-31"
         resp = client.get(
@@ -289,4 +293,84 @@ class TestRequestStatistics:
         """Unauthenticated request returns 401."""
         params = "?start_date=2026-01-01&end_date=2026-01-31"
         resp = client.get(self.URL + params)
+        assert resp.status_code == 401
+
+
+# =============================================================================
+# Trends tests
+# =============================================================================
+
+
+@pytest.mark.django_db
+class TestTrends:
+    """Tests for GET /api/reports/trends — INTEGRATION_GAPS §4."""
+
+    URL = "/api/reports/trends"
+
+    def test_requests_per_day_counts_today(self, client, auth_headers, lab_manager):
+        """A request created today shows up in today's bucket."""
+        RequestFactory()
+        RequestFactory()
+
+        resp = client.get(
+            self.URL + "?metric=requests_per_day&days=7",
+            **auth_headers(lab_manager),
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["metric"] == "requests_per_day"
+        assert data["days"] == 7
+        assert len(data["points"]) == 7
+
+        from datetime import date
+
+        today_iso = date.today().isoformat()
+        today_point = next(p for p in data["points"] if p["date"] == today_iso)
+        assert today_point["count"] == 2
+
+    def test_zero_filled_for_days_with_no_data(self, client, auth_headers, lab_manager):
+        """Days without any request return count=0 (not omitted), so the
+        SPA can plot a continuous series without client-side gap filling."""
+        resp = client.get(
+            self.URL + "?metric=requests_per_day&days=5",
+            **auth_headers(lab_manager),
+        )
+        assert resp.status_code == 200
+        points = resp.json()["points"]
+        assert len(points) == 5
+        assert all(p["count"] == 0 for p in points)
+        # Dates returned in ascending order, ending today.
+        from datetime import date
+
+        assert points[-1]["date"] == date.today().isoformat()
+
+    def test_defaults_to_30_days(self, client, auth_headers, lab_manager):
+        """Omitting the days param defaults to 30."""
+        resp = client.get(
+            self.URL + "?metric=requests_per_day",
+            **auth_headers(lab_manager),
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["days"] == 30
+        assert len(data["points"]) == 30
+
+    def test_unknown_metric_returns_400(self, client, auth_headers, lab_manager):
+        resp = client.get(self.URL + "?metric=bogus", **auth_headers(lab_manager))
+        assert resp.status_code == 400
+
+    def test_lab_staff_forbidden(self, client, auth_headers, lab_staff):
+        resp = client.get(
+            self.URL + "?metric=requests_per_day", **auth_headers(lab_staff)
+        )
+        assert resp.status_code == 403
+
+    def test_fab_user_forbidden(self, client, auth_headers, fab_user):
+        resp = client.get(
+            self.URL + "?metric=requests_per_day", **auth_headers(fab_user)
+        )
+        assert resp.status_code == 403
+
+    def test_unauthenticated_returns_401(self, client):
+        resp = client.get(self.URL + "?metric=requests_per_day")
         assert resp.status_code == 401

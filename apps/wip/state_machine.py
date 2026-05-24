@@ -30,8 +30,13 @@ DISPATCH_TRANSITIONS: dict[str, set[str]] = {
     "dispatch": {DispatchStatus.PENDING},
     "start": {DispatchStatus.DISPATCHED},
     "unload": {DispatchStatus.DISPATCHED, DispatchStatus.RUNNING},
+    # record_result is the terminal step for a successful dispatch —
+    # it lands straight in COMPLETED. The intermediate RESULT_RECORDED
+    # status (and its "complete" action) was removed because operators
+    # treat result entry as the end of the run. The enum value
+    # DispatchStatus.RESULT_RECORDED is preserved to keep historical
+    # rows / migrations untouched.
     "record_result": {DispatchStatus.UNLOADED},
-    "complete": {DispatchStatus.RESULT_RECORDED},
     "report_exception": {DispatchStatus.DISPATCHED, DispatchStatus.RUNNING},
     "redispatch": {DispatchStatus.EXECUTION_EXCEPTION},
     "abort": {DispatchStatus.EXECUTION_EXCEPTION, DispatchStatus.PENDING},
@@ -41,8 +46,7 @@ DISPATCH_TARGET: dict[str, str] = {
     "dispatch": DispatchStatus.DISPATCHED,
     "start": DispatchStatus.RUNNING,
     "unload": DispatchStatus.UNLOADED,
-    "record_result": DispatchStatus.RESULT_RECORDED,
-    "complete": DispatchStatus.COMPLETED,
+    "record_result": DispatchStatus.COMPLETED,
     "report_exception": DispatchStatus.EXECUTION_EXCEPTION,
     "redispatch": DispatchStatus.PENDING_REDISPATCH,
     "abort": DispatchStatus.ABORTED,

@@ -104,6 +104,42 @@ class TestRequestList:
         resp = client.get("/api/requests/")
         assert resp.status_code == 401
 
+    def test_list_requests_includes_urgency(self, client, auth_headers, lab_staff):
+        """List response exposes the urgency field."""
+        RequestFactory(urgency="3d")
+
+        resp = client.get("/api/requests/", **auth_headers(lab_staff))
+        assert resp.status_code == 200
+        data = resp.json()
+        assert len(data) == 1
+        assert data[0]["urgency"] == "3d"
+
+    def test_list_requests_filter_by_urgency(self, client, auth_headers, lab_staff):
+        """Can filter requests by urgency."""
+        RequestFactory(urgency="3d")
+        RequestFactory(urgency="1w")
+        RequestFactory(urgency="2w")
+
+        resp = client.get("/api/requests/?urgency=3d", **auth_headers(lab_staff))
+        assert resp.status_code == 200
+        data = resp.json()
+        assert len(data) == 1
+        assert data[0]["urgency"] == "3d"
+
+    def test_list_requests_includes_sample_count(self, client, auth_headers, lab_staff):
+        """Each list row exposes sample_count so the SPA's Fab Dashboard
+        can render the wafers-per-row count without a second round-trip."""
+        req_with = RequestFactory()
+        SampleFactory(request=req_with)
+        SampleFactory(request=req_with)
+        req_empty = RequestFactory()
+
+        resp = client.get("/api/requests/", **auth_headers(lab_staff))
+        assert resp.status_code == 200
+        rows = {row["id"]: row for row in resp.json()}
+        assert rows[req_with.pk]["sample_count"] == 2
+        assert rows[req_empty.pk]["sample_count"] == 0
+
 
 @pytest.mark.django_db
 class TestRequestCreate:
@@ -193,6 +229,47 @@ class TestRequestCreate:
         )
         assert resp.status_code == 422
 
+    def test_create_request_round_trips_urgency(
+        self, client, auth_headers, fab_user, experiment_type
+    ):
+        """Urgency provided on create is persisted and returned in detail response."""
+        payload = {
+            "title": "Urgent",
+            "urgency": "3d",
+            "experiment_type_ids": [experiment_type.pk],
+            "samples": [{"wafer_id": "WF-001", "wafer_size": "300mm"}],
+        }
+        resp = client.post(
+            "/api/requests/",
+            data=payload,
+            content_type="application/json",
+            **auth_headers(fab_user),
+        )
+        assert resp.status_code == 201
+        data = resp.json()
+        assert data["urgency"] == "3d"
+
+        req = Request.objects.get(pk=data["id"])
+        assert req.urgency == "3d"
+
+    def test_create_request_defaults_urgency_to_one_week(
+        self, client, auth_headers, fab_user, experiment_type
+    ):
+        """Urgency omitted on create defaults to '1w'."""
+        payload = {
+            "title": "Default urgency",
+            "experiment_type_ids": [experiment_type.pk],
+            "samples": [{"wafer_id": "WF-001", "wafer_size": "300mm"}],
+        }
+        resp = client.post(
+            "/api/requests/",
+            data=payload,
+            content_type="application/json",
+            **auth_headers(fab_user),
+        )
+        assert resp.status_code == 201
+        assert resp.json()["urgency"] == "1w"
+
 
 @pytest.mark.django_db
 class TestRequestDetail:
@@ -225,6 +302,13 @@ class TestRequestDetail:
         other_req = RequestFactory()  # different user
         resp = client.get(f"/api/requests/{other_req.pk}", **auth_headers(fab_user))
         assert resp.status_code == 404
+
+    def test_request_detail_includes_urgency(self, client, auth_headers, fab_user):
+        """Detail response exposes the urgency field."""
+        req = RequestFactory(requester=fab_user, urgency="2w")
+        resp = client.get(f"/api/requests/{req.pk}", **auth_headers(fab_user))
+        assert resp.status_code == 200
+        assert resp.json()["urgency"] == "2w"
 
 
 @pytest.mark.django_db
@@ -265,6 +349,186 @@ class TestRequestUpdate:
             **auth_headers(fab_user),
         )
         assert resp.status_code == 400
+
+    def test_update_urgency(self, client, auth_headers, fab_user):
+        """Fab user can patch urgency on a draft request."""
+        req = RequestFactory(
+            requester=fab_user, status=RequestStatus.DRAFT, urgency="1w"
+        )
+        resp = client.patch(
+            f"/api/requests/{req.pk}",
+            data={"urgency": "3d"},
+            content_type="application/json",
+            **auth_headers(fab_user),
+        )
+        assert resp.status_code == 200
+        assert resp.json()["urgency"] == "3d"
+        req.refresh_from_db()
+        assert req.urgency == "3d"
+
+    # ------------------------------------------------------------------
+    # INTEGRATION_GAPS §2.9 — PATCH samples + experiment_type_ids on
+    # draft requests. Draft is the only state where samples can change;
+    # other states (RETURNED, PENDING_APPROVAL, …) must 422.
+    # ------------------------------------------------------------------
+
+    def test_update_returned_request_with_samples_rejected(
+        self, client, auth_headers, fab_user, experiment_type
+    ):
+        """RETURNED is editable for title/note/urgency but NOT for samples —
+        once a request has been seen by a reviewer, the sample list is
+        locked. 422 with a clear detail string."""
+        req = RequestFactory(requester=fab_user, status=RequestStatus.RETURNED)
+        SampleFactory(request=req, wafer_id="WF-OLD")
+        before_ids = list(req.samples.values_list("pk", flat=True))
+
+        resp = client.patch(
+            f"/api/requests/{req.pk}",
+            data={
+                "samples": [{"wafer_id": "WF-NEW", "wafer_size": "300mm"}],
+            },
+            content_type="application/json",
+            **auth_headers(fab_user),
+        )
+        assert resp.status_code == 422
+        assert "draft" in resp.json()["detail"].lower()
+        # Samples untouched.
+        assert list(req.samples.values_list("pk", flat=True)) == before_ids
+
+    def test_update_draft_request_samples_replaces_set(
+        self, client, auth_headers, fab_user
+    ):
+        """Draft PATCH samples wipes the existing set and rebuilds from
+        payload (full replacement, not partial)."""
+        req = RequestFactory(requester=fab_user, status=RequestStatus.DRAFT)
+        SampleFactory(request=req, wafer_id="WF-A")
+        SampleFactory(request=req, wafer_id="WF-B")
+        assert req.samples.count() == 2
+
+        resp = client.patch(
+            f"/api/requests/{req.pk}",
+            data={
+                "samples": [
+                    {"wafer_id": "WF-NEW-1", "wafer_size": "300mm"},
+                    {"wafer_id": "WF-NEW-2", "wafer_size": "200mm"},
+                    {"wafer_id": "WF-NEW-3", "wafer_size": "300mm"},
+                ],
+            },
+            content_type="application/json",
+            **auth_headers(fab_user),
+        )
+        assert resp.status_code == 200, resp.json()
+        req.refresh_from_db()
+        wafer_ids = sorted(req.samples.values_list("wafer_id", flat=True))
+        assert wafer_ids == ["WF-NEW-1", "WF-NEW-2", "WF-NEW-3"]
+        # Old samples are gone, not co-existing.
+        assert not req.samples.filter(wafer_id__in=["WF-A", "WF-B"]).exists()
+
+    def test_update_draft_request_experiment_type_ids_replaces_set(
+        self, client, auth_headers, fab_user, experiment_type
+    ):
+        """Draft PATCH experiment_type_ids resets the RequestExperiment
+        through-table."""
+        from apps.experiments.factories import ExperimentTypeFactory
+
+        req = RequestFactory(requester=fab_user, status=RequestStatus.DRAFT)
+        # Start with experiment_type already attached.
+        RequestExperiment.objects.create(request=req, experiment_type=experiment_type)
+        new_et_a = ExperimentTypeFactory(name="ET-NEW-A")
+        new_et_b = ExperimentTypeFactory(name="ET-NEW-B")
+
+        resp = client.patch(
+            f"/api/requests/{req.pk}",
+            data={"experiment_type_ids": [new_et_a.pk, new_et_b.pk]},
+            content_type="application/json",
+            **auth_headers(fab_user),
+        )
+        assert resp.status_code == 200, resp.json()
+        attached_ids = sorted(
+            req.request_experiments.values_list("experiment_type_id", flat=True)
+        )
+        assert attached_ids == sorted([new_et_a.pk, new_et_b.pk])
+        # Original experiment_type is gone.
+        assert experiment_type.pk not in attached_ids
+
+    def test_update_draft_combined_patch_applies_all(
+        self, client, auth_headers, fab_user
+    ):
+        """Title + samples + experiment_type_ids in one PATCH all land
+        atomically."""
+        from apps.experiments.factories import ExperimentTypeFactory
+
+        req = RequestFactory(
+            requester=fab_user, status=RequestStatus.DRAFT, title="Original"
+        )
+        SampleFactory(request=req, wafer_id="WF-OLD")
+        new_et = ExperimentTypeFactory(name="ET-COMBO")
+
+        resp = client.patch(
+            f"/api/requests/{req.pk}",
+            data={
+                "title": "Combined Update",
+                "samples": [{"wafer_id": "WF-COMBO", "wafer_size": "300mm"}],
+                "experiment_type_ids": [new_et.pk],
+            },
+            content_type="application/json",
+            **auth_headers(fab_user),
+        )
+        assert resp.status_code == 200, resp.json()
+        req.refresh_from_db()
+        assert req.title == "Combined Update"
+        assert list(req.samples.values_list("wafer_id", flat=True)) == ["WF-COMBO"]
+        assert list(
+            req.request_experiments.values_list("experiment_type_id", flat=True)
+        ) == [new_et.pk]
+
+    def test_update_draft_samples_empty_list_rejected(
+        self, client, auth_headers, fab_user
+    ):
+        """Empty samples list violates the business rule (every request
+        needs at least one sample, same as on create)."""
+        req = RequestFactory(requester=fab_user, status=RequestStatus.DRAFT)
+        SampleFactory(request=req, wafer_id="WF-EXISTING")
+
+        resp = client.patch(
+            f"/api/requests/{req.pk}",
+            data={"samples": []},
+            content_type="application/json",
+            **auth_headers(fab_user),
+        )
+        assert resp.status_code == 422
+        req.refresh_from_db()
+        # Original sample untouched (atomic).
+        assert req.samples.count() == 1
+
+    def test_update_draft_invalid_experiment_type_rolls_back(
+        self, client, auth_headers, fab_user, experiment_type
+    ):
+        """An invalid experiment_type_id in a combined PATCH must roll
+        back EVERY change — no partial application."""
+        req = RequestFactory(
+            requester=fab_user, status=RequestStatus.DRAFT, title="Untouched"
+        )
+        SampleFactory(request=req, wafer_id="WF-ORIG")
+        RequestExperiment.objects.create(request=req, experiment_type=experiment_type)
+
+        resp = client.patch(
+            f"/api/requests/{req.pk}",
+            data={
+                "title": "Should Not Land",
+                "samples": [{"wafer_id": "WF-SHOULD-NOT-LAND", "wafer_size": "300mm"}],
+                "experiment_type_ids": [experiment_type.pk, 99999],
+            },
+            content_type="application/json",
+            **auth_headers(fab_user),
+        )
+        assert resp.status_code == 422
+        req.refresh_from_db()
+        assert req.title == "Untouched"
+        assert list(req.samples.values_list("wafer_id", flat=True)) == ["WF-ORIG"]
+        assert list(
+            req.request_experiments.values_list("experiment_type_id", flat=True)
+        ) == [experiment_type.pk]
 
 
 @pytest.mark.django_db
@@ -605,6 +869,176 @@ class TestSampleList:
         assert len(data) == 1
         assert data[0]["status"] == "shipped"
 
+    def test_list_samples_exposes_has_wip(self, client, auth_headers, lab_staff):
+        """has_wip is True iff the sample is in at least one non-terminal
+        WIP (CREATED or IN_PROGRESS); terminal WIPs (COMPLETED, ABORTED)
+        don't count. Lets the SPA's Lab Samples page derive the in_wip
+        pill without a second round-trip."""
+        from apps.experiments.factories import ExperimentTypeFactory
+        from apps.wip.factories import WIPFactory
+        from apps.wip.models import WIPSample, WIPStatus
+
+        req = RequestFactory()
+        et = ExperimentTypeFactory()
+        s_active = SampleFactory(request=req, wafer_id="WF-ACTIVE")
+        s_terminal = SampleFactory(request=req, wafer_id="WF-DONE")
+        s_idle = SampleFactory(request=req, wafer_id="WF-IDLE")
+
+        WIPSample.objects.create(
+            wip=WIPFactory(experiment_type=et, status=WIPStatus.IN_PROGRESS),
+            sample=s_active,
+        )
+        WIPSample.objects.create(
+            wip=WIPFactory(experiment_type=et, status=WIPStatus.COMPLETED),
+            sample=s_terminal,
+        )
+
+        resp = client.get("/api/samples/", **auth_headers(lab_staff))
+        assert resp.status_code == 200
+        by_id = {row["id"]: row for row in resp.json()}
+        assert by_id[s_active.pk]["has_wip"] is True
+        assert by_id[s_terminal.pk]["has_wip"] is False
+        assert by_id[s_idle.pk]["has_wip"] is False
+
+
+@pytest.mark.django_db
+class TestSampleExperimentsRollup:
+    """GET /samples/:id/experiments — INTEGRATION_GAPS §2.8 resolution A."""
+
+    URL_TEMPLATE = "/api/samples/{}/experiments"
+
+    def _setup_sample_with_experiments(self):
+        """Build a sample whose request requires three experiment types
+        and return (sample, et_pending, et_in_progress, et_done, equipment,
+        recipe_factory_args). Each test wires its own dispatch state."""
+        from apps.equipment.factories import EquipmentFactory, RecipeFactory
+        from apps.equipment.models import EquipmentCapability
+        from apps.experiments.factories import ExperimentTypeFactory
+        from apps.wip.factories import WIPFactory
+        from apps.wip.models import WIPSample, WIPStatus
+
+        et_pending = ExperimentTypeFactory(name="ET-PENDING")
+        et_in_progress = ExperimentTypeFactory(name="ET-IN-PROGRESS")
+        et_done = ExperimentTypeFactory(name="ET-DONE")
+
+        req = RequestFactory(status=RequestStatus.IN_PROGRESS)
+        for et in (et_pending, et_in_progress, et_done):
+            RequestExperiment.objects.create(request=req, experiment_type=et)
+        sample = SampleFactory(request=req, status=SampleStatus.PROCESSING)
+
+        equipment = EquipmentFactory()
+        for et in (et_pending, et_in_progress, et_done):
+            EquipmentCapability.objects.create(equipment=equipment, experiment_type=et)
+
+        # Build a WIP for the in-progress experiment.
+        wip_in_progress = WIPFactory(
+            experiment_type=et_in_progress, status=WIPStatus.IN_PROGRESS
+        )
+        WIPSample.objects.create(wip=wip_in_progress, sample=sample)
+
+        # And another WIP for the done experiment.
+        wip_done = WIPFactory(experiment_type=et_done, status=WIPStatus.IN_PROGRESS)
+        WIPSample.objects.create(wip=wip_done, sample=sample)
+
+        recipes = {
+            "in_progress": RecipeFactory(experiment_type=et_in_progress),
+            "done": RecipeFactory(experiment_type=et_done),
+        }
+
+        return {
+            "sample": sample,
+            "et_pending": et_pending,
+            "et_in_progress": et_in_progress,
+            "et_done": et_done,
+            "equipment": equipment,
+            "wip_in_progress": wip_in_progress,
+            "wip_done": wip_done,
+            "recipes": recipes,
+        }
+
+    def test_pending_in_progress_done(self, client, auth_headers, lab_staff):
+        """One sample exercises all three states in a single response.
+
+        Verdict now lives top-level per-(sample, experiment_type) on the
+        rollup row (was nested in result.verdict before — the result
+        block now only carries the operator comment).
+        """
+        from apps.wip.factories import DispatchFactory, ExperimentResultFactory
+        from apps.wip.models import (
+            DispatchStatus,
+            SampleExperimentStatus,
+            SampleExperimentVerdict,
+        )
+
+        ctx = self._setup_sample_with_experiments()
+        sample = ctx["sample"]
+
+        # in-progress: dispatch in RUNNING
+        DispatchFactory(
+            wip=ctx["wip_in_progress"],
+            experiment_type=ctx["et_in_progress"],
+            equipment=ctx["equipment"],
+            recipe=ctx["recipes"]["in_progress"],
+            status=DispatchStatus.RUNNING,
+        )
+        # done: dispatch COMPLETED with a result + per-wafer verdict.
+        done_dispatch = DispatchFactory(
+            wip=ctx["wip_done"],
+            experiment_type=ctx["et_done"],
+            equipment=ctx["equipment"],
+            recipe=ctx["recipes"]["done"],
+            status=DispatchStatus.COMPLETED,
+        )
+        ExperimentResultFactory(dispatch=done_dispatch, comment="OK")
+        SampleExperimentStatus.objects.create(
+            sample=sample,
+            experiment_type=ctx["et_done"],
+            verdict=SampleExperimentVerdict.PASS,
+            dispatch=done_dispatch,
+        )
+
+        resp = client.get(
+            self.URL_TEMPLATE.format(sample.pk), **auth_headers(lab_staff)
+        )
+        assert resp.status_code == 200
+        rows = {row["experiment_type"]["name"]: row for row in resp.json()}
+
+        assert rows["ET-PENDING"]["status"] == "pending"
+        assert rows["ET-PENDING"]["verdict"] is None
+        assert rows["ET-PENDING"]["dispatch_id"] is None
+        assert rows["ET-PENDING"]["result"] is None
+
+        assert rows["ET-IN-PROGRESS"]["status"] == "in_progress"
+        assert rows["ET-IN-PROGRESS"]["verdict"] is None
+        assert rows["ET-IN-PROGRESS"]["dispatch_id"] is not None
+        assert rows["ET-IN-PROGRESS"]["result"] is None
+
+        assert rows["ET-DONE"]["status"] == "done"
+        assert rows["ET-DONE"]["verdict"] == "pass"
+        assert rows["ET-DONE"]["dispatch_id"] == done_dispatch.pk
+        assert rows["ET-DONE"]["result"]["comment"] == "OK"
+
+    def test_not_found(self, client, auth_headers, lab_staff):
+        resp = client.get(self.URL_TEMPLATE.format(99999), **auth_headers(lab_staff))
+        assert resp.status_code == 404
+
+    def test_fab_user_cannot_see_other_users_sample(
+        self, client, auth_headers, fab_user
+    ):
+        """Fab user only sees their own request's samples."""
+        from apps.experiments.factories import ExperimentTypeFactory
+
+        other_req = RequestFactory()  # not fab_user
+        RequestExperiment.objects.create(
+            request=other_req, experiment_type=ExperimentTypeFactory()
+        )
+        other_sample = SampleFactory(request=other_req)
+
+        resp = client.get(
+            self.URL_TEMPLATE.format(other_sample.pk), **auth_headers(fab_user)
+        )
+        assert resp.status_code == 404
+
 
 @pytest.mark.django_db
 class TestSampleDetail:
@@ -699,6 +1133,70 @@ class TestSampleReceive:
 
         req.refresh_from_db()
         assert req.status == RequestStatus.SAMPLE_SHIPPED
+
+    def test_receive_stamps_received_at(self, client, auth_headers, lab_staff):
+        """Receiving a sample sets received_at to the current time and the
+        list/detail responses expose it."""
+        from django.utils import timezone
+
+        sample = SampleFactory(status=SampleStatus.SHIPPED)
+        assert sample.received_at is None
+
+        before = timezone.now()
+        resp = client.post(
+            f"/api/samples/{sample.pk}/receive",
+            content_type="application/json",
+            **auth_headers(lab_staff),
+        )
+        after = timezone.now()
+        assert resp.status_code == 200
+
+        sample.refresh_from_db()
+        assert sample.received_at is not None
+        assert before <= sample.received_at <= after
+
+        # Detail response exposes received_at.
+        assert resp.json()["received_at"] is not None
+
+        # List response also exposes it.
+        list_resp = client.get(
+            "/api/samples/",
+            **auth_headers(lab_staff),
+        )
+        assert list_resp.status_code == 200
+        rows = {row["id"]: row for row in list_resp.json()}
+        assert rows[sample.pk]["received_at"] is not None
+
+    def test_received_at_not_overwritten_by_later_transition(
+        self, client, auth_headers, lab_staff
+    ):
+        """Transitioning past 'received' (e.g. to voided) must preserve the
+        original received_at — it's a once-stamped clock, not a status timer."""
+        sample = SampleFactory(status=SampleStatus.SHIPPED)
+
+        # First, receive the sample.
+        client.post(
+            f"/api/samples/{sample.pk}/receive",
+            content_type="application/json",
+            **auth_headers(lab_staff),
+        )
+        sample.refresh_from_db()
+        original_received_at = sample.received_at
+        assert original_received_at is not None
+
+        # State machine: received -> split -> processing_exception -> voided.
+        sample.status = SampleStatus.PROCESSING_EXCEPTION
+        sample.save(update_fields=["status"])
+
+        resp = client.post(
+            f"/api/samples/{sample.pk}/void",
+            content_type="application/json",
+            **auth_headers(lab_staff),
+        )
+        assert resp.status_code == 200
+
+        sample.refresh_from_db()
+        assert sample.received_at == original_received_at
 
 
 @pytest.mark.django_db

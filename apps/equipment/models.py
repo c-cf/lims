@@ -24,6 +24,7 @@ class Equipment(models.Model):
         through="EquipmentCapability",
         related_name="equipments",
     )
+    parameters = models.JSONField(default=dict, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -51,14 +52,15 @@ class EquipmentCapability(models.Model):
 
 
 class Recipe(models.Model):
-    """Experiment procedure and parameter template for a specific equipment and experiment type."""
+    """Experiment procedure and parameter template for an experiment type.
+
+    Chat-design: recipes are equipment-agnostic — equipment is chosen
+    per-dispatch (see wip.Dispatch.equipment).
+    """
 
     name = models.CharField(max_length=200)
     description = models.TextField(blank=True)
     parameters = models.JSONField(default=dict)
-    equipment = models.ForeignKey(
-        Equipment, on_delete=models.CASCADE, related_name="recipes"
-    )
     experiment_type = models.ForeignKey(
         "experiments.ExperimentType",
         on_delete=models.CASCADE,

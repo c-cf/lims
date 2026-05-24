@@ -24,7 +24,7 @@ class WIPFactory(DjangoModelFactory):
     class Meta:
         model = WIP
 
-    equipment = factory.SubFactory(EquipmentFactory)
+    experiment_type = factory.SubFactory(ExperimentTypeFactory)
     status = WIPStatus.CREATED
     note = ""
     created_by = factory.SubFactory(UserFactory)
@@ -56,6 +56,7 @@ class DispatchFactory(DjangoModelFactory):
 
     wip = factory.SubFactory(WIPFactory)
     experiment_type = factory.SubFactory(ExperimentTypeFactory)
+    equipment = factory.SubFactory(EquipmentFactory)
     recipe = factory.SubFactory(RecipeFactory)
     status = DispatchStatus.PENDING
     note = ""
@@ -69,10 +70,7 @@ class ExperimentResultFactory(DjangoModelFactory):
         model = ExperimentResult
 
     dispatch = factory.SubFactory(DispatchFactory)
-    summary = factory.Sequence(lambda n: f"Test result {n}")
-    verdict = ExperimentResult.Verdict.PASS
-    data = factory.LazyFunction(dict)
-    data_source = ExperimentResult.DataSource.MANUAL
+    comment = factory.Sequence(lambda n: f"Test result {n}")
 
 
 class SampleExperimentStatusFactory(DjangoModelFactory):

@@ -51,6 +51,18 @@ if RAILWAY_PUBLIC_DOMAIN:
 if RAILWAY_STATIC_URL:
     CSRF_TRUSTED_ORIGINS.append(f"https://{RAILWAY_STATIC_URL}")
 
+# CORS — DEBUG-only allowlist for the standalone SPA served from a
+# separate dev port. Production runs the SPA same-origin via whitenoise,
+# so no CORS allowlist is needed there. CLAUDE.local.md hard rule:
+# do not enable CORS in production from this branch.
+if DEBUG:
+    CORS_ALLOWED_ORIGINS = [
+        "http://localhost:8080",
+        "http://127.0.0.1:8080",
+    ]
+else:
+    CORS_ALLOWED_ORIGINS = []
+
 
 # Application definition
 
@@ -64,6 +76,7 @@ INSTALLED_APPS = [
     "django.contrib.staticfiles",
     # Third-party
     "ninja",
+    "corsheaders",
     # Local apps
     "apps.accounts",
     "apps.experiments",
@@ -80,6 +93,10 @@ MIDDLEWARE = [
     "django.middleware.security.SecurityMiddleware",
     "whitenoise.middleware.WhiteNoiseMiddleware",
     "django.contrib.sessions.middleware.SessionMiddleware",
+    # corsheaders must precede CommonMiddleware (and run as early as
+    # possible) so it can attach Access-Control-* headers and respond
+    # to OPTIONS preflights before any view runs.
+    "corsheaders.middleware.CorsMiddleware",
     "django.middleware.common.CommonMiddleware",
     "config.middleware.CsrfExemptApiMiddleware",
     "django.contrib.auth.middleware.AuthenticationMiddleware",

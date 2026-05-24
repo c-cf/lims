@@ -57,6 +57,9 @@ from apps.wip.models import (
     WIPSample,
     WIPStatus,
 )
+from apps.wip.state_machine import (
+    InvalidTransitionError as WIPInvalidTransitionError,
+)
 from apps.wip.state_machine import validate_dispatch_transition, validate_wip_transition
 
 from .decorators import role_required
@@ -468,7 +471,7 @@ def dashboard_chart_capacity(request: HttpRequest) -> HttpResponse:
             dispatched_at__date__lte=end,
         )
         .values("dispatched_at__date")
-        .annotate(active=Count("wip__equipment_id", distinct=True))
+        .annotate(active=Count("equipment_id", distinct=True))
         .order_by("dispatched_at__date")
     )
     utilization_map = {
@@ -932,7 +935,7 @@ def sample_return(request: HttpRequest, sample_id: int) -> HttpResponse:
 def wips_list(request: HttpRequest) -> HttpResponse:
     status_filter = request.GET.get("status", "")
     qs = (
-        WIP.objects.select_related("equipment")
+        WIP.objects.select_related("experiment_type")
         .prefetch_related("samples")
         .order_by("-created_at")
     )
@@ -943,9 +946,7 @@ def wips_list(request: HttpRequest) -> HttpResponse:
         status__in=[SampleStatus.RECEIVED, SampleStatus.PROCESSING],
         request__status=RequestStatus.IN_PROGRESS,
     ).select_related("request")
-    equipment_list = Equipment.objects.filter(
-        status=EquipmentStatus.AVAILABLE
-    ).order_by("name")
+    experiment_types = ExperimentType.objects.filter(is_active=True).order_by("name")
     return render(
         request,
         "web/wips/list.html",
@@ -955,7 +956,7 @@ def wips_list(request: HttpRequest) -> HttpResponse:
             "status_choices": WIPStatus.choices,
             "current_status": status_filter,
             "available_samples": available_samples,
-            "equipment_list": equipment_list,
+            "experiment_types": experiment_types,
         },
     )
 
@@ -964,18 +965,15 @@ def wips_list(request: HttpRequest) -> HttpResponse:
 @require_POST
 def wip_create(request: HttpRequest) -> HttpResponse:
     sample_ids = request.POST.getlist("sample_ids")
-    equipment_id = request.POST.get("equipment_id", "").strip()
+    experiment_type_id = request.POST.get("experiment_type_id", "").strip()
     note = request.POST.get("note", "").strip()
 
     try:
-        equipment = Equipment.objects.get(pk=equipment_id)
-    except (Equipment.DoesNotExist, ValueError):
-        return _action_error(request, "Invalid equipment.", redirect_url="/wips/")
-
-    if equipment.status != EquipmentStatus.AVAILABLE:
-        return _action_error(
-            request, "Equipment is not available.", redirect_url="/wips/"
+        experiment_type = ExperimentType.objects.get(
+            pk=experiment_type_id, is_active=True
         )
+    except (ExperimentType.DoesNotExist, ValueError):
+        return _action_error(request, "Invalid experiment type.", redirect_url="/wips/")
 
     samples = list(Sample.objects.select_related("request").filter(pk__in=sample_ids))
     if not samples:
@@ -995,30 +993,54 @@ def wip_create(request: HttpRequest) -> HttpResponse:
                 redirect_url="/wips/",
             )
 
-    # Check equipment capacity.
-    from apps.wip.api import _equipment_remaining_capacity
-
-    remaining = _equipment_remaining_capacity(equipment)
-    if len(samples) > remaining:
+    # Every sample's request must include the chosen experiment_type
+    # (chat-design constraint).
+    request_ids = {s.request_id for s in samples}
+    covered_request_ids = set(
+        Request.objects.filter(
+            pk__in=request_ids,
+            request_experiments__experiment_type=experiment_type,
+        ).values_list("pk", flat=True)
+    )
+    missing = request_ids - covered_request_ids
+    if missing:
+        bad = ", ".join(s.wafer_id for s in samples if s.request_id in missing)
         return _action_error(
             request,
-            f"Equipment capacity exceeded: {remaining} slot(s) remaining, "
-            f"but {len(samples)} sample(s) selected.",
+            f"Sample(s) {bad}: parent request does not include experiment type "
+            f"'{experiment_type.name}'.",
             redirect_url="/wips/",
         )
 
+    for sample in samples:
+        if sample.status != SampleStatus.RECEIVED:
+            continue
+        try:
+            validate_sample_transition(sample.status, "start_processing")
+        except InvalidTransitionError as e:
+            return _action_error(
+                request,
+                f"Sample {sample.wafer_id}: {e}",
+                redirect_url="/wips/",
+            )
+
     with transaction.atomic():
         wip = WIP.objects.create(
-            equipment=equipment,
+            experiment_type=experiment_type,
             note=note,
             created_by=request.user,
         )
         for sample in samples:
             WIPSample.objects.create(wip=wip, sample=sample)
             if sample.status == SampleStatus.RECEIVED:
-                sample.status = validate_sample_transition(
-                    sample.status, "start_processing"
-                )
+                # Re-raise unexpected transition failures so the WIP create
+                # transaction rolls back instead of leaving a stuck sample.
+                try:
+                    sample.status = validate_sample_transition(
+                        sample.status, "start_processing"
+                    )
+                except InvalidTransitionError:
+                    raise
                 sample.save(update_fields=["status", "updated_at"])
 
     return redirect("web:wip-detail", wip_id=wip.pk)
@@ -1027,36 +1049,36 @@ def wip_create(request: HttpRequest) -> HttpResponse:
 @role_required("lab_staff", "lab_manager")
 def wip_detail(request: HttpRequest, wip_id: int) -> HttpResponse:
     wip = get_object_or_404(
-        WIP.objects.select_related("equipment").prefetch_related(
+        WIP.objects.select_related("experiment_type").prefetch_related(
             "samples__request",
             Prefetch(
                 "dispatches",
-                queryset=Dispatch.objects.select_related("experiment_type", "recipe")
+                queryset=Dispatch.objects.select_related(
+                    "experiment_type", "equipment", "recipe"
+                )
                 .prefetch_related("result")
                 .order_by("created_at"),
             ),
         ),
         pk=wip_id,
     )
-    # Collect experiment types from all samples' requests for the dispatch form.
-    request_ids = wip.samples.values_list("request_id", flat=True)
-    exp_types = list(
-        ExperimentType.objects.filter(
-            is_active=True, requests__pk__in=request_ids
-        ).distinct()
-    )
-    # Recipes for this WIP's equipment, filtered by capability.
-    recipes = Recipe.objects.filter(
-        equipment=wip.equipment, is_active=True
-    ).select_related("experiment_type")
+    # Chat-design: recipes are equipment-agnostic, filtered only by
+    # the WIP's experiment_type.
+    recipes = Recipe.objects.filter(experiment_type=wip.experiment_type, is_active=True)
+    # Equipment options for the dispatch form: those with capability for
+    # the WIP's experiment_type and currently available.
+    equipment_list = Equipment.objects.filter(
+        capabilities=wip.experiment_type,
+        status=EquipmentStatus.AVAILABLE,
+    ).order_by("name")
     return render(
         request,
         "web/wips/detail.html",
         {
             "title": f"WIP #{wip.pk}",
             "wip": wip,
-            "exp_types": exp_types,
             "recipes": recipes,
+            "equipment_list": equipment_list,
         },
     )
 
@@ -1082,7 +1104,7 @@ def wip_complete(request: HttpRequest, wip_id: int) -> HttpResponse:
             )
         try:
             target = validate_wip_transition(wip.status, "complete")
-        except InvalidTransitionError as e:
+        except WIPInvalidTransitionError as e:
             return _action_error(request, str(e), redirect_url=f"/wips/{wip_id}/")
         wip.status = target
         wip.completed_at = timezone.now()
@@ -1135,7 +1157,7 @@ def wip_abort(request: HttpRequest, wip_id: int) -> HttpResponse:
         wip = get_object_or_404(WIP.objects.select_for_update(), pk=wip_id)
         try:
             target = validate_wip_transition(wip.status, "abort")
-        except InvalidTransitionError as e:
+        except WIPInvalidTransitionError as e:
             return _action_error(request, str(e), redirect_url=f"/wips/{wip_id}/")
         wip.status = target
         wip.save()
@@ -1164,7 +1186,7 @@ def wip_abort(request: HttpRequest, wip_id: int) -> HttpResponse:
 def dispatches_list(request: HttpRequest) -> HttpResponse:
     status_filter = request.GET.get("status", "")
     qs = Dispatch.objects.select_related(
-        "wip__equipment", "experiment_type", "recipe"
+        "equipment", "experiment_type", "recipe", "wip"
     ).order_by("-created_at")
     if status_filter:
         qs = qs.filter(status=status_filter)
@@ -1184,10 +1206,11 @@ def dispatches_list(request: HttpRequest) -> HttpResponse:
 def dispatch_detail(request: HttpRequest, dispatch_id: int) -> HttpResponse:
     dispatch = get_object_or_404(
         Dispatch.objects.select_related(
-            "wip__equipment",
+            "equipment",
             "experiment_type",
             "recipe",
             "created_by",
+            "wip__experiment_type",
         ).prefetch_related("result", "wip__samples__request"),
         pk=dispatch_id,
     )
@@ -1201,47 +1224,53 @@ def dispatch_detail(request: HttpRequest, dispatch_id: int) -> HttpResponse:
 @role_required("lab_staff", "lab_manager")
 @require_POST
 def dispatch_create(request: HttpRequest, wip_id: int) -> HttpResponse:
-    wip = get_object_or_404(WIP.objects.select_related("equipment"), pk=wip_id)
-    exp_type_id = request.POST.get("experiment_type_id", "").strip()
+    wip = get_object_or_404(WIP.objects.select_related("experiment_type"), pk=wip_id)
+    equipment_id = request.POST.get("equipment_id", "").strip()
     recipe_id = request.POST.get("recipe_id", "").strip()
     note = request.POST.get("note", "").strip()
 
     try:
-        exp_type = ExperimentType.objects.get(pk=exp_type_id, is_active=True)
-    except (ExperimentType.DoesNotExist, ValueError):
+        equipment = Equipment.objects.get(pk=equipment_id)
+    except (Equipment.DoesNotExist, ValueError):
         return _action_error(
-            request, "Invalid experiment type.", redirect_url=f"/wips/{wip_id}/"
+            request, "Invalid equipment.", redirect_url=f"/wips/{wip_id}/"
         )
-    try:
-        recipe = Recipe.objects.get(
-            pk=recipe_id, equipment=wip.equipment, is_active=True
-        )
-    except (Recipe.DoesNotExist, ValueError):
+    if equipment.status != EquipmentStatus.AVAILABLE:
         return _action_error(
-            request,
-            "Invalid recipe for this equipment.",
-            redirect_url=f"/wips/{wip_id}/",
-        )
-    if recipe.experiment_type_id != exp_type.pk:
-        return _action_error(
-            request,
-            "Recipe experiment type does not match.",
-            redirect_url=f"/wips/{wip_id}/",
+            request, "Equipment is not available.", redirect_url=f"/wips/{wip_id}/"
         )
     if not EquipmentCapability.objects.filter(
-        equipment=wip.equipment, experiment_type=exp_type
+        equipment=equipment, experiment_type=wip.experiment_type
     ).exists():
         return _action_error(
             request,
-            "Equipment does not support this experiment type.",
+            "Equipment does not support this WIP's experiment type.",
+            redirect_url=f"/wips/{wip_id}/",
+        )
+
+    try:
+        recipe = Recipe.objects.get(pk=recipe_id, is_active=True)
+    except (Recipe.DoesNotExist, ValueError):
+        return _action_error(
+            request, "Invalid recipe.", redirect_url=f"/wips/{wip_id}/"
+        )
+    if recipe.experiment_type_id != wip.experiment_type_id:
+        return _action_error(
+            request,
+            "Recipe experiment type does not match the WIP.",
             redirect_url=f"/wips/{wip_id}/",
         )
 
     with transaction.atomic():
-        wip = WIP.objects.select_for_update().get(pk=wip_id)
+        wip = (
+            WIP.objects.select_for_update()
+            .select_related("experiment_type")
+            .get(pk=wip_id)
+        )
         Dispatch.objects.create(
             wip=wip,
-            experiment_type=exp_type,
+            experiment_type=wip.experiment_type,
+            equipment=equipment,
             recipe=recipe,
             note=note,
             created_by=request.user,
@@ -1254,7 +1283,7 @@ def dispatch_create(request: HttpRequest, wip_id: int) -> HttpResponse:
         sample_ids = list(wip.samples.values_list("pk", flat=True))
         SampleExperimentStatus.objects.filter(
             sample_id__in=sample_ids,
-            experiment_type=exp_type,
+            experiment_type=wip.experiment_type,
             status=SampleExperimentProgress.PENDING,
         ).update(status=SampleExperimentProgress.IN_PROGRESS)
 
@@ -1263,11 +1292,13 @@ def dispatch_create(request: HttpRequest, wip_id: int) -> HttpResponse:
 
 @role_required("lab_staff", "lab_manager")
 def recipes_for_equipment(request: HttpRequest) -> HttpResponse:
-    """HTMX endpoint: return recipe options for a given equipment + experiment type."""
-    equipment_id = request.GET.get("equipment_id", "")
+    """HTMX endpoint: return recipe options for an experiment type.
+
+    Chat-design: recipes are equipment-agnostic, so the equipment_id
+    parameter (still sent by older clients) is ignored.
+    """
     exp_type_id = request.GET.get("experiment_type_id", "")
     recipes = Recipe.objects.filter(
-        equipment_id=equipment_id,
         experiment_type_id=exp_type_id,
         is_active=True,
     ).order_by("name")
@@ -1277,9 +1308,15 @@ def recipes_for_equipment(request: HttpRequest) -> HttpResponse:
 def _dispatch_action(
     request: HttpRequest, dispatch_id: int, action: str
 ) -> HttpResponse:
+    # Lazy import to avoid apps.web → apps.wip.api at module load.
+    from apps.wip.api import _update_experiment_statuses_on_unload
+
     with transaction.atomic():
         dispatch = get_object_or_404(
-            Dispatch.objects.select_for_update(), pk=dispatch_id
+            Dispatch.objects.select_for_update().select_related(
+                "wip", "experiment_type"
+            ),
+            pk=dispatch_id,
         )
         # Special case: start auto-handles PENDING → DISPATCHED → RUNNING
         if action == "start" and dispatch.status == DispatchStatus.PENDING:
@@ -1287,7 +1324,7 @@ def _dispatch_action(
             dispatch.dispatched_at = timezone.now()
         try:
             target = validate_dispatch_transition(dispatch.status, action)
-        except InvalidTransitionError as e:
+        except WIPInvalidTransitionError as e:
             return _action_error(
                 request,
                 str(e),
@@ -1299,6 +1336,12 @@ def _dispatch_action(
         if action == "complete":
             dispatch.completed_at = timezone.now()
         dispatch.save()
+
+        # Mirror the API: per-wafer verdict roll fires at unload time so
+        # the legacy UI's Record Result modal can show the outcomes
+        # before the operator finalises a comment.
+        if action == "unload":
+            _update_experiment_statuses_on_unload(dispatch)
     return redirect("web:dispatch-detail", dispatch_id=dispatch_id)
 
 
@@ -1317,45 +1360,33 @@ def dispatch_unload(request: HttpRequest, dispatch_id: int) -> HttpResponse:
 @role_required("lab_staff", "lab_manager")
 @require_POST
 def dispatch_record_result(request: HttpRequest, dispatch_id: int) -> HttpResponse:
-    summary = request.POST.get("summary", "").strip()
-    verdict = request.POST.get("verdict", "").strip()
-    data_raw = request.POST.get("data", "{}").strip()
-    note = request.POST.get("note", "").strip()
+    """Record-result via the legacy Django-templated UI.
 
-    if not summary:
-        return _action_error(
-            request, "Summary is required.", redirect_url=f"/dispatches/{dispatch_id}/"
-        )
-    if verdict not in ("pass", "fail"):
-        return _action_error(
-            request,
-            "Verdict must be pass or fail.",
-            redirect_url=f"/dispatches/{dispatch_id}/",
-        )
-    try:
-        data = json.loads(data_raw) if data_raw else {}
-    except json.JSONDecodeError:
-        data = {}
+    Comment-only payload. Per-wafer verdicts were already rolled at
+    unload (see _dispatch_action's unload branch) so this endpoint
+    only persists the comment and finalises the dispatch.
+    """
+    comment = request.POST.get("comment", request.POST.get("note", "")).strip()
 
     with transaction.atomic():
         dispatch = get_object_or_404(
-            Dispatch.objects.select_for_update(), pk=dispatch_id
+            Dispatch.objects.select_for_update().select_related(
+                "wip", "experiment_type"
+            ),
+            pk=dispatch_id,
         )
         try:
             target = validate_dispatch_transition(dispatch.status, "record_result")
-        except InvalidTransitionError as e:
+        except WIPInvalidTransitionError as e:
             return _action_error(
                 request, str(e), redirect_url=f"/dispatches/{dispatch_id}/"
             )
         dispatch.status = target
+        dispatch.completed_at = timezone.now()
         dispatch.save()
         ExperimentResult.objects.create(
             dispatch=dispatch,
-            summary=summary,
-            verdict=verdict,
-            data=data,
-            note=note,
-            data_source=ExperimentResult.DataSource.MANUAL,
+            comment=comment,
             recorded_by=request.user,
         )
     return redirect("web:dispatch-detail", dispatch_id=dispatch_id)
@@ -1364,7 +1395,7 @@ def dispatch_record_result(request: HttpRequest, dispatch_id: int) -> HttpRespon
 @role_required("lab_staff", "lab_manager")
 @require_POST
 def dispatch_complete(request: HttpRequest, dispatch_id: int) -> HttpResponse:
-    return _dispatch_action(request, dispatch_id, "complete")
+    return dispatch_record_result(request, dispatch_id)
 
 
 @role_required("lab_staff", "lab_manager")
@@ -1377,7 +1408,7 @@ def dispatch_report_exception(request: HttpRequest, dispatch_id: int) -> HttpRes
         )
         try:
             target = validate_dispatch_transition(dispatch.status, "report_exception")
-        except InvalidTransitionError as e:
+        except WIPInvalidTransitionError as e:
             return _action_error(
                 request, str(e), redirect_url=f"/dispatches/{dispatch_id}/"
             )
@@ -1397,7 +1428,7 @@ def dispatch_redispatch(request: HttpRequest, dispatch_id: int) -> HttpResponse:
         )
         try:
             target = validate_dispatch_transition(old_dispatch.status, "redispatch")
-        except InvalidTransitionError as e:
+        except WIPInvalidTransitionError as e:
             return _action_error(
                 request, str(e), redirect_url=f"/dispatches/{dispatch_id}/"
             )
@@ -1407,7 +1438,9 @@ def dispatch_redispatch(request: HttpRequest, dispatch_id: int) -> HttpResponse:
         new_dispatch = Dispatch.objects.create(
             wip=old_dispatch.wip,
             experiment_type=old_dispatch.experiment_type,
+            equipment=old_dispatch.equipment,
             recipe=old_dispatch.recipe,
+            estimated_duration_seconds=old_dispatch.estimated_duration_seconds,
             note=f"Redispatch of #{old_dispatch.pk}",
             created_by=request.user,
         )
@@ -1593,10 +1626,9 @@ def equipment_set_capabilities(request: HttpRequest, equipment_id: int) -> HttpR
 
 @role_required("lab_manager")
 def recipes_list(request: HttpRequest) -> HttpResponse:
-    qs = Recipe.objects.select_related("equipment", "experiment_type").order_by(
-        "equipment__name", "name"
+    qs = Recipe.objects.select_related("experiment_type").order_by(
+        "experiment_type__name", "name"
     )
-    equipment_all = Equipment.objects.order_by("name")
     exp_types_all = ExperimentType.objects.filter(is_active=True).order_by(
         "lab_category", "name"
     )
@@ -1606,7 +1638,6 @@ def recipes_list(request: HttpRequest) -> HttpResponse:
         {
             "title": "Recipes",
             "recipes": qs,
-            "equipment_all": equipment_all,
             "exp_types_all": exp_types_all,
         },
     )
@@ -1617,14 +1648,8 @@ def recipes_list(request: HttpRequest) -> HttpResponse:
 def recipe_create(request: HttpRequest) -> HttpResponse:
     name = request.POST.get("name", "").strip()
     description = request.POST.get("description", "").strip()
-    equipment_id = request.POST.get("equipment_id", "").strip()
     exp_type_id = request.POST.get("experiment_type_id", "").strip()
     params_raw = request.POST.get("parameters", "{}").strip()
-
-    try:
-        equipment = Equipment.objects.get(pk=equipment_id)
-    except (Equipment.DoesNotExist, ValueError):
-        return redirect("web:recipes")
 
     try:
         exp_type = ExperimentType.objects.get(pk=exp_type_id, is_active=True)
@@ -1639,7 +1664,6 @@ def recipe_create(request: HttpRequest) -> HttpResponse:
     Recipe.objects.create(
         name=name,
         description=description,
-        equipment=equipment,
         experiment_type=exp_type,
         parameters=params,
     )

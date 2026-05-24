@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING, Any
 
 from ninja import Field, Schema
 
-from apps.commissions.models import WaferSize
+from apps.commissions.models import RequestUrgency, WaferSize
 
 if TYPE_CHECKING:
     from apps.commissions.models import Request, Sample
@@ -75,16 +75,28 @@ class RequestIn(Schema):
 
     title: str = Field(..., min_length=1, max_length=300)
     note: str = ""
+    urgency: RequestUrgency = RequestUrgency.ONE_WEEK
     experiment_type_ids: list[int] = Field(..., min_length=1)
     experiment_parameters: dict[str, dict[str, Any]] = {}
     samples: list[SampleIn] = Field(..., min_length=1)
 
 
 class RequestUpdateIn(Schema):
-    """Input schema for updating a draft/returned request."""
+    """Input schema for updating a draft/returned request.
+
+    title/note/urgency are partial-update fields that work on both
+    DRAFT and RETURNED requests. samples and experiment_type_ids are
+    DRAFT-only — reviewing a request locks the sample + experiment
+    set. None means "don't change this field"; an empty list is a
+    business-rule violation (samples need ≥1) and is rejected with
+    422 by update_request rather than slipping past as a no-op.
+    """
 
     title: str | None = Field(None, min_length=1, max_length=300)
     note: str | None = None
+    urgency: RequestUrgency | None = None
+    samples: list[SampleIn] | None = None
+    experiment_type_ids: list[int] | None = None
 
 
 # --- Action input schemas ---
@@ -118,14 +130,21 @@ class RequestListOut(Schema):
     title: str
     requester: RequesterOut
     status: str
+    urgency: str
     note: str
+    sample_count: int
     submitted_at: datetime | None
     created_at: datetime
     updated_at: datetime
 
     @staticmethod
     def from_request(req: Request) -> dict:
-        """Build a dict from a Request instance."""
+        """Build a dict from a Request instance.
+
+        Expects the queryset to annotate ``sample_count`` (see
+        list_requests in apps/commissions/api.py) so the list endpoint
+        doesn't incur a per-row COUNT(*).
+        """
         profile = getattr(req.requester, "profile", None)
         return {
             "id": req.pk,
@@ -136,7 +155,9 @@ class RequestListOut(Schema):
                 "department": profile.department if profile else "",
             },
             "status": req.status,
+            "urgency": req.urgency,
             "note": req.note,
+            "sample_count": getattr(req, "sample_count", req.samples.count()),
             "submitted_at": req.submitted_at,
             "created_at": req.created_at,
             "updated_at": req.updated_at,
@@ -150,6 +171,7 @@ class RequestDetailOut(Schema):
     title: str
     requester: RequesterOut
     status: str
+    urgency: str
     note: str
     experiment_types: list[ExperimentTypeWithParamsOut]
     samples: list[SampleBriefOut]
@@ -212,6 +234,7 @@ class RequestDetailOut(Schema):
                 "department": profile.department if profile else "",
             },
             "status": req.status,
+            "urgency": req.urgency,
             "note": req.note,
             "experiment_types": experiment_types,
             "samples": samples,
@@ -236,6 +259,7 @@ class SampleDetailOut(Schema):
     status: str
     request: RequestSummaryOut
     note: str
+    received_at: datetime | None
     created_at: datetime
     updated_at: datetime
 
@@ -252,18 +276,55 @@ class SampleDetailOut(Schema):
                 "title": sample.request.title,
             },
             "note": sample.note,
+            "received_at": sample.received_at,
             "created_at": sample.created_at,
             "updated_at": sample.updated_at,
         }
 
 
 class SampleExperimentStatusOut(Schema):
-    """Output schema for per-sample experiment progress."""
+    """Output schema for per-sample experiment progress.
+
+    verdict is null until the dispatch's record_result fills it in
+    (random pass/fail per wafer).
+    """
 
     experiment_type_id: int
     experiment_type_name: str
     status: str
+    verdict: str | None
     dispatch_id: int | None
+
+
+class ExperimentResultBrief(Schema):
+    """Result summary nested in the sample experiments rollup."""
+
+    id: int
+    comment: str
+    created_at: datetime
+
+
+class ExperimentTypeBrief(Schema):
+    """Experiment type summary nested in the rollup."""
+
+    id: int
+    name: str
+
+
+class SampleExperimentRollupOut(Schema):
+    """One row of the per-sample experiments rollup.
+
+    Status semantics (computed server-side from the sample's dispatches):
+      - "done": the latest dispatch for this experiment_type is COMPLETED
+      - "in_progress": at least one non-terminal dispatch exists
+      - "pending": no dispatch has been created yet
+    """
+
+    experiment_type: ExperimentTypeBrief
+    status: str
+    verdict: str | None
+    dispatch_id: int | None
+    result: ExperimentResultBrief | None
 
 
 class SampleListOut(Schema):
@@ -274,5 +335,7 @@ class SampleListOut(Schema):
     wafer_size: str
     status: str
     request_id: int
+    has_wip: bool = False
+    received_at: datetime | None
     created_at: datetime
     updated_at: datetime

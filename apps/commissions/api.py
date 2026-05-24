@@ -4,7 +4,7 @@ from collections.abc import Callable
 
 from django.contrib.auth.models import User
 from django.db import models, transaction
-from django.db.models import Prefetch
+from django.db.models import Count, Exists, OuterRef, Prefetch
 from django.http import HttpRequest
 from django.utils import timezone
 from ninja import Query, Router
@@ -18,6 +18,7 @@ from apps.commissions.models import (
     Request,
     RequestExperiment,
     RequestStatus,
+    RequestUrgency,
     Sample,
     SampleStatus,
 )
@@ -30,6 +31,7 @@ from apps.commissions.schemas import (
     RequestListOut,
     RequestUpdateIn,
     SampleDetailOut,
+    SampleExperimentRollupOut,
     SampleExperimentStatusOut,
     SampleListOut,
 )
@@ -225,15 +227,22 @@ def _lab_sample_action(
 def list_requests(
     request: HttpRequest,
     status: RequestStatus | None = Query(None),  # noqa: B008
+    urgency: RequestUrgency | None = Query(None),  # noqa: B008
 ):
     """List commission requests. Fab users see only their own."""
-    qs = Request.objects.select_related("requester__profile").order_by("-created_at")
+    qs = (
+        Request.objects.select_related("requester__profile")
+        .annotate(sample_count=Count("samples"))
+        .order_by("-created_at")
+    )
 
     if _is_fab_user(request):
         qs = qs.filter(requester=request.auth)
 
     if status:
         qs = qs.filter(status=status)
+    if urgency:
+        qs = qs.filter(urgency=urgency)
 
     return [RequestListOut.from_request(r) for r in qs]
 
@@ -256,6 +265,7 @@ def create_request(request: HttpRequest, payload: RequestIn):
         req = Request.objects.create(
             title=payload.title,
             note=payload.note,
+            urgency=payload.urgency,
             requester=request.auth,
         )
 
@@ -292,10 +302,22 @@ def get_request(request: HttpRequest, request_id: int):
 
 @router.patch(
     "/{request_id}",
-    response={200: RequestDetailOut, 400: ErrorOut, 403: ErrorOut, 404: ErrorOut},
+    response={
+        200: RequestDetailOut,
+        400: ErrorOut,
+        403: ErrorOut,
+        404: ErrorOut,
+        422: ErrorOut,
+    },
 )
 def update_request(request: HttpRequest, request_id: int, payload: RequestUpdateIn):
-    """Update a draft or returned request. Only the requester (fab user) allowed."""
+    """Update a draft or returned request. Only the requester (fab user) allowed.
+
+    Scalar fields (title/note/urgency) can be patched on DRAFT and
+    RETURNED. samples and experiment_type_ids are draft-only — once a
+    reviewer has seen the request, the sample set and required
+    experiments are locked, even after a return. INTEGRATION_GAPS §2.9.
+    """
     role = _get_user_role(request)
     req = _get_request_for_user(request_id, request.auth, role)
     if req is None:
@@ -304,15 +326,66 @@ def update_request(request: HttpRequest, request_id: int, payload: RequestUpdate
     if req.requester != request.auth:
         return 403, {"detail": "Only the requester can update this request"}
 
+    # model_dump(exclude_unset=True) keeps explicit None/[] values so
+    # we can distinguish "no field sent" from "field sent as empty".
+    sent = payload.model_dump(exclude_unset=True)
+
     with transaction.atomic():
         req = Request.objects.select_for_update().get(pk=req.pk)
 
         if req.status not in (RequestStatus.DRAFT, RequestStatus.RETURNED):
             return 400, {"detail": "Can only update draft or returned requests"}
 
-        for field, value in payload.model_dump(exclude_unset=True).items():
+        samples_in = sent.pop("samples", None)
+        exp_type_ids_in = sent.pop("experiment_type_ids", None)
+
+        # Draft-only gate for the relational fields.
+        if (samples_in is not None or exp_type_ids_in is not None) and (
+            req.status != RequestStatus.DRAFT
+        ):
+            return 422, {
+                "detail": (
+                    "samples and experiment_type_ids can only be modified "
+                    "while request is in draft state"
+                )
+            }
+
+        if samples_in is not None and len(samples_in) == 0:
+            return 422, {"detail": "samples cannot be empty — at least one required"}
+
+        # Validate experiment_type_ids before any DB mutation so the
+        # whole PATCH rolls back together on bad input.
+        new_exp_types = None
+        if exp_type_ids_in is not None:
+            unique_ids = list(dict.fromkeys(exp_type_ids_in))
+            new_exp_types = list(
+                ExperimentType.objects.filter(pk__in=unique_ids, is_active=True)
+            )
+            if len(new_exp_types) != len(unique_ids):
+                return 422, {
+                    "detail": "One or more experiment_type_ids not found or inactive"
+                }
+
+        # Scalar partial update (title/note/urgency).
+        for field, value in sent.items():
             setattr(req, field, value)
         req.save()
+
+        # Replace experiment_types through-table.
+        if new_exp_types is not None:
+            req.request_experiments.all().delete()
+            for et in new_exp_types:
+                RequestExperiment.objects.create(request=req, experiment_type=et)
+
+        # Replace samples — safe in DRAFT because no WIPs reference them.
+        if samples_in is not None:
+            req.samples.all().delete()
+            for s in samples_in:
+                Sample.objects.create(
+                    request=req,
+                    wafer_id=s["wafer_id"],
+                    wafer_size=s["wafer_size"],
+                )
 
     req = _request_detail_queryset().get(pk=req.pk)
     return 200, RequestDetailOut.from_request(req)
@@ -559,8 +632,24 @@ def list_samples(
     request_id: int | None = Query(None),
     status: SampleStatus | None = Query(None),  # noqa: B008
 ):
-    """List samples with optional filters. Fab users see only their own."""
-    qs = Sample.objects.order_by("-created_at")
+    """List samples with optional filters. Fab users see only their own.
+
+    Annotates ``has_wip`` (True when the sample is in at least one
+    non-terminal WIP) so the SPA's Lab Samples page can derive its
+    ``in_wip`` pill without a second round-trip — see
+    INTEGRATION_GAPS §3.2 (sample status enum) and §4.
+    """
+    # Imported lazily to avoid a top-of-file circular import: apps.wip
+    # imports from apps.commissions for state-machine helpers.
+    from apps.wip.models import WIPSample, WIPStatus
+
+    active_wip_for_sample = WIPSample.objects.filter(
+        sample=OuterRef("pk"),
+        wip__status__in=[WIPStatus.CREATED, WIPStatus.IN_PROGRESS],
+    )
+    qs = Sample.objects.annotate(has_wip=Exists(active_wip_for_sample)).order_by(
+        "-created_at"
+    )
 
     if _is_fab_user(request):
         qs = qs.filter(request__requester=request.auth)
@@ -583,19 +672,128 @@ def get_sample(request: HttpRequest, sample_id: int):
     return 200, SampleDetailOut.from_sample(sample)
 
 
+@sample_router.get(
+    "/{sample_id}/experiments",
+    response={200: list[SampleExperimentRollupOut], 404: ErrorOut},
+)
+def sample_experiments(request: HttpRequest, sample_id: int):
+    """Per-experiment-type rollup for one sample's wafer detail page.
+
+    For each experiment_type required by the sample's parent request,
+    inspects dispatches across this sample's WIPs and returns the
+    status, dispatch_id, and (when done) the result. INTEGRATION_GAPS
+    §2.8 resolution A — saves the SPA three extra requests per wafer
+    detail open.
+    """
+    # Lazy imports to avoid a top-of-file circular dep: apps.wip
+    # already imports from apps.commissions for state-machine helpers.
+    from apps.wip.models import Dispatch, DispatchStatus
+
+    sample = _get_sample_for_user(sample_id, request)
+    if sample is None:
+        return 404, {"detail": "Not found"}
+
+    request_experiments = sample.request.request_experiments.select_related(
+        "experiment_type"
+    ).order_by("experiment_type__name")
+
+    sample_wip_ids = list(sample.wips.values_list("pk", flat=True))
+    dispatches_by_et: dict[int, list[Dispatch]] = {}
+    if sample_wip_ids:
+        dispatch_qs = (
+            Dispatch.objects.filter(wip_id__in=sample_wip_ids)
+            .select_related("result")
+            .order_by("experiment_type_id", "-created_at")
+        )
+        for d in dispatch_qs:
+            dispatches_by_et.setdefault(d.experiment_type_id, []).append(d)
+
+    # Per-wafer verdicts now live on SampleExperimentStatus, not on
+    # the dispatch result. One query for all of this sample's rows.
+    verdicts_by_et: dict[int, str | None] = dict(
+        SampleExperimentStatus.objects.filter(sample=sample).values_list(
+            "experiment_type_id", "verdict"
+        )
+    )
+
+    rows = []
+    for re in request_experiments:
+        et = re.experiment_type
+        dispatches = dispatches_by_et.get(et.pk, [])
+
+        status = "pending"
+        dispatch_id: int | None = None
+        result_payload: dict | None = None
+
+        if dispatches:
+            # dispatches are ordered newest-first within each ET group.
+            completed = next(
+                (d for d in dispatches if d.status == DispatchStatus.COMPLETED),
+                None,
+            )
+            if completed is not None and hasattr(completed, "result"):
+                status = "done"
+                dispatch_id = completed.pk
+                r = completed.result
+                result_payload = {
+                    "id": r.pk,
+                    "comment": r.comment,
+                    "created_at": r.created_at,
+                }
+            else:
+                non_terminal = {
+                    DispatchStatus.PENDING,
+                    DispatchStatus.DISPATCHED,
+                    DispatchStatus.RUNNING,
+                    DispatchStatus.EXECUTION_EXCEPTION,
+                    DispatchStatus.UNLOADED,
+                    DispatchStatus.RESULT_RECORDED,
+                }
+                active = next((d for d in dispatches if d.status in non_terminal), None)
+                if active is not None:
+                    status = "in_progress"
+                    dispatch_id = active.pk
+
+        rows.append(
+            {
+                "experiment_type": {"id": et.pk, "name": et.name},
+                "status": status,
+                "verdict": verdicts_by_et.get(et.pk),
+                "dispatch_id": dispatch_id,
+                "result": result_payload,
+            }
+        )
+
+    return 200, rows
+
+
 @sample_router.post(
     "/{sample_id}/receive",
     response={200: SampleDetailOut, 400: ErrorOut, 403: ErrorOut, 404: ErrorOut},
 )
 def receive_sample(request: HttpRequest, sample_id: int):
-    """Confirm sample receipt. Only lab staff/managers allowed."""
+    """Confirm sample receipt. Only lab staff/managers allowed.
+
+    Stamps Sample.received_at with the current time on the receive
+    transition. The frontend uses this to render the urgency countdown
+    on the Samples list (deadline = received_at + urgency_duration),
+    so it must be captured at the moment of receipt, not derived from
+    later updated_at values.
+    """
+
+    def pre_save(sample: Sample) -> None:
+        sample.received_at = timezone.now()
 
     def post_save_in_txn(sample: Sample) -> None:
         req = Request.objects.select_for_update().get(pk=sample.request_id)
         _check_all_samples_received(req)
 
     return _lab_sample_action(
-        request, sample_id, "receive", post_save_in_txn=post_save_in_txn
+        request,
+        sample_id,
+        "receive",
+        pre_save=pre_save,
+        post_save_in_txn=post_save_in_txn,
     )
 
 
@@ -680,6 +878,7 @@ def get_sample_experiment_status(request: HttpRequest, sample_id: int):
             "experiment_type_id": s.experiment_type_id,
             "experiment_type_name": s.experiment_type.name,
             "status": s.status,
+            "verdict": s.verdict,
             "dispatch_id": s.dispatch_id,
         }
         for s in statuses

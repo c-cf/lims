@@ -47,14 +47,14 @@ def _aggregate_dispatches(start_date, end_date, equipment_obj=None):
         created_at__date__lte=end_date,
     )
     if equipment_obj is not None:
-        qs = qs.filter(wip__equipment=equipment_obj)
+        qs = qs.filter(equipment=equipment_obj)
     return list(
-        qs.values("wip__equipment_id", "wip__equipment__name")
+        qs.values("equipment_id", "equipment__name")
         .annotate(
             wip_count=Count("id"),
             sample_count=Count("wip_id", distinct=True),
         )
-        .order_by("wip__equipment__name")
+        .order_by("equipment__name")
     )
 
 

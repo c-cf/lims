@@ -232,6 +232,59 @@ class TestCreateEquipment:
         )
         assert response.status_code == 401
 
+    def test_create_with_parameters_round_trip(self, client, auth_headers):
+        """Equipment parameters (alterable-parameter schema) round-trip
+        through create and detail."""
+        profile = LabStaffFactory()
+        params = {
+            "temperature_c": {"min": 25, "max": 200},
+            "humidity_percent": [10, 50, 90],
+        }
+
+        response = client.post(
+            "/api/equipment/",
+            data=json.dumps(
+                {
+                    "name": "Param rig",
+                    "model_name": "PR-1",
+                    "capacity": 4,
+                    "parameters": params,
+                }
+            ),
+            content_type="application/json",
+            **auth_headers(profile.user),
+        )
+        assert response.status_code == 201
+        data = response.json()
+        assert data["parameters"] == params
+
+        # Detail response also exposes parameters.
+        detail = client.get(
+            f"/api/equipment/{data['id']}", **auth_headers(profile.user)
+        )
+        assert detail.status_code == 200
+        assert detail.json()["parameters"] == params
+
+    def test_create_without_parameters_defaults_to_empty_dict(
+        self, client, auth_headers
+    ):
+        """parameters is optional on create; defaults to {}."""
+        profile = LabStaffFactory()
+        response = client.post(
+            "/api/equipment/",
+            data=json.dumps(
+                {
+                    "name": "No-param rig",
+                    "model_name": "NP-1",
+                    "capacity": 1,
+                }
+            ),
+            content_type="application/json",
+            **auth_headers(profile.user),
+        )
+        assert response.status_code == 201
+        assert response.json()["parameters"] == {}
+
 
 # ---------------------------------------------------------------------------
 # Equipment API tests — GET /api/equipment/{id}
@@ -250,7 +303,7 @@ class TestGetEquipment:
         equip = EquipmentFactory(name="詳情機台")
         et = ExperimentTypeFactory(name="測試項目")
         EquipmentCapability.objects.create(equipment=equip, experiment_type=et)
-        RecipeFactory(equipment=equip, experiment_type=et, name="測試 Recipe")
+        RecipeFactory(experiment_type=et, name="測試 Recipe")
 
         response = client.get(
             f"/api/equipment/{equip.pk}", **auth_headers(profile.user)
@@ -339,6 +392,24 @@ class TestUpdateEquipment:
 
         assert response.status_code == 200
         assert response.json()["status"] == "maintenance"
+
+    def test_update_parameters(self, client, auth_headers):
+        """PATCH can replace the parameters dict."""
+        profile = LabStaffFactory()
+        equip = EquipmentFactory()
+        new_params = {"voltage_v": {"min": 1.0, "max": 5.0, "default": 3.3}}
+
+        response = client.patch(
+            f"/api/equipment/{equip.pk}",
+            data=json.dumps({"parameters": new_params}),
+            content_type="application/json",
+            **auth_headers(profile.user),
+        )
+
+        assert response.status_code == 200
+        assert response.json()["parameters"] == new_params
+        equip.refresh_from_db()
+        assert equip.parameters == new_params
 
     def test_update_invalid_status_returns_422(self, client, auth_headers):
         """Updating with an invalid status value returns 422."""
@@ -509,24 +580,6 @@ class TestListRecipes:
 
         assert response.status_code == 403
 
-    def test_list_filters_by_equipment_id(self, client, auth_headers):
-        """Filtering by equipment_id returns only matching recipes."""
-        profile = LabStaffFactory()
-        equip1 = EquipmentFactory()
-        equip2 = EquipmentFactory()
-        RecipeFactory(name="Recipe on E1", equipment=equip1)
-        RecipeFactory(name="Recipe on E2", equipment=equip2)
-
-        response = client.get(
-            f"/api/recipes/?equipment_id={equip1.pk}",
-            **auth_headers(profile.user),
-        )
-
-        assert response.status_code == 200
-        data = response.json()
-        assert len(data) == 1
-        assert data[0]["name"] == "Recipe on E1"
-
     def test_list_filters_by_experiment_type_id(self, client, auth_headers):
         """Filtering by experiment_type_id returns only matching recipes."""
         profile = LabStaffFactory()
@@ -558,19 +611,18 @@ class TestListRecipes:
         assert len(data) == 1
         assert data[0]["name"] == "Active Recipe"
 
-    def test_list_includes_nested_relations(self, client, auth_headers):
-        """Recipe list includes nested equipment and experiment_type."""
+    def test_list_includes_nested_experiment_type(self, client, auth_headers):
+        """Recipe list includes the nested experiment_type."""
         profile = LabStaffFactory()
-        equip = EquipmentFactory(name="烤箱 X")
         et = ExperimentTypeFactory(name="高溫測試")
-        RecipeFactory(equipment=equip, experiment_type=et)
+        RecipeFactory(experiment_type=et)
 
         response = client.get("/api/recipes/", **auth_headers(profile.user))
 
         assert response.status_code == 200
         data = response.json()
-        assert data[0]["equipment"]["name"] == "烤箱 X"
         assert data[0]["experiment_type"]["name"] == "高溫測試"
+        assert "equipment" not in data[0]
 
 
 # ---------------------------------------------------------------------------
@@ -585,7 +637,6 @@ class TestCreateRecipe:
     def test_lab_staff_can_create(self, client, auth_headers):
         """Lab staff can create a recipe."""
         profile = LabStaffFactory()
-        equip = EquipmentFactory()
         et = ExperimentTypeFactory()
 
         response = client.post(
@@ -594,7 +645,6 @@ class TestCreateRecipe:
                 {
                     "name": "新 Recipe",
                     "description": "描述",
-                    "equipment_id": equip.pk,
                     "experiment_type_id": et.pk,
                     "parameters": {"temp": 150},
                 }
@@ -606,14 +656,13 @@ class TestCreateRecipe:
         assert response.status_code == 201
         data = response.json()
         assert data["name"] == "新 Recipe"
-        assert data["equipment"]["id"] == equip.pk
         assert data["experiment_type"]["id"] == et.pk
         assert data["parameters"] == {"temp": 150}
+        assert "equipment" not in data
 
     def test_fab_user_cannot_create(self, client, auth_headers):
         """Fab user cannot create recipes (403)."""
         profile = FabUserFactory()
-        equip = EquipmentFactory()
         et = ExperimentTypeFactory()
 
         response = client.post(
@@ -621,7 +670,6 @@ class TestCreateRecipe:
             data=json.dumps(
                 {
                     "name": "禁止",
-                    "equipment_id": equip.pk,
                     "experiment_type_id": et.pk,
                 }
             ),
@@ -631,39 +679,17 @@ class TestCreateRecipe:
 
         assert response.status_code == 403
 
-    def test_create_with_invalid_equipment_returns_404(self, client, auth_headers):
-        """Creating recipe with non-existent equipment_id returns 404."""
-        profile = LabStaffFactory()
-        et = ExperimentTypeFactory()
-
-        response = client.post(
-            "/api/recipes/",
-            data=json.dumps(
-                {
-                    "name": "Bad Recipe",
-                    "equipment_id": 99999,
-                    "experiment_type_id": et.pk,
-                }
-            ),
-            content_type="application/json",
-            **auth_headers(profile.user),
-        )
-
-        assert response.status_code == 404
-
     def test_create_with_invalid_experiment_type_returns_404(
         self, client, auth_headers
     ):
         """Creating recipe with non-existent experiment_type_id returns 404."""
         profile = LabStaffFactory()
-        equip = EquipmentFactory()
 
         response = client.post(
             "/api/recipes/",
             data=json.dumps(
                 {
                     "name": "Bad Recipe",
-                    "equipment_id": equip.pk,
                     "experiment_type_id": 99999,
                 }
             ),
@@ -680,7 +706,6 @@ class TestCreateRecipe:
             data=json.dumps(
                 {
                     "name": "test",
-                    "equipment_id": 1,
                     "experiment_type_id": 1,
                 }
             ),

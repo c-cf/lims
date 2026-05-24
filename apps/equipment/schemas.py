@@ -30,6 +30,7 @@ class EquipmentIn(Schema):
     model_name: str = Field(..., min_length=1, max_length=200)
     capacity: int = Field(..., gt=0)
     experiment_type_ids: list[int] = []
+    parameters: dict[str, Any] = {}
 
 
 EquipmentStatusLiteral = Literal["available", "maintenance", "disabled"]
@@ -42,6 +43,7 @@ class EquipmentUpdate(Schema):
     model_name: str | None = Field(None, min_length=1, max_length=200)
     capacity: int | None = Field(None, gt=0)
     status: EquipmentStatusLiteral | None = None
+    parameters: dict[str, Any] | None = None
 
 
 class EquipmentOut(Schema):
@@ -53,6 +55,7 @@ class EquipmentOut(Schema):
     capacity: int
     status: EquipmentStatusLiteral
     capabilities: list[CapabilityOut] = []
+    parameters: dict[str, Any] = {}
     created_at: datetime
     updated_at: datetime
 
@@ -67,6 +70,7 @@ class EquipmentOut(Schema):
             "capacity": equipment.capacity,
             "status": equipment.status,
             "capabilities": caps,
+            "parameters": equipment.parameters,
             "created_at": equipment.created_at,
             "updated_at": equipment.updated_at,
         }
@@ -83,13 +87,6 @@ class CapabilitySetIn(Schema):
 # ---------------------------------------------------------------------------
 
 
-class RecipeEquipmentOut(Schema):
-    """Nested equipment summary for recipe responses."""
-
-    id: int
-    name: str
-
-
 class RecipeExperimentTypeOut(Schema):
     """Nested experiment type summary for recipe responses."""
 
@@ -98,11 +95,13 @@ class RecipeExperimentTypeOut(Schema):
 
 
 class RecipeIn(Schema):
-    """Input schema for creating a recipe."""
+    """Input schema for creating a recipe.
+
+    Chat-design: no equipment_id — recipes are equipment-agnostic.
+    """
 
     name: str = Field(..., min_length=1, max_length=200)
     description: str = ""
-    equipment_id: int
     experiment_type_id: int
     parameters: dict[str, Any] = {}
 
@@ -124,7 +123,6 @@ class RecipeOut(Schema):
     id: int
     name: str
     description: str
-    equipment: RecipeEquipmentOut
     experiment_type: RecipeExperimentTypeOut
     parameters: dict[str, Any]
     is_active: bool
@@ -138,7 +136,6 @@ class RecipeOut(Schema):
             "id": recipe.pk,
             "name": recipe.name,
             "description": recipe.description,
-            "equipment": {"id": recipe.equipment_id, "name": recipe.equipment.name},
             "experiment_type": {
                 "id": recipe.experiment_type_id,
                 "name": recipe.experiment_type.name,
