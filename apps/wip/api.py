@@ -542,7 +542,7 @@ def create_dispatch(request: HttpRequest, wip_id: int, payload: DispatchIn):
             }
 
         try:
-            recipe = Recipe.objects.get(pk=payload.recipe_id)
+            recipe = Recipe.objects.get(pk=payload.recipe_id, is_active=True)
         except Recipe.DoesNotExist:
             return 400, {"detail": "Recipe not found"}
 
@@ -1059,6 +1059,7 @@ def submit_equipment_result(request: HttpRequest, payload: AutomationResultIn):
         ExperimentResult.objects.create(
             dispatch=dispatch,
             comment=payload.comment,
+            recorded_by=request.auth,
         )
 
         # Same auto-complete trigger as the manual record_result path.

@@ -2,7 +2,7 @@ name: Publish Staging Docker Image
 
 on:
   push:
-    branches: ["feat/frontend-integration-v2"]
+    branches: ["main"]
   workflow_dispatch:
 
 permissions:

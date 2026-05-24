@@ -394,6 +394,29 @@ class TestWIPCreateDispatch:
         assert resp.status_code == 400
         assert "experiment type" in resp.json()["detail"].lower()
 
+    def test_create_dispatch_rejects_inactive_recipe(
+        self, client, auth_headers, lab_staff, wip, equipment, experiment_type
+    ):
+        """Soft-deleted recipes cannot be used for new dispatches."""
+        inactive_recipe = RecipeFactory(
+            experiment_type=experiment_type,
+            is_active=False,
+        )
+
+        resp = client.post(
+            f"/api/wips/{wip.pk}/dispatches/",
+            data={
+                "equipment_id": equipment.pk,
+                "recipe_id": inactive_recipe.pk,
+            },
+            content_type="application/json",
+            **auth_headers(lab_staff),
+        )
+
+        assert resp.status_code == 400
+        assert "recipe not found" in resp.json()["detail"].lower()
+        assert Dispatch.objects.filter(recipe=inactive_recipe).count() == 0
+
     def test_create_dispatch_equipment_lacks_capability(
         self, client, auth_headers, lab_staff, wip, recipe
     ):
@@ -1699,6 +1722,7 @@ class TestAutomationEquipmentResult:
 
         result = ExperimentResult.objects.get(dispatch_id=dispatched_dispatch.pk)
         assert result.comment == "Automated measurement complete"
+        assert result.recorded_by == lab_staff
 
     def test_automation_result_from_running_dispatch(
         self, client, auth_headers, lab_staff, running_dispatch

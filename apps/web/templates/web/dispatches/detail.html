@@ -52,15 +52,6 @@
     </button>
     {% endif %}
 
-    {% if dispatch.status == 'result_recorded' %}
-    <form method="post" action="{% url 'web:dispatch-complete' dispatch.pk %}">
-      {% csrf_token %}
-      <button class="bg-green-600 hover:bg-green-700 text-white text-sm px-4 py-2 rounded-lg transition cursor-pointer">
-        Complete
-      </button>
-    </form>
-    {% endif %}
-
     {% if dispatch.status == 'execution_exception' %}
     <form method="post" action="{% url 'web:dispatch-redispatch' dispatch.pk %}">
       {% csrf_token %}

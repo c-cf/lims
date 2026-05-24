@@ -1012,6 +1012,18 @@ def wip_create(request: HttpRequest) -> HttpResponse:
             redirect_url="/wips/",
         )
 
+    for sample in samples:
+        if sample.status != SampleStatus.RECEIVED:
+            continue
+        try:
+            validate_sample_transition(sample.status, "start_processing")
+        except InvalidTransitionError as e:
+            return _action_error(
+                request,
+                f"Sample {sample.wafer_id}: {e}",
+                redirect_url="/wips/",
+            )
+
     with transaction.atomic():
         wip = WIP.objects.create(
             experiment_type=experiment_type,
@@ -1021,15 +1033,14 @@ def wip_create(request: HttpRequest) -> HttpResponse:
         for sample in samples:
             WIPSample.objects.create(wip=wip, sample=sample)
             if sample.status == SampleStatus.RECEIVED:
-                # Skip silently if the state-machine call fails — upstream
-                # checks ensure RECEIVED → PROCESSING is valid, but a hard
-                # raise here would 500 the entire WIP-create flow.
+                # Re-raise unexpected transition failures so the WIP create
+                # transaction rolls back instead of leaving a stuck sample.
                 try:
                     sample.status = validate_sample_transition(
                         sample.status, "start_processing"
                     )
                 except InvalidTransitionError:
-                    continue
+                    raise
                 sample.save(update_fields=["status", "updated_at"])
 
     return redirect("web:wip-detail", wip_id=wip.pk)
@@ -1384,7 +1395,7 @@ def dispatch_record_result(request: HttpRequest, dispatch_id: int) -> HttpRespon
 @role_required("lab_staff", "lab_manager")
 @require_POST
 def dispatch_complete(request: HttpRequest, dispatch_id: int) -> HttpResponse:
-    return _dispatch_action(request, dispatch_id, "complete")
+    return dispatch_record_result(request, dispatch_id)
 
 
 @role_required("lab_staff", "lab_manager")
