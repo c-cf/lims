@@ -96,7 +96,7 @@ const useDispatchCreationData = (experimentId) => {
 // modal does an N-fetch over received samples' parent requests).
 const useWipCreationData = () => {
   const [experimentTypes, setExperimentTypes] = lS([]);
-  const [samples, setSamples] = lS([]);
+  const [pickerSamples, setPickerSamples] = lS([]);
   const [equipment, setEquipment] = lS([]);
   const [requestExpMap, setRequestExpMap] = lS(new Map());
   const [loading, setLoading] = lS(true);
@@ -111,13 +111,8 @@ const useWipCreationData = () => {
       window.api.equipment.list(),
     ])
       .then(async ([exps, allSamples, equip]) => {
-        // Coarse filter: at the lab (received or already processing for a
-        // different experiment) + not currently locked to an active WIP.
-        // Processing wafers still need to land in new WIPs when their parent
-        // request requires more experiments — e.g. a TCT-processed wafer
-        // still owes CP + FT, which become eligible once its first WIP closes.
-        // Backend would 400 on a duplicate (sample,experiment) WIP anyway;
-        // see INTEGRATION_GAPS.md §2.8 follow-up for a finer pre-check.
+        // Samples that are physically at the lab and not locked to an active WIP.
+        // These are the only rows the backend allows WIP creation for.
         const eligible = allSamples.filter(s =>
           (s.raw_status === 'received' || s.raw_status === 'processing') && !s.hasWip
         );
@@ -125,10 +120,45 @@ const useWipCreationData = () => {
         const reqDetails = await Promise.all(
           reqIds.map(id => window.api.requests.get(id).catch(() => null))
         );
+
+        // Which requests have reached backend `in_progress` — the gate for WIP creation.
+        const readyReqIds = new Set(
+          reqDetails.filter(r => r && r.rawStatus === 'in_progress').map(r => r.id)
+        );
+
+        // Build experiment-type map (requestId → expId[]) for the eligibility filter.
         const map = new Map();
         reqDetails.forEach(r => { if (r) map.set(r.id, r.expIds || []); });
+
+        // Build the full picker list:
+        //   1. Eligible (received/processing) samples — enabled if request is ready,
+        //      disabled with reason if request is still `sample_shipped`.
+        //   2. Sibling samples from the same requests that are NOT yet received —
+        //      shown disabled so the user can see what's still holding things up.
+        const eligibleIds = new Set(eligible.map(s => s.id));
+        const combined = eligible.map(s => ({
+          ...s,
+          blockReason: readyReqIds.has(s.requestId) ? null : 'request_not_ready',
+        }));
+        reqDetails.forEach(req => {
+          if (!req) return;
+          (req.samples || []).forEach(s => {
+            if (eligibleIds.has(s.id)) return; // already in combined as eligible
+            combined.push({
+              id: s.id,
+              wafer: s.wafer,
+              size: s.size,
+              requestId: req.id,
+              raw_status: s.raw_status,
+              status: s.status,
+              hasWip: false,
+              blockReason: 'not_received',
+            });
+          });
+        });
+
         setExperimentTypes(exps);
-        setSamples(eligible);
+        setPickerSamples(combined);
         setEquipment(equip);
         setRequestExpMap(map);
         setError(null);
@@ -137,7 +167,7 @@ const useWipCreationData = () => {
       .finally(() => setLoading(false));
   }, []);
 
-  return { experimentTypes, samples, equipment, requestExpMap, loading, error };
+  return { experimentTypes, pickerSamples, equipment, requestExpMap, loading, error };
 };
 
 // Live experiment-types catalogue. Both the equipment modal and the
@@ -1701,16 +1731,18 @@ const WipCreationModal = ({ open, onClose, onSaved }) => {
   return <WipCreationModalInner onClose={onClose} onSaved={onSaved}/>;
 };
 const WipCreationModalInner = ({ onClose, onSaved }) => {
-  const { experimentTypes, samples, equipment, requestExpMap, loading, error: loadError } = useWipCreationData();
+  const { experimentTypes, pickerSamples, equipment, requestExpMap, loading, error: loadError } = useWipCreationData();
   const [experimentTypeId, setExperimentTypeId] = lS('');
   const [selectedSampleIds, setSelectedSampleIds] = lS([]);
   const [note, setNote] = lS('');
   const [busy, setBusy] = lS(false);
   const [submitErr, setSubmitErr] = lS(null);
 
-  // Samples whose parent request actually needs the chosen experiment.
+  // All samples for the chosen experiment type — includes blocked ones so
+  // the user can see the full batch picture. Filtering is by requestExpMap:
+  // if the request includes the chosen experiment, all its samples appear.
   const eligibleSamples = experimentTypeId
-    ? samples.filter(s => (requestExpMap.get(s.requestId) || []).includes(experimentTypeId))
+    ? pickerSamples.filter(s => (requestExpMap.get(s.requestId) || []).includes(experimentTypeId))
     : [];
 
   // Selection cap = max(capacity) across capable equipment (every status,
@@ -1725,15 +1757,21 @@ const WipCreationModalInner = ({ onClose, onSaved }) => {
     null,
   );
 
-  // Drop selections that aren't in the eligible set (e.g. when switching
-  // experiment_type the previous picks may stop matching).
+  // When experiment type changes, drop any selection that is now blocked
+  // (only non-blocked samples can be selected).
   React.useEffect(() => {
-    const set = new Set(eligibleSamples.map(s => s.id));
-    setSelectedSampleIds(prev => prev.filter(id => set.has(id)));
+    const selectableIds = new Set(
+      eligibleSamples.filter(s => !s.blockReason).map(s => s.id)
+    );
+    setSelectedSampleIds(prev => prev.filter(id => selectableIds.has(id)));
   // eslint-disable-next-line — depend on experiment_type only
   }, [experimentTypeId]);
 
   const toggleSample = (id) => {
+    // Guard: blocked samples can't be selected (checkbox is also disabled,
+    // but this prevents any programmatic bypass).
+    const s = pickerSamples.find(s => s.id === id);
+    if (s?.blockReason) return;
     setSelectedSampleIds(prev => {
       if (prev.includes(id)) return prev.filter(x => x !== id);
       if (maxBatch && prev.length >= maxBatch) return prev;
@@ -1818,24 +1856,37 @@ const WipCreationModalInner = ({ onClose, onSaved }) => {
               }}>
                 {eligibleSamples.length === 0 ? (
                   <div style={{ padding: '14px 16px', color: muted, fontSize: 13, textAlign: 'center' }}>
-                    No received wafers whose request needs this experiment.
+                    No wafers found for this experiment type.
                   </div>
                 ) : eligibleSamples.map(s => {
                   const checked = selectedSampleIds.includes(s.id);
+                  const blocked = !!s.blockReason;
                   const atCap = maxBatch > 0 && selectedSampleIds.length >= maxBatch && !checked;
+                  const disabled = blocked || atCap || maxBatch === 0;
+                  const reasonLabel =
+                    s.blockReason === 'not_received'     ? 'Not yet received at lab' :
+                    s.blockReason === 'request_not_ready'? 'Pending — waiting for other samples' :
+                    null;
                   return (
                     <label key={s.id} style={{
                       display: 'grid', gridTemplateColumns: '20px 1fr auto', gap: 10,
                       alignItems: 'center', padding: '10px 14px',
                       borderTop: `1px solid ${lineSoft}`,
-                      cursor: atCap ? 'not-allowed' : 'pointer',
-                      background: checked ? '#f7f6fb' : '#fff',
-                      opacity: atCap ? 0.5 : 1,
+                      cursor: disabled ? 'not-allowed' : 'pointer',
+                      background: checked ? '#f7f6fb' : blocked ? '#fafafa' : '#fff',
+                      opacity: blocked ? 0.55 : atCap ? 0.5 : 1,
                     }}>
-                      <input type="checkbox" checked={checked} disabled={atCap || maxBatch === 0}
+                      <input type="checkbox" checked={checked} disabled={disabled}
                         onChange={() => toggleSample(s.id)} style={{ accentColor: accent }}/>
-                      <span style={{ fontFamily: 'var(--font-mono)', fontSize: 13, fontWeight: 600, color: ink }}>{s.wafer}</span>
-                      <span style={{ fontSize: 12, color: muted, whiteSpace: 'nowrap' }}>{s.size} · Req #{String(s.requestId).padStart(4,'0')}</span>
+                      <span style={{ fontFamily: 'var(--font-mono)', fontSize: 13, fontWeight: 600, color: blocked ? muted : ink }}>{s.wafer}</span>
+                      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 2 }}>
+                        <span style={{ fontSize: 12, color: muted, whiteSpace: 'nowrap' }}>{s.size} · Req #{String(s.requestId).padStart(4,'0')}</span>
+                        {reasonLabel && (
+                          <span style={{ fontSize: 11, color: '#b45309', fontWeight: 600, whiteSpace: 'nowrap' }}>
+                            {reasonLabel}
+                          </span>
+                        )}
+                      </div>
                     </label>
                   );
                 })}
@@ -1915,8 +1966,13 @@ const LabWipDetail = ({ id, navigate, showToast }) => {
   const expCode = (findExp(w.experimentId)?.code) || (w.experimentName ? w.experimentName.split(/\s+/).map(t => t[0]).join('').slice(0, 4).toUpperCase() : '—');
   const isActive = w.status !== 'completed' && w.status !== 'aborted';
   // Only one active dispatch per WIP at a time — gate "Create Dispatch"
-  // on there being no open one (anything not yet completed/aborted).
-  const hasActiveDispatch = w.dispatches.some(d => d.status !== 'completed' && d.status !== 'aborted');
+  // on there being no open one. Must mirror the backend's
+  // TERMINAL_DISPATCH_STATUSES = {completed, aborted, pending_redispatch}.
+  // `pending_redispatch` normalizes to 'exception' on the FE so we check
+  // raw_status explicitly; otherwise a superseded dispatch would block the button.
+  const hasActiveDispatch = w.dispatches.some(d =>
+    d.status !== 'completed' && d.status !== 'aborted' && d.raw_status !== 'pending_redispatch'
+  );
 
   return (
     <Page
@@ -1957,6 +2013,31 @@ const LabWipDetail = ({ id, navigate, showToast }) => {
           {actionError}
         </div>
       )}
+
+      {(() => {
+        const exceptionDispatch = w.dispatches.find(d => d.raw_status === 'execution_exception');
+        if (!exceptionDispatch) return null;
+        return (
+          <div style={{
+            padding: '12px 16px', marginBottom: 14, borderRadius: 10,
+            background: '#fef3e2', color: '#9a4715', fontSize: 13.5, fontWeight: 500,
+            border: '1px solid #f6d9b0',
+            display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12,
+          }}>
+            <span>
+              <LF.Alert size={14} color="#9a4715" style={{ verticalAlign: '-2px', marginRight: 6 }}/>
+              {exceptionDispatch.code} has an execution exception. Abort or redispatch it to continue.
+            </span>
+            <button
+              onClick={() => navigate({ page: 'lab_dispatch_detail', id: exceptionDispatch.id })}
+              style={{
+                background: '#9a4715', color: '#fff', border: 'none', borderRadius: 6,
+                padding: '5px 12px', fontSize: 12.5, fontWeight: 600, cursor: 'pointer', whiteSpace: 'nowrap',
+              }}
+            >View Dispatch</button>
+          </div>
+        );
+      })()}
 
       <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) 320px', gap: 18, alignItems: 'flex-start' }}>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
@@ -2433,6 +2514,8 @@ const LabDispatchDetail = ({ id, navigate, showToast }) => {
     return () => clearInterval(h);
   }, [d?.status]);
   const [recordOpen, setRecordOpen] = lS(false);
+  const [exceptionOpen, setExceptionOpen] = lS(false);
+  const [exceptionNote, setExceptionNote] = lS('');
   const [busy, setBusy] = lS(false);
   const [actionError, setActionError] = lS(null);
 
@@ -2495,11 +2578,27 @@ const LabDispatchDetail = ({ id, navigate, showToast }) => {
     <PrimaryBtn icon={<LF.Play size={14}/>} success disabled={busy} onClick={() => confirmThen(`Start ${d.code}?`, () => window.api.dispatches.start(d.id), `${d.code} started`)}>{busy ? '…' : 'Start Running'}</PrimaryBtn>
   </>;
   else if (d.status === 'running') actions = <>
-    <SecondaryBtn danger disabled={busy} onClick={() => confirmThen(`Flag ${d.code} as an exception?`, () => window.api.dispatches.reportException(d.id, ''), `${d.code} flagged exception`)}>Mark Exception</SecondaryBtn>
+    <SecondaryBtn danger disabled={busy} onClick={() => { setExceptionNote(''); setExceptionOpen(true); }}>Mark Exception</SecondaryBtn>
     <PrimaryBtn icon={<LF.Check size={14}/>} disabled={busy} onClick={() => confirmThen(`Unload ${d.code}?`, () => window.api.dispatches.unload(d.id), `${d.code} unloaded`)}>{busy ? '…' : 'Mark Unloaded'}</PrimaryBtn>
   </>;
-  else if (d.status === 'unloaded' || d.status === 'exception') actions = <>
+  else if (d.status === 'unloaded') actions = <>
     <PrimaryBtn icon={<LF.ClipboardList size={14}/>} disabled={busy} onClick={() => setRecordOpen(true)}>Record Result</PrimaryBtn>
+  </>;
+  else if (d.status === 'exception' && d.raw_status === 'execution_exception') actions = <>
+    <SecondaryBtn danger disabled={busy} onClick={async () => {
+      if (!window.confirm(`Abort ${d.code}? The dispatch will be closed and the WIP will remain open for a new dispatch.`)) return;
+      setBusy(true);
+      setActionError(null);
+      try {
+        await window.api.dispatches.abort(d.id);
+        showToast && showToast(`${d.code} aborted — you can now create a new dispatch`);
+        navigate({ page: 'lab_wip_detail', id: d.wipId });
+      } catch (e) {
+        setActionError(e.message || String(e));
+        setBusy(false);
+      }
+    }}>Abort Dispatch</SecondaryBtn>
+    <PrimaryBtn icon={<LF.Refresh size={14}/>} disabled={busy} onClick={() => confirmThen(`Redispatch ${d.code}? A new dispatch will be created with the same equipment and recipe.`, () => window.api.dispatches.redispatch(d.id), `${d.code} redispatched`)}>{busy ? '…' : 'Redispatch'}</PrimaryBtn>
   </>;
 
   const wipCode = `WIP-${String(d.wipId).padStart(4, '0')}`;
@@ -2626,7 +2725,7 @@ const LabDispatchDetail = ({ id, navigate, showToast }) => {
         {(d.status === 'aborted' || d.status === 'exception') && (
           <div style={{ padding: '12px 24px', borderTop: `1px solid ${lineSoft}`, background: '#fbe4e6', color: '#a93445', fontSize: 13, fontWeight: 600 }}>
             <LF.Alert size={14} color="#a93445" style={{ verticalAlign: '-2px', marginRight: 6 }}/>
-            {d.status === 'aborted' ? 'Dispatch aborted before completion.' : 'Dispatch ended with an exception — record details below.'}
+            {d.status === 'aborted' ? 'Dispatch aborted before completion.' : d.raw_status === 'pending_redispatch' ? 'Dispatch superseded — a new dispatch has been created to continue this WIP.' : 'Execution exception — abort this dispatch to open a new one, or redispatch on the same equipment.'}
           </div>
         )}
       </Card>
@@ -2655,6 +2754,10 @@ const LabDispatchDetail = ({ id, navigate, showToast }) => {
               <div style={{ fontFamily: 'var(--font-mono)', fontSize: 13, color: ink }}>{d.dispatchedAt || '—'}</div>
               <div style={{ fontSize: 13, color: text2 }}>Completed At</div>
               <div style={{ fontFamily: 'var(--font-mono)', fontSize: 13, color: ink }}>{d.completedAt || '—'}</div>
+              {d.note && <>
+                <div style={{ fontSize: 13, color: '#a93445', fontWeight: 600 }}>Exception Note</div>
+                <div style={{ fontSize: 13.5, color: ink, lineHeight: 1.55 }}>{d.note}</div>
+              </>}
             </div>
           </Card>
 
@@ -2749,6 +2852,40 @@ const LabDispatchDetail = ({ id, navigate, showToast }) => {
           );
         }}
       />
+
+      <Modal
+        open={exceptionOpen}
+        onClose={() => setExceptionOpen(false)}
+        title="Mark Execution Exception"
+        width={480}
+        footer={<>
+          <SecondaryBtn onClick={() => setExceptionOpen(false)}>Cancel</SecondaryBtn>
+          <PrimaryBtn
+            danger
+            disabled={busy || !exceptionNote.trim()}
+            onClick={async () => {
+              setExceptionOpen(false);
+              await runAction(
+                () => window.api.dispatches.reportException(d.id, exceptionNote.trim()),
+                `${d.code} flagged as exception`,
+              );
+            }}
+          >Confirm Exception</PrimaryBtn>
+        </>}
+      >
+        <div style={{ fontSize: 13.5, color: ink, marginBottom: 16 }}>
+          Describe what went wrong during this dispatch run. This note will be permanently attached to the dispatch record.
+        </div>
+        <label style={{ fontSize: 12.5, fontWeight: 600, color: text2, display: 'block', marginBottom: 6 }}>
+          Exception Reason <span style={{ color: '#c0394a' }}>*</span>
+        </label>
+        <TextArea
+          value={exceptionNote}
+          onChange={e => setExceptionNote(e.target.value)}
+          placeholder="e.g. Equipment malfunction — temperature spike at 15 min mark"
+          style={{ width: '100%' }}
+        />
+      </Modal>
     </Page>
   );
 };
