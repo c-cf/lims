@@ -238,6 +238,10 @@ def list_requests(
 
     if _is_fab_user(request):
         qs = qs.filter(requester=request.auth)
+    else:
+        # Lab staff and managers never see draft requests — drafts are
+        # private to the requester until they are submitted.
+        qs = qs.exclude(status=RequestStatus.DRAFT)
 
     if status:
         qs = qs.filter(status=status)

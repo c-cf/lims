@@ -79,25 +79,45 @@ class TestRequestList:
         assert len(data) == 1
         assert data[0]["requester"]["id"] == fab_user.pk
 
-    def test_list_requests_as_lab_staff_sees_all(self, client, auth_headers, lab_staff):
-        """Lab staff should see all requests."""
-        RequestFactory()
-        RequestFactory()
+    def test_list_requests_as_lab_staff_sees_all_non_draft(
+        self, client, auth_headers, lab_staff
+    ):
+        """Lab staff sees all non-draft requests; draft requests are hidden."""
+        RequestFactory(status=RequestStatus.PENDING_APPROVAL)
+        RequestFactory(status=RequestStatus.APPROVED)
+        RequestFactory(status=RequestStatus.DRAFT)  # must be excluded
 
         resp = client.get("/api/requests/", **auth_headers(lab_staff))
         assert resp.status_code == 200
-        assert len(resp.json()) == 2
+        data = resp.json()
+        assert len(data) == 2
+        assert all(r["status"] != "draft" for r in data)
 
-    def test_list_requests_filter_by_status(self, client, auth_headers, lab_staff):
-        """Can filter requests by status."""
+    def test_list_requests_draft_hidden_from_manager(
+        self, client, auth_headers, lab_manager
+    ):
+        """Lab managers never see draft requests in the listing."""
         RequestFactory(status=RequestStatus.DRAFT)
         RequestFactory(status=RequestStatus.PENDING_APPROVAL)
 
-        resp = client.get("/api/requests/?status=draft", **auth_headers(lab_staff))
+        resp = client.get("/api/requests/", **auth_headers(lab_manager))
         assert resp.status_code == 200
         data = resp.json()
         assert len(data) == 1
-        assert data[0]["status"] == "draft"
+        assert data[0]["status"] == "pending_approval"
+
+    def test_list_requests_filter_by_status(self, client, auth_headers, lab_staff):
+        """Can filter requests by status (non-draft statuses work normally)."""
+        RequestFactory(status=RequestStatus.PENDING_APPROVAL)
+        RequestFactory(status=RequestStatus.APPROVED)
+
+        resp = client.get(
+            "/api/requests/?status=pending_approval", **auth_headers(lab_staff)
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert len(data) == 1
+        assert data[0]["status"] == "pending_approval"
 
     def test_list_requests_unauthenticated(self, client):
         """Unauthenticated request returns 401."""
@@ -106,7 +126,7 @@ class TestRequestList:
 
     def test_list_requests_includes_urgency(self, client, auth_headers, lab_staff):
         """List response exposes the urgency field."""
-        RequestFactory(urgency="3d")
+        RequestFactory(status=RequestStatus.PENDING_APPROVAL, urgency="3d")
 
         resp = client.get("/api/requests/", **auth_headers(lab_staff))
         assert resp.status_code == 200
@@ -116,9 +136,9 @@ class TestRequestList:
 
     def test_list_requests_filter_by_urgency(self, client, auth_headers, lab_staff):
         """Can filter requests by urgency."""
-        RequestFactory(urgency="3d")
-        RequestFactory(urgency="1w")
-        RequestFactory(urgency="2w")
+        RequestFactory(status=RequestStatus.PENDING_APPROVAL, urgency="3d")
+        RequestFactory(status=RequestStatus.PENDING_APPROVAL, urgency="1w")
+        RequestFactory(status=RequestStatus.PENDING_APPROVAL, urgency="2w")
 
         resp = client.get("/api/requests/?urgency=3d", **auth_headers(lab_staff))
         assert resp.status_code == 200
@@ -129,10 +149,10 @@ class TestRequestList:
     def test_list_requests_includes_sample_count(self, client, auth_headers, lab_staff):
         """Each list row exposes sample_count so the SPA's Fab Dashboard
         can render the wafers-per-row count without a second round-trip."""
-        req_with = RequestFactory()
+        req_with = RequestFactory(status=RequestStatus.PENDING_APPROVAL)
         SampleFactory(request=req_with)
         SampleFactory(request=req_with)
-        req_empty = RequestFactory()
+        req_empty = RequestFactory(status=RequestStatus.PENDING_APPROVAL)
 
         resp = client.get("/api/requests/", **auth_headers(lab_staff))
         assert resp.status_code == 200
@@ -838,14 +858,15 @@ class TestRequestDeleteDraft:
         assert resp.status_code == 204
 
     def test_delete_draft_removes_record(self, client, auth_headers, fab_user):
-        """Deleting a draft hard-deletes the DB record."""
+        """Deleting a draft hard-deletes the DB record and returns 204."""
         req = RequestFactory(requester=fab_user, status=RequestStatus.DRAFT)
         pk = req.pk
-        client.delete(
+        resp = client.delete(
             f"/api/requests/{pk}",
             content_type="application/json",
             **auth_headers(fab_user),
         )
+        assert resp.status_code == 204
         assert not Request.objects.filter(pk=pk).exists()
 
     def test_delete_non_draft_rejected(self, client, auth_headers, fab_user):
