@@ -1,8 +1,11 @@
-name: Publish Staging Docker Image
+name: Publish Backend Staging Docker Image
 
 on:
   push:
     branches: ["main"]
+    paths:
+      - "backend/**"
+      - ".github/workflows/backend-staging-image.yml"
   workflow_dispatch:
 
 permissions:
@@ -47,8 +50,8 @@ jobs:
       - name: Build and push backend image
         uses: docker/build-push-action@v6
         with:
-          context: .
-          file: ./Dockerfile
+          context: ./backend
+          file: ./backend/Dockerfile
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
