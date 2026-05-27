@@ -35,6 +35,10 @@ from apps.commissions.models import (
     SampleStatus,
     WaferSize,
 )
+from apps.commissions.services import (
+    check_all_samples_received,
+    check_request_completed,
+)
 from apps.commissions.state_machine import (
     InvalidTransitionError,
     validate_request_transition,
@@ -57,6 +61,7 @@ from apps.wip.models import (
     WIPSample,
     WIPStatus,
 )
+from apps.wip.services import update_experiment_statuses_on_unload
 from apps.wip.state_machine import (
     InvalidTransitionError as WIPInvalidTransitionError,
 )
@@ -869,28 +874,13 @@ def _sample_action(
 
         # Auto-transition request if all samples received
         if action == "receive":
-            _check_all_samples_received(sample.request)
+            req = Request.objects.select_for_update().get(pk=sample.request_id)
+            check_all_samples_received(req)
 
     if _is_htmx(request):
         sample = Sample.objects.select_related("request").get(pk=sample_id)
         return render(request, "web/samples/_row.html", {"sample": sample})
     return redirect(redirect_url)
-
-
-def _check_all_samples_received(req: Request) -> None:
-    req = Request.objects.select_for_update().get(pk=req.pk)
-    if req.status != RequestStatus.SAMPLE_SHIPPED:
-        return
-    received_statuses = {
-        SampleStatus.RECEIVED,
-        SampleStatus.PROCESSING,
-        SampleStatus.COMPLETED,
-    }
-    total = req.samples.count()
-    received_count = req.samples.filter(status__in=received_statuses).count()
-    if total > 0 and received_count == total:
-        req.status = RequestStatus.IN_PROGRESS
-        req.save()
 
 
 @role_required("lab_staff", "lab_manager")
@@ -1110,7 +1100,8 @@ def wip_complete(request: HttpRequest, wip_id: int) -> HttpResponse:
         wip.completed_at = timezone.now()
         wip.save()
 
-        # Auto-complete samples whose all experiment statuses are done.
+        # Auto-complete samples whose all experiment statuses are done,
+        # then cascade per-request completion via the canonical service.
         for sample in Sample.objects.select_for_update().filter(
             pk__in=wip.samples.values_list("pk", flat=True)
         ):
@@ -1125,29 +1116,12 @@ def wip_complete(request: HttpRequest, wip_id: int) -> HttpResponse:
                     s_target = validate_sample_transition(sample.status, "complete")
                     sample.status = s_target
                     sample.save(update_fields=["status", "updated_at"])
-                    _check_request_auto_complete(sample.request_id)
+                    req = Request.objects.select_for_update().get(pk=sample.request_id)
+                    check_request_completed(req)
                 except InvalidTransitionError:
                     pass
 
     return redirect("web:wip-detail", wip_id=wip_id)
-
-
-def _check_request_auto_complete(request_id: int) -> None:
-    """Auto-complete request when all samples are in terminal state."""
-    req = Request.objects.select_for_update().get(pk=request_id)
-    if req.status != RequestStatus.IN_PROGRESS:
-        return
-    terminal_statuses = {
-        SampleStatus.COMPLETED,
-        SampleStatus.VOIDED,
-        SampleStatus.RETURNED,
-    }
-    total = req.samples.count()
-    terminal_count = req.samples.filter(status__in=terminal_statuses).count()
-    if total > 0 and terminal_count == total:
-        req.status = RequestStatus.COMPLETED
-        req.completed_at = timezone.now()
-        req.save(update_fields=["status", "completed_at", "updated_at"])
 
 
 @role_required("lab_staff", "lab_manager")
@@ -1308,9 +1282,6 @@ def recipes_for_equipment(request: HttpRequest) -> HttpResponse:
 def _dispatch_action(
     request: HttpRequest, dispatch_id: int, action: str
 ) -> HttpResponse:
-    # Lazy import to avoid apps.web → apps.wip.api at module load.
-    from apps.wip.api import _update_experiment_statuses_on_unload
-
     with transaction.atomic():
         dispatch = get_object_or_404(
             Dispatch.objects.select_for_update().select_related(
@@ -1341,7 +1312,7 @@ def _dispatch_action(
         # the legacy UI's Record Result modal can show the outcomes
         # before the operator finalises a comment.
         if action == "unload":
-            _update_experiment_statuses_on_unload(dispatch)
+            update_experiment_statuses_on_unload(dispatch)
     return redirect("web:dispatch-detail", dispatch_id=dispatch_id)
 
 

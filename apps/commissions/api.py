@@ -35,6 +35,10 @@ from apps.commissions.schemas import (
     SampleExperimentStatusOut,
     SampleListOut,
 )
+from apps.commissions.services import (
+    check_all_samples_received,
+    check_request_completed,
+)
 from apps.commissions.state_machine import (
     InvalidTransitionError,
     validate_request_transition,
@@ -109,70 +113,6 @@ def _get_sample_for_user(sample_id: int, request: HttpRequest) -> Sample | None:
         return qs.get(pk=sample_id)
     except Sample.DoesNotExist:
         return None
-
-
-def _initialize_sample_experiment_statuses(req: Request) -> None:
-    """Create SampleExperimentStatus rows for every sample × experiment_type
-    in this request.  Called once when the request transitions to IN_PROGRESS.
-    """
-    request_experiments = req.request_experiments.select_related(
-        "experiment_type"
-    ).all()
-    for sample in req.samples.all():
-        for re in request_experiments:
-            SampleExperimentStatus.objects.get_or_create(
-                sample=sample,
-                experiment_type=re.experiment_type,
-            )
-
-
-def _check_all_samples_received(req: Request) -> None:
-    """If all samples in a sample_shipped request are accounted for,
-    auto-transition the request to in_progress.
-
-    Counts RECEIVED, SPLIT, COMPLETED, VOIDED, and RETURNED — any state
-    that means the sample has been definitively dealt with.
-
-    Caller must hold a lock on the request row (select_for_update).
-    """
-    if req.status != RequestStatus.SAMPLE_SHIPPED:
-        return
-
-    accounted_statuses = {
-        SampleStatus.RECEIVED,
-        SampleStatus.PROCESSING,
-        SampleStatus.COMPLETED,
-        SampleStatus.VOIDED,
-        SampleStatus.RETURNED,
-    }
-    total = req.samples.count()
-    accounted_count = req.samples.filter(status__in=accounted_statuses).count()
-
-    if total > 0 and accounted_count == total:
-        req.status = RequestStatus.IN_PROGRESS
-        req.save()
-        _initialize_sample_experiment_statuses(req)
-
-
-def _check_request_completed(req: Request) -> None:
-    """If all samples are in terminal states, auto-complete the request.
-
-    Caller must hold a lock on the request row (select_for_update).
-    """
-    if req.status != RequestStatus.IN_PROGRESS:
-        return
-
-    terminal_statuses = {
-        SampleStatus.COMPLETED,
-        SampleStatus.VOIDED,
-        SampleStatus.RETURNED,
-    }
-    total = req.samples.count()
-    terminal_count = req.samples.filter(status__in=terminal_statuses).count()
-
-    if total > 0 and terminal_count == total:
-        req.status = RequestStatus.COMPLETED
-        req.save()
 
 
 def _lab_sample_action(
@@ -810,7 +750,7 @@ def receive_sample(request: HttpRequest, sample_id: int):
 
     def post_save_in_txn(sample: Sample) -> None:
         req = Request.objects.select_for_update().get(pk=sample.request_id)
-        _check_all_samples_received(req)
+        check_all_samples_received(req)
 
     return _lab_sample_action(
         request,
@@ -855,9 +795,9 @@ def void_sample(request: HttpRequest, sample_id: int):
 
     def post_save_in_txn(sample: Sample) -> None:
         req = Request.objects.select_for_update().get(pk=sample.request_id)
-        _check_all_samples_received(req)
+        check_all_samples_received(req)
         req.refresh_from_db()
-        _check_request_completed(req)
+        check_request_completed(req)
 
     return _lab_sample_action(
         request, sample_id, "void", post_save_in_txn=post_save_in_txn
@@ -873,9 +813,9 @@ def return_sample(request: HttpRequest, sample_id: int):
 
     def post_save_in_txn(sample: Sample) -> None:
         req = Request.objects.select_for_update().get(pk=sample.request_id)
-        _check_all_samples_received(req)
+        check_all_samples_received(req)
         req.refresh_from_db()
-        _check_request_completed(req)
+        check_request_completed(req)
 
     return _lab_sample_action(
         request, sample_id, "return", post_save_in_txn=post_save_in_txn
