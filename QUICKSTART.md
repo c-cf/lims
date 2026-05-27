@@ -29,6 +29,8 @@ uv run python manage.py migrate
 # 5. Seed
 uv run python manage.py seed_demo_users          # creates fab_user, lab_member, lab_manager
 uv run python manage.py seed_experiment_types    # creates 7 canonical experiment types
+uv run python manage.py seed_equipment           # creates equipment and capabilities
+uv run python manage.py seed_recipes             # creates recipes
 
 # 6. Start
 uv run python manage.py runserver                # http://localhost:8000
@@ -50,8 +52,8 @@ These are also the offline-demo credentials baked into `lims-frontend/src/login.
 
 After the SPA is running (see `lims-frontend` QUICKSTART):
 
-1. **lab_manager → Equipment** → `+ Add Equipment` × a few (e.g., `QA-TCT-01` capable of Temperature Cycling Test, `QA-HAST-01` capable of HAST, `QA-CP-A` capable of Circuit Probe). Set capacity 1–6.
-2. **lab_manager → Recipes** → `+ New Recipe` for each experiment type (e.g., `TCT_std` linked to Temperature Cycling Test with parameters `{cycles: 500, t_min: -55, t_max: 125}`).
+1. **lab_manager → Equipment** → confirm the seeded equipment exists (e.g., `QA-TCT-01`, `QA-HAST-01`, `QA-CP-A`).
+2. **lab_manager → Recipes** → confirm the seeded recipes exist (e.g., `TCT_Standard_500_v1`, `HAST_85_85_168h`).
 3. **fab_user → New Request** → fill in wafers + experiments → Submit.
 4. **lab_manager → All Requests** → pending one → Approve.
 5. **fab_user → request detail** → Ship Wafers.
