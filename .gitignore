@@ -2,6 +2,8 @@ skills-lock.json
 .DS_Store
 *.pem
 .env
+.env.local
+.env.*.local
 .envrc
 
 # BACKEND
@@ -32,8 +34,15 @@ celerybeat-schedule
 
 node_modules/
 .next/
+/out/
+/build
 .pnp
 .pnp.*
+.yarn/*
+!.yarn/patches
+!.yarn/plugins
+!.yarn/releases
+!.yarn/versions
 coverage/
 .vercel
 npm-debug.log*

@@ -1,121 +1,114 @@
 # LIMS Full Stack
 
-This repository contains the rebuilt LIMS MVP:
+- `backend/` — Django Ninja API, PostgreSQL, JWT auth, WIP/dispatch workflow
+- `frontend/` — Next.js 16, role-based routing (fab_user / lab_member / lab_manager), server-side API proxy
 
-- `backend`: Django Ninja API, PostgreSQL schema, JWT auth, WIP/dispatch workflow, Celery equipment simulation, SSE, and reports.
-- `frontend`: role-routed Next.js frontend connected to the live API.
-
-## Run With Docker Compose
+## Quick Start (Docker Compose)
 
 ```bash
-git submodule update --init --recursive
-git -C frontend checkout -b nextjs origin/nextjs
-git -C backend checkout -b test-warren origin/test-warren
-
 cp .env.example .env
 docker compose up --build
 ```
 
-Services (expose these port if you are on remote):
+| Service      | URL                            |
+|--------------|-------------------------------|
+| Frontend     | http://localhost:3000          |
+| Backend API  | http://localhost:8000/api      |
+| API docs     | http://localhost:8000/api/docs |
+| PostgreSQL   | localhost:5432                 |
 
-- Frontend: http://localhost:3000
-- Backend API: http://localhost:8000/api
-- API docs: http://localhost:8000/api/docs
-- PostgreSQL: localhost:5432
-- Redis: localhost:6379
+On first boot the database is migrated and seeded with demo accounts automatically.
 
-The application starts with a clean database. On first launch, create the first
-lab manager from the login screen. After that, use the manager account APIs/UI to
-create fab and lab users. Expose
+### Demo accounts
+
+| Role        | Username      | Password          |
+|-------------|---------------|-------------------|
+| Lab Manager | `lab_manager` | `eWoN48kU0QrEV8B` |
+| Lab Member  | `lab_member`  | `t26fnPyedon6aFz` |
+| Fab User    | `fab_user`    | `mcv8uPKSvqz8Yru` |
+
+### Remote server
+
+Set `SERVER_IP`, `BACKEND_PORT`, and `FRONTEND_PORT` in `.env` before running:
+
+```bash
+SERVER_IP=192.168.1.100 BACKEND_PORT=8000 FRONTEND_PORT=3000 docker compose up --build
+```
+
+---
 
 ## Local Development
 
-### Backend Setup
+### Backend
 
-**Prerequisites:**
-- Python 3.10+
-- PostgreSQL 12+ (or Docker)
-- Redis (optional, for Celery workers)
-
-**Installation:**
+**Prerequisites:** Python 3.12+
 
 ```bash
 cd backend
 
-# Create and activate virtual environment
-python -m venv .venv
-source .venv/bin/activate  # On Windows: .venv\Scripts\activate
+# Install with uv (recommended)
+uv sync
 
-# Install dependencies
-pip install -e .
-pip install pytest pytest-django factory-boy ruff
+# Or with pip
+pip install -e ".[dev]"
 ```
 
-**Configuration:**
-
 ```bash
-# Copy environment file from root and update with your settings
+# Configure — SQLite works locally without DATABASE_URL
 cp ../.env.example .env
-# Edit .env to configure:
-# - DJANGO_SECRET_KEY (generate with: python -c 'from django.core.management.utils import get_random_secret_key; print(get_random_secret_key())')
-# - DEBUG=True for development
-# - DATABASE_URL=postgres://user:password@localhost:5432/lims (if using PostgreSQL)
-```
 
-**Database Setup:**
-
-```bash
-# Run migrations
+# Migrate + seed demo data
 python manage.py migrate
+python manage.py seed_demo_users
+python manage.py seed_experiment_types
+python manage.py seed_equipment
+python manage.py seed_recipes
 
-# Create superuser (lab manager) for first login
-python manage.py createsuperuser
-
-# Optional: Load demo data for testing
-python manage.py seed_demo
-```
-
-**Running the Server:**
-
-```bash
-# Basic development server
+# Run server
 python manage.py runserver
-
-# With Celery workers (background tasks)
-celery -A config worker --loglevel=info  # In another terminal
-
-# Simulated experiment duration for all Celery equipment workers
-EXPERIMENT_DURATION_SECONDS=15 celery -A config worker --loglevel=info
-
-# Without Redis/Celery (eager task execution)
-CELERY_TASK_ALWAYS_EAGER=True python manage.py runserver
 ```
 
-**Testing:**
-
 ```bash
-# Run all tests
+# Tests
 pytest
-
-# Run specific test file
 pytest tests/test_api.py -v
-
-# With coverage
 pytest --cov=src
 ```
 
-**API Documentation:**
+### Frontend
 
-Once running, access the interactive API docs at: http://localhost:8000/api/docs
-
-### Frontend Setup
+**Prerequisites:** Node 22+
 
 ```bash
 cd frontend
-cp .env.example .env.local
+cp ../.env.example .env.local   # sets LIMS_BACKEND_URL=http://localhost:8000
 npm install
 npm run dev
 ```
 
-For a single-process local backend without Redis/Celery workers, run the backend with `CELERY_TASK_ALWAYS_EAGER=True`.
-For Docker Compose, set `EXPERIMENT_DURATION_SECONDS` in `.env`, then restart `backend` and all `worker-*` services.
+The frontend proxies all `/api/*` requests server-side to `LIMS_BACKEND_URL`. No browser CORS issues.
+
+```bash
+npm run lint    # ESLint
+npm run build   # production build
+```
+
+---
+
+## Architecture
+
+```
+browser → Next.js (3000) → /api/* route handler → Django (8000)
+```
+
+All API calls go through the Next.js server-side proxy. `LIMS_BACKEND_URL` controls where the proxy points — `http://localhost:8000` for local dev, `http://backend:8000` inside Docker Compose.
+
+### Role routing
+
+| Role          | Entry point            |
+|---------------|------------------------|
+| `fab_user`    | `/fab/dashboard`       |
+| `lab_member`  | `/lab/dashboard`       |
+| `lab_manager` | `/manager/dashboard`   |
+
+Root `/` redirects to the appropriate dashboard based on the stored session, or to `/login` if unauthenticated.
