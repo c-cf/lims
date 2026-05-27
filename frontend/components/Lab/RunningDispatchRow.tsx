@@ -1,10 +1,10 @@
 // @ts-nocheck
 "use client";
 import React from 'react';
-import findExp from '@/components/Lab/findExp';
-import lineSoft from '@/components/Lab/lineSoft';
-import muted from '@/components/Lab/muted';
-import ink from '@/components/Lab/ink';
+import findExp from '@/components/Lab/utils/findExp';
+import { lineSoft } from '@/lib/colors';
+import { muted } from '@/lib/colors';
+import { ink } from '@/lib/colors';
 import Pill from '@/components/Manager/Pill';
 
 const RunningDispatchRow=({d,wip,navigate})=>{const exp=findExp(d.experimentId);const isRunning=d.status==='running';const pct=React.useMemo(()=>{if(!d.startedAt)return 0;const start=new Date(d.startedAt.replace(' ','T')).getTime();const elapsed=Date.now()-start;return Math.max(8,Math.min(94,elapsed/(1000*60*60*24)*100));},[d.startedAt]);return<button onClick={()=>navigate({page:'lab_dispatch_detail',id:d.id})}style={{display:'block',width:'100%',textAlign:'left',padding:'16px 22px',borderTop:`1px solid ${lineSoft}`,background:'#fff',border:'none',cursor:'pointer',fontFamily:'inherit',transition:'background 0.15s'}}onMouseEnter={e=>e.currentTarget.style.background='#faf9fc'}onMouseLeave={e=>e.currentTarget.style.background='#fff'}>

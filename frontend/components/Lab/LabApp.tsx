@@ -9,7 +9,7 @@ import LabWipDetail from '@/components/Lab/LabWipDetail';
 import LabDispatchList from '@/components/Lab/LabDispatchList';
 import LabDispatchDetail from '@/components/Lab/LabDispatchDetail';
 import LabEquipment from '@/components/Lab/LabEquipment';
-import ink from '@/components/Lab/ink';
+import { ink } from '@/lib/colors';
 
 const LabApp=({route,navigate,canManage=false})=>{const[toast,setToast]=React.useState(null);const showToast=msg=>{setToast({msg,t:Date.now()});setTimeout(()=>setToast(null),2200);};let page=null;const p=route.page;if(p==='lab_dashboard'||p==='dashboard')page=<LabDashboard navigate={navigate}/>;else if(p==='lab_samples'||p==='samples')page=<LabSamples navigate={navigate}defaultTab={route.tab||'all'}showToast={showToast}/>;else if(p==='lab_wafer')page=<LabWaferDetail id={route.id}navigate={navigate}showToast={showToast}/>;else if(p==='lab_wip'||p==='wip')page=<LabWipList navigate={navigate}showToast={showToast}/>;else if(p==='lab_wip_detail')page=<LabWipDetail id={route.id}navigate={navigate}showToast={showToast}/>;else if(p==='lab_dispatches'||p==='dispatches')page=<LabDispatchList navigate={navigate}defaultTab={route.tab||'active'}/>;else if(p==='lab_dispatch_detail')page=<LabDispatchDetail id={route.id}navigate={navigate}showToast={showToast}/>;else if(p==='lab_equipment'||p==='equipment')page=<LabEquipment navigate={navigate}canManage={canManage}showToast={showToast}/>;else page=<LabDashboard navigate={navigate}/>;return<>
       {page}

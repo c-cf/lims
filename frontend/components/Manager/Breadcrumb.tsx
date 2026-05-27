@@ -2,9 +2,9 @@
 "use client";
 import React from 'react';
 import * as I from '@/components/ui/I';
-import mMuted from '@/components/Manager/mMuted';
-import mAccent from '@/components/Manager/mAccent';
-import mText2 from '@/components/Manager/mText2';
+import { muted as mMuted } from '@/lib/colors';
+import { accent as mAccent } from '@/lib/colors';
+import { text2 as mText2 } from '@/lib/colors';
 const MI=I;
 const Breadcrumb=({items})=><div style={{display:'inline-flex',alignItems:'center',gap:4,marginBottom:14,fontSize:13}}>
     {items.map((it,i)=><React.Fragment key={i}>

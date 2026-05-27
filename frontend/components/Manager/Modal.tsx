@@ -1,9 +1,9 @@
 // @ts-nocheck
 "use client";
 import * as I from '@/components/ui/I';
-import mLineSft from '@/components/Manager/mLineSft';
-import mInk from '@/components/Manager/mInk';
-import mMuted from '@/components/Manager/mMuted';
+import { lineSoft as mLineSft } from '@/lib/colors';
+import { ink as mInk } from '@/lib/colors';
+import { muted as mMuted } from '@/lib/colors';
 const MI=I;
 const Modal=({open,onClose,title,children,width=580,footer})=>{if(!open)return null;return<div onClick={onClose}style={{position:'fixed',inset:0,background:'rgba(20,20,28,0.45)',display:'flex',alignItems:'center',justifyContent:'center',zIndex:200,padding:20,animation:'fade-in 0.12s ease-out'}}>
       <div onClick={e=>e.stopPropagation()}style={{background:'#fff',borderRadius:14,width:'100%',maxWidth:width,boxShadow:'0 30px 60px -20px rgba(20,20,28,0.4)',maxHeight:'88vh',display:'flex',flexDirection:'column'}}>

@@ -2,19 +2,19 @@
 "use client";
 import React from 'react';
 import api from '@/lib/api';
-import useDispatchCreationData from '@/components/Lab/useDispatchCreationData';
+import useDispatchCreationData from '@/components/Lab/hooks/useDispatchCreationData';
 import Modal from '@/components/Manager/Modal';
 import SecondaryBtn from '@/components/Manager/SecondaryBtn';
 import PrimaryBtn from '@/components/Manager/PrimaryBtn';
-import line from '@/components/Lab/line';
-import text2 from '@/components/Lab/text2';
-import ink from '@/components/Lab/ink';
-import muted from '@/components/Lab/muted';
+import { line } from '@/lib/colors';
+import { text2 } from '@/lib/colors';
+import { ink } from '@/lib/colors';
+import { muted } from '@/lib/colors';
 import FieldLabel from '@/components/Manager/FieldLabel';
 import SelectInput from '@/components/Manager/SelectInput';
-import lineSoft from '@/components/Lab/lineSoft';
+import { lineSoft } from '@/lib/colors';
 import TextInput from '@/components/Manager/TextInput';
-import accent from '@/components/Lab/accent';
+import { accent } from '@/lib/colors';
 import TextArea from '@/components/Manager/TextArea';
 
 const AddDispatchModalInner=({onClose,wip,onCreated})=>{const{equipment,recipes,loading,error:loadError}=useDispatchCreationData(wip.experimentId);const[equipmentId,setEquipmentId]=React.useState('');const[recipeId,setRecipeId]=React.useState('');const[duration,setDuration]=React.useState('');const[note,setNote]=React.useState('');const[busy,setBusy]=React.useState(false);const[submitErr,setSubmitErr]=React.useState(null);const selectedRecipe=recipes.find(r=>r.id===recipeId);const selectedEquipment=equipment.find(e=>e.id===equipmentId);const wipCode=`WIP-${String(wip.id).padStart(4,'0')}`;const durationSec=duration===''?null:parseInt(duration,10);const durationValid=duration===''||Number.isFinite(durationSec)&&durationSec>0;const valid=equipmentId!==''&&recipeId!==''&&durationValid&&!loading;const submit=async()=>{setBusy(true);setSubmitErr(null);try{await api.wips.createDispatch(wip.id,{equipmentId,recipeId,estimatedDurationSeconds:duration===''?undefined:durationSec,note:note.trim()});onCreated&&onCreated();}catch(e){setSubmitErr(e.message||String(e));}finally{setBusy(false);}};const eqStatusChip=e=>{if(e.status==='maintenance'){return<span style={{fontSize:10.5,fontWeight:700,padding:'2px 7px',borderRadius:999,background:'#fbe4e6',color:'#a93445',marginLeft:6}}>maint</span>;}return null;};return<Modal open={true}onClose={onClose}title="Add Dispatch"width={680}footer={<>

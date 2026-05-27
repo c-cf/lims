@@ -1,18 +1,18 @@
 // @ts-nocheck
 "use client";
 import * as I from '@/components/ui/I';
-import useMgrDashboardData from '@/components/Manager/useMgrDashboardData';
+import useMgrDashboardData from '@/components/Manager/hooks/useMgrDashboardData';
 import Page from '@/components/Manager/Page';
 import MgrStatTile from '@/components/Manager/MgrStatTile';
 import Card from '@/components/Manager/Card';
 import CardHeader from '@/components/Manager/CardHeader';
-import mAccent from '@/components/Manager/mAccent';
-import mMuted from '@/components/Manager/mMuted';
-import mLineSft from '@/components/Manager/mLineSft';
-import mInk from '@/components/Manager/mInk';
-import mText2 from '@/components/Manager/mText2';
+import { accent as mAccent } from '@/lib/colors';
+import { muted as mMuted } from '@/lib/colors';
+import { lineSoft as mLineSft } from '@/lib/colors';
+import { ink as mInk } from '@/lib/colors';
+import { text2 as mText2 } from '@/lib/colors';
 import Pill from '@/components/Manager/Pill';
-import URGENCY_LABEL from '@/components/Manager/URGENCY_LABEL';
+import URGENCY_LABEL from '@/components/Manager/constants/urgencyLabel';
 import TrendChart from '@/components/Manager/TrendChart';
 const MI=I;
 const MgrDashboard=({navigate})=>{const{requests,equipmentCount,loading:countsLoading,error:countsError}=useMgrDashboardData();const pending=requests.filter(r=>r.status==='submitted');const inProgress=requests.filter(r=>r.status==='in_progress').length;const completed=requests.filter(r=>r.status==='completed').length;const initialLoad=countsLoading&&requests.length===0;const v=n=>initialLoad?'—':n;return<Page title="Dashboard"subtitle="Welcome back, lab_manager">

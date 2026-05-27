@@ -3,17 +3,17 @@
 import React from 'react';
 import * as I from '@/components/ui/I';
 import * as UI from '@/components/ui/UI';
-import useLabDispatches from '@/components/Lab/useLabDispatches';
+import useLabDispatches from '@/components/Lab/hooks/useLabDispatches';
 import Page from '@/components/Manager/Page';
-import muted from '@/components/Lab/muted';
-import line from '@/components/Lab/line';
-import ink from '@/components/Lab/ink';
-import text2 from '@/components/Lab/text2';
+import { muted } from '@/lib/colors';
+import { line } from '@/lib/colors';
+import { ink } from '@/lib/colors';
+import { text2 } from '@/lib/colors';
 import Card from '@/components/Manager/Card';
-import findExp from '@/components/Lab/findExp';
+import findExp from '@/components/Lab/utils/findExp';
 import Pill from '@/components/Manager/Pill';
-import lineSoft from '@/components/Lab/lineSoft';
-import accent from '@/components/Lab/accent';
+import { lineSoft } from '@/lib/colors';
+import { accent } from '@/lib/colors';
 const LF=I;
 const LabDispatchList=({navigate,defaultTab='active'})=>{const{dispatches,loading,error}=useLabDispatches();const[tab,setTab]=React.useState(defaultTab);const groups={active:['dispatched','pending','running'],record:['unloaded','exception'],done:['completed','aborted'],all:null};const filtered=groups[tab]===null?dispatches:dispatches.filter(d=>groups[tab].includes(d.status));const[,setTick]=React.useState(0);const hasRunning=filtered.some(d=>d.status==='running');React.useEffect(()=>{if(!hasRunning)return;const h=setInterval(()=>setTick(t=>t+1),1000);return()=>clearInterval(h);},[hasRunning]);const tabs=[{id:'active',label:'Active'},{id:'record',label:'Needs Result'},{id:'done',label:'Closed'},{id:'all',label:'All'}];if(loading&&dispatches.length===0){return<Page title="Dispatches"subtitle="Loading…">
         <div style={{padding:'60px 20px',textAlign:'center',color:muted,fontSize:14}}>Loading…</div>

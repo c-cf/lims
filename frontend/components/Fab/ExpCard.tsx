@@ -1,7 +1,7 @@
 // @ts-nocheck
 "use client";
 import * as I from '@/components/ui/I';
-import CATEGORY_BADGE from '@/components/Fab/CATEGORY_BADGE';
+import CATEGORY_BADGE from '@/components/Fab/constants/categoryBadge';
 const F=I;
 const ExpCard=({exp,active,onClick})=>{const badge=CATEGORY_BADGE[exp.group]||{bg:'#ecedf0',fg:'#5a5a6e'};return<button onClick={onClick}style={{display:'block',textAlign:'left',width:'100%',padding:'14px 16px',borderRadius:12,fontFamily:'inherit',cursor:'pointer',background:active?'#f5f4fb':'#fff',border:`1px solid ${active?'#6c67b8':'rgba(0,0,0,0.12)'}`,boxShadow:active?'0 0 0 3px rgba(108,103,184,0.10)':'none',transition:'all 0.12s'}}>
         <div style={{display:'flex',alignItems:'center',gap:10}}>

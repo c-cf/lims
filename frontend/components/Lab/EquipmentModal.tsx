@@ -2,18 +2,18 @@
 "use client";
 import React from 'react';
 import api from '@/lib/api';
-import useLabExperimentTypes from '@/components/Lab/useLabExperimentTypes';
+import useLabExperimentTypes from '@/components/Lab/hooks/useLabExperimentTypes';
 import Modal from '@/components/Manager/Modal';
 import SecondaryBtn from '@/components/Manager/SecondaryBtn';
 import PrimaryBtn from '@/components/Manager/PrimaryBtn';
 import FieldLabel from '@/components/Manager/FieldLabel';
 import TextInput from '@/components/Manager/TextInput';
-import muted from '@/components/Lab/muted';
+import { muted } from '@/lib/colors';
 import SelectInput from '@/components/Manager/SelectInput';
-import line from '@/components/Lab/line';
-import lineSoft from '@/components/Lab/lineSoft';
-import accent from '@/components/Lab/accent';
-import ink from '@/components/Lab/ink';
+import { line } from '@/lib/colors';
+import { lineSoft } from '@/lib/colors';
+import { accent } from '@/lib/colors';
+import { ink } from '@/lib/colors';
 import TextArea from '@/components/Manager/TextArea';
 
 const EquipmentModal=({open,onClose,onSaved,initial})=>{const{data:experimentTypes,loading:typesLoading}=useLabExperimentTypes();const[name,setName]=React.useState('');const[modelName,setModelName]=React.useState('');const[capacity,setCapacity]=React.useState('1');const[status,setStatus]=React.useState('available');const[capIds,setCapIds]=React.useState([]);const[paramsJson,setParamsJson]=React.useState('{}');const[busy,setBusy]=React.useState(false);const[err,setErr]=React.useState(null);const isEdit=!!initial;const initialCapIds=(initial?.capabilities||[]).map(c=>c.id);const capsChanged=isEdit&&(capIds.length!==initialCapIds.length||capIds.some(id=>!initialCapIds.includes(id))||initialCapIds.some(id=>!capIds.includes(id)));React.useEffect(()=>{if(!open)return;setErr(null);setBusy(false);if(initial){setName(initial.name||'');setModelName(initial.model||'');setCapacity(String(initial.capacity??1));setStatus(initial.raw_status||'available');setCapIds(initialCapIds);try{setParamsJson(JSON.stringify(initial.parameters||{},null,2)||'{}');}catch(_e){setParamsJson('{}');}}else{setName('');setModelName('');setCapacity('1');setStatus('available');setCapIds([]);setParamsJson('{}');}},[open,initial]);const toggleCap=id=>{setCapIds(prev=>prev.includes(id)?prev.filter(x=>x!==id):[...prev,id]);};const capacityNum=parseInt(capacity,10);const valid=name.trim().length>0&&name.trim().length<=200&&modelName.trim().length>0&&modelName.trim().length<=200&&Number.isFinite(capacityNum)&&capacityNum>0;const submit=async()=>{setBusy(true);setErr(null);let parameters;const trimmed=paramsJson.trim();if(!trimmed)parameters={};else{try{parameters=JSON.parse(trimmed);}catch(_e){setErr('Parameters must be valid JSON.');setBusy(false);return;}if(parameters===null||typeof parameters!=='object'||Array.isArray(parameters)){setErr('Parameters must be a JSON object.');setBusy(false);return;}}try{if(isEdit){await api.equipment.update(initial.id,{name:name.trim(),modelName:modelName.trim(),capacity:capacityNum,status,parameters});if(capsChanged){await api.equipment.setCapabilities(initial.id,capIds);}}else{await api.equipment.create({name:name.trim(),modelName:modelName.trim(),capacity:capacityNum,experimentTypeIds:capIds,parameters});}onSaved&&onSaved();}catch(e){setErr(e.message||String(e));}finally{setBusy(false);}};return<Modal open={open}onClose={onClose}title={isEdit?`Edit Equipment ${initial?.name||''}`:'New Equipment'}width={620}footer={<>

@@ -6,7 +6,7 @@ import SecondaryBtn from '@/components/Manager/SecondaryBtn';
 import PrimaryBtn from '@/components/Manager/PrimaryBtn';
 import FieldLabel from '@/components/Manager/FieldLabel';
 import TextArea from '@/components/Manager/TextArea';
-import mMuted from '@/components/Manager/mMuted';
+import { muted as mMuted } from '@/lib/colors';
 
 const ApprovalModal=({open,onClose,action,onSubmit})=>{const[reason,setReason]=React.useState('');React.useEffect(()=>{if(open)setReason('');},[open]);const map={APPROVE:{title:'Approve request',cta:'Approve',needs:false,hint:'Optional note recorded with the approval.'},RETURN:{title:'Return request',cta:'Return',needs:true,hint:'Tell the requester what needs to change.'},REJECT:{title:'Reject request',cta:'Reject',needs:true,hint:'Tell the requester why.'}}[action]||{};const valid=!map.needs||reason.trim().length>0;return<Modal open={open}onClose={onClose}title={map.title}width={520}footer={<>
         <SecondaryBtn onClick={onClose}>Cancel</SecondaryBtn>

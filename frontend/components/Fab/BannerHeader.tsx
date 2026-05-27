@@ -1,7 +1,7 @@
 // @ts-nocheck
 "use client";
 import React from 'react';
-import accent from '@/components/Lab/accent';
+import { accent } from '@/lib/colors';
 
 const BannerHeader=({icon,title,count,accent,twinkle=true,right,accentLight})=><div style={{position:'relative',overflow:'hidden',padding:'20px 24px 18px',background:'#1e1e24',color:'#fff',display:'flex',alignItems:'center',justifyContent:'space-between',gap:16}}>
       {}

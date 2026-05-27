@@ -4,18 +4,18 @@ import React from 'react';
 import api from '@/lib/api';
 import * as I from '@/components/ui/I';
 import * as UI from '@/components/ui/UI';
-import useLabDashboardData from '@/components/Lab/useLabDashboardData';
+import useLabDashboardData from '@/components/Lab/hooks/useLabDashboardData';
 import Page from '@/components/Manager/Page';
-import surface from '@/components/Lab/surface';
-import line from '@/components/Lab/line';
-import text2 from '@/components/Lab/text2';
-import ink from '@/components/Lab/ink';
+import { surface } from '@/lib/colors';
+import { line } from '@/lib/colors';
+import { text2 } from '@/lib/colors';
+import { ink } from '@/lib/colors';
 import Card from '@/components/Manager/Card';
 import CardHeader from '@/components/Manager/CardHeader';
-import muted from '@/components/Lab/muted';
-import lineSoft from '@/components/Lab/lineSoft';
+import { muted } from '@/lib/colors';
+import { lineSoft } from '@/lib/colors';
 import Pill from '@/components/Manager/Pill';
-import accent from '@/components/Lab/accent';
+import { accent } from '@/lib/colors';
 const LF=I;
 const LabDashboard=({navigate})=>{const{samples:liveSamples,wips:liveWips,dispatches:liveDispatches,equipment:liveEquipment,loading:countsLoading,error:countsError}=useLabDashboardData();const[,setTick]=React.useState(0);const hasRunning=liveDispatches.some(d=>d.status==='running');React.useEffect(()=>{if(!hasRunning)return;const h=setInterval(()=>setTick(t=>t+1),1000);return()=>clearInterval(h);},[hasRunning]);const incoming=liveSamples.filter(s=>s.status==='incoming').length;const activeWips=liveWips.filter(w=>w.status==='in_progress').length;const runningDps=liveDispatches.filter(d=>d.status==='running').length;const needsRecord=liveDispatches.filter(d=>d.status==='unloaded'||d.status==='exception').length;const activeDispatches=liveDispatches.filter(d=>d.status==='running'||d.status==='pending'||d.status==='dispatched').slice(0,5);const toRecord=liveDispatches.filter(d=>d.status==='unloaded'||d.status==='exception');const liveEquipmentIds=new Set(liveDispatches.filter(d=>d.status==='running'||d.status==='pending'||d.status==='dispatched').map(d=>d.equipmentId));const cachedUser=api&&api.auth&&api.auth.cachedUser?api.auth.cachedUser():null;const subtitleName=cachedUser?.username||'lab_member';const subtitleDate=new Date().toISOString().slice(0,10);const initialLoad=countsLoading&&liveSamples.length===0&&liveWips.length===0&&liveDispatches.length===0;const v=n=>initialLoad?'—':n;const tiles=[{label:'Incoming wafers',value:v(incoming),onClick:()=>navigate({page:'lab_samples',tab:'incoming'}),icon:<LF.Inbox size={16}color="#a06618"/>,tint:'#fef4dd'},{label:'Active WIPs',value:v(activeWips),onClick:()=>navigate({page:'lab_wip'}),icon:<LF.WIP size={16}color="#4f4a8f"/>,tint:'#ecebf3'},{label:'Dispatches live',value:v(runningDps),onClick:()=>navigate({page:'lab_dispatches',tab:'active'}),icon:<LF.Activity size={16}color="#a93445"/>,tint:'#fbe4e6'},{label:'To record',value:v(needsRecord),onClick:()=>navigate({page:'lab_dispatches',tab:'record'}),icon:<LF.ClipboardList size={16}color="#2e6a47"/>,tint:'#e7f0e9'}];return<Page title="Dashboard"subtitle={`Welcome back, ${subtitleName} · ${subtitleDate}`}>
       {countsError&&<div style={{padding:'12px 16px',marginBottom:14,borderRadius:10,background:'#fde4e4',color:'#c0394a',fontSize:13.5,fontWeight:500,border:'1px solid #f6c4c4'}}>

@@ -1,14 +1,14 @@
 // @ts-nocheck
 "use client";
 import React from 'react';
-import useMgrTrend from '@/components/Manager/useMgrTrend';
+import useMgrTrend from '@/components/Manager/hooks/useMgrTrend';
 import Card from '@/components/Manager/Card';
-import mMuted from '@/components/Manager/mMuted';
-import smoothPath from '@/components/Manager/smoothPath';
-import mLineSft from '@/components/Manager/mLineSft';
-import mInk from '@/components/Manager/mInk';
-import mBgSoft from '@/components/Manager/mBgSoft';
-import mText2 from '@/components/Manager/mText2';
+import { muted as mMuted } from '@/lib/colors';
+import smoothPath from '@/components/Manager/utils/smoothPath';
+import { lineSoft as mLineSft } from '@/lib/colors';
+import { ink as mInk } from '@/lib/colors';
+import { bgSoft as mBgSoft } from '@/lib/colors';
+import { text2 as mText2 } from '@/lib/colors';
 
 const TrendChart=()=>{const{data:trend,loading,error}=useMgrTrend('requests_per_day',30);const days=React.useMemo(()=>{const points=trend?.points||[];const arr=points.map(p=>({date:p.date,dispatches:p.count}));for(let i=0;i<arr.length;i++){const prev=i>0?arr[i-1].dispatches:0;arr[i].utilization=Math.min(100,(arr[i].dispatches*0.6+prev*0.4)*24);}return arr;},[trend]);if(loading&&!trend){return<Card padding={22}style={{marginTop:18,textAlign:'center',color:mMuted,fontSize:13}}>
         Loading trend…

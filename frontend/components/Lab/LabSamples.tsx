@@ -3,18 +3,18 @@
 import React from 'react';
 import api from '@/lib/api';
 import * as I from '@/components/ui/I';
-import useLabSamples from '@/components/Lab/useLabSamples';
+import useLabSamples from '@/components/Lab/hooks/useLabSamples';
 import Page from '@/components/Manager/Page';
-import muted from '@/components/Lab/muted';
+import { muted } from '@/lib/colors';
 import SecondaryBtn from '@/components/Manager/SecondaryBtn';
-import line from '@/components/Lab/line';
-import ink from '@/components/Lab/ink';
-import text2 from '@/components/Lab/text2';
+import { line } from '@/lib/colors';
+import { ink } from '@/lib/colors';
+import { text2 } from '@/lib/colors';
 import Card from '@/components/Manager/Card';
-import computeRemaining from '@/components/Lab/computeRemaining';
-import formatRemaining from '@/components/Lab/formatRemaining';
-import REMAINING_STYLE from '@/components/Lab/REMAINING_STYLE';
-import URGENCY_DAYS from '@/components/Lab/URGENCY_DAYS';
+import computeRemaining from '@/components/Lab/utils/computeRemaining';
+import formatRemaining from '@/components/Lab/utils/formatRemaining';
+import REMAINING_STYLE from '@/components/Lab/constants/remainingStyle';
+import URGENCY_DAYS from '@/components/Lab/constants/urgencyDays';
 import Pill from '@/components/Manager/Pill';
 const LF=I;
 const LabSamples=({navigate,defaultTab='all',showToast})=>{const{wafers,loading,error,refresh}=useLabSamples();const[tab,setTab]=React.useState(defaultTab);const[busyIds,setBusyIds]=React.useState(new Set());const[actionError,setActionError]=React.useState(null);const runAction=async(id,op,label)=>{setBusyIds(prev=>new Set(prev).add(id));setActionError(null);try{await op();showToast&&showToast(label);refresh();}catch(e){setActionError(e.message||String(e));}finally{setBusyIds(prev=>{const next=new Set(prev);next.delete(id);return next;});}};const handleReceive=w=>runAction(w.id,()=>api.samples.receive(w.id),`${w.wafer} received`);const handleReject=w=>runAction(w.id,()=>api.samples.rejectReceiving(w.id,''),`${w.wafer} rejected`);const handleBulkReceive=()=>{wafers.filter(w=>w.status==='incoming'&&!busyIds.has(w.id)).forEach(handleReceive);};const tabs=[{id:'all',label:'All',count:wafers.length},{id:'incoming',label:'Incoming',count:wafers.filter(w=>w.status==='incoming').length},{id:'received',label:'Received',count:wafers.filter(w=>w.status==='received').length},{id:'in_wip',label:'In WIP',count:wafers.filter(w=>w.status==='in_wip').length},{id:'completed',label:'Completed',count:wafers.filter(w=>w.status==='completed').length},{id:'rejected',label:'Rejected',count:wafers.filter(w=>w.status==='rejected').length}];const list=tab==='all'?wafers:wafers.filter(w=>w.status===tab);if(loading&&wafers.length===0){return<Page title="Samples"subtitle="Loading…">

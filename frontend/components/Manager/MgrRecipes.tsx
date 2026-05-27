@@ -3,17 +3,16 @@
 import React from 'react';
 import api from '@/lib/api';
 import * as I from '@/components/ui/I';
-import useMgrRecipes from '@/components/Manager/useMgrRecipes';
+import useMgrRecipes from '@/components/Manager/hooks/useMgrRecipes';
 import Page from '@/components/Manager/Page';
-import mMuted from '@/components/Manager/mMuted';
+import { muted as mMuted } from '@/lib/colors';
 import PrimaryBtn from '@/components/Manager/PrimaryBtn';
 import Card from '@/components/Manager/Card';
-import mText2 from '@/components/Manager/mText2';
-import findExpById from '@/components/Manager/findExpById';
-import mInk from '@/components/Manager/mInk';
-import mBgSoft from '@/components/Manager/mBgSoft';
-import mLineSft from '@/components/Manager/mLineSft';
-import mAccent from '@/components/Manager/mAccent';
+import { text2 as mText2 } from '@/lib/colors';
+import { ink as mInk } from '@/lib/colors';
+import { bgSoft as mBgSoft } from '@/lib/colors';
+import { lineSoft as mLineSft } from '@/lib/colors';
+import { accent as mAccent } from '@/lib/colors';
 import RecipeModal from '@/components/Manager/RecipeModal';
 const MI=I;
 const MgrRecipes=({showToast})=>{const{data:recipes,loading,error,refresh}=useMgrRecipes();const[modalOpen,setModalOpen]=React.useState(false);const[editing,setEditing]=React.useState(null);const[busyDeleteId,setBusyDeleteId]=React.useState(null);const[deleteError,setDeleteError]=React.useState(null);const openNew=()=>{setEditing(null);setModalOpen(true);};const openEdit=rec=>{setEditing(rec);setModalOpen(true);};const closeModal=()=>{setEditing(null);setModalOpen(false);};const onSaved=()=>{const wasEdit=!!editing;closeModal();showToast&&showToast(wasEdit?'Recipe updated':'Recipe created');refresh();};const onDelete=async rec=>{if(!window.confirm(`Delete recipe "${rec.name}"? This can't be undone.`))return;setBusyDeleteId(rec.id);setDeleteError(null);try{await api.recipes.remove(rec.id);showToast&&showToast(`${rec.name} deleted`);refresh();}catch(e){setDeleteError(e.message||String(e));}finally{setBusyDeleteId(null);}};if(loading&&recipes.length===0){return<Page title="Recipes"subtitle="Loading…">
@@ -30,7 +29,7 @@ const MgrRecipes=({showToast})=>{const{data:recipes,loading,error,refresh}=useMg
         {recipes.length===0?<Card padding={48}style={{textAlign:'center',color:mMuted}}>
             <MI.ClipboardList size={32}color="#cbcbd6"style={{marginBottom:10}}/>
             <div style={{fontSize:14,fontWeight:600,color:mText2}}>No recipes yet</div>
-          </Card>:recipes.map(rec=>{const expCode=findExpById(rec.experimentId)?.code||(rec.experimentName?rec.experimentName.split(/\s+/).map(t=>t[0]).join('').slice(0,4).toUpperCase():'—');const expName=rec.experimentName||findExpById(rec.experimentId)?.name||'—';const paramEntries=rec.params?Object.entries(rec.params):[];return<div key={rec.id}style={{display:'grid',gridTemplateColumns:'minmax(0,1.4fr) 180px minmax(0,1.6fr) 110px',alignItems:'center',gap:18,padding:'18px 22px',borderRadius:14,background:'#fff',border:'1px solid rgba(0,0,0,0.08)'}}>
+          </Card>:recipes.map(rec=>{const expCode=rec.experimentName?rec.experimentName.split(/\s+/).map(t=>t[0]).join('').slice(0,4).toUpperCase():'—';const expName=rec.experimentName||'—';const paramEntries=rec.params?Object.entries(rec.params):[];return<div key={rec.id}style={{display:'grid',gridTemplateColumns:'minmax(0,1.4fr) 180px minmax(0,1.6fr) 110px',alignItems:'center',gap:18,padding:'18px 22px',borderRadius:14,background:'#fff',border:'1px solid rgba(0,0,0,0.08)'}}>
               <div style={{minWidth:0}}>
                 <div style={{fontFamily:'var(--font-mono)',fontSize:14,fontWeight:700,color:mInk,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{rec.name}</div>
                 {rec.description&&<div style={{fontSize:12.5,color:mMuted,marginTop:4,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{rec.description}</div>}

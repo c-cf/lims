@@ -3,8 +3,8 @@
 import React from 'react';
 import api from '@/lib/api';
 import * as I from '@/components/ui/I';
-import useRequests from '@/components/Fab/useRequests';
-import TABS from '@/components/Fab/TABS';
+import useRequests from '@/components/Fab/hooks/useRequests';
+import TABS from '@/components/Fab/constants/tabs';
 import FabPage from '@/components/Fab/FabPage';
 import PrimaryBtn from '@/components/Manager/PrimaryBtn';
 import FabCard from '@/components/Fab/FabCard';

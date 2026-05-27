@@ -2,18 +2,18 @@
 "use client";
 import React from 'react';
 import * as I from '@/components/ui/I';
-import useLabEquipment from '@/components/Lab/useLabEquipment';
+import useLabEquipment from '@/components/Lab/hooks/useLabEquipment';
 import Page from '@/components/Manager/Page';
-import muted from '@/components/Lab/muted';
+import { muted } from '@/lib/colors';
 import PrimaryBtn from '@/components/Manager/PrimaryBtn';
-import line from '@/components/Lab/line';
-import ink from '@/components/Lab/ink';
-import text2 from '@/components/Lab/text2';
+import { line } from '@/lib/colors';
+import { ink } from '@/lib/colors';
+import { text2 } from '@/lib/colors';
 import Card from '@/components/Manager/Card';
-import lineSoft from '@/components/Lab/lineSoft';
+import { lineSoft } from '@/lib/colors';
 import Pill from '@/components/Manager/Pill';
-import accent from '@/components/Lab/accent';
-import bgSoft from '@/components/Lab/bgSoft';
+import { accent } from '@/lib/colors';
+import { bgSoft } from '@/lib/colors';
 import EquipmentModal from '@/components/Lab/EquipmentModal';
 const LF=I;
 const LabEquipment=({navigate,canManage=false,showToast})=>{const{equipment,loading,error,refresh}=useLabEquipment();const[tab,setTab]=React.useState('all');const[modalOpen,setModalOpen]=React.useState(false);const[editing,setEditing]=React.useState(null);const openNew=()=>{setEditing(null);setModalOpen(true);};const openEdit=e=>{setEditing(e);setModalOpen(true);};const closeModal=()=>{setEditing(null);setModalOpen(false);};const onSaved=()=>{const wasEdit=!!editing;closeModal();showToast&&showToast(wasEdit?'Equipment updated':'Equipment created');refresh();};const counts={all:equipment.length,idle:equipment.filter(e=>e.status==='idle').length,maintenance:equipment.filter(e=>e.status==='maintenance').length};const filtered=tab==='all'?equipment:equipment.filter(e=>e.status===tab);const tabs=[{id:'all',label:'All'},{id:'idle',label:'Idle'},{id:'maintenance',label:'Maintenance'}];if(loading&&equipment.length===0){return<Page title="Equipment"subtitle="Loading…">

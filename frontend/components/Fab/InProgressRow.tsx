@@ -3,8 +3,8 @@
 import React from 'react';
 import api from '@/lib/api';
 import * as I from '@/components/ui/I';
-import phaseIndexFor from '@/components/Fab/phaseIndexFor';
-import WAFER_PHASES from '@/components/Fab/WAFER_PHASES';
+import phaseIndexFor from '@/components/Fab/utils/phaseIndexFor';
+import WAFER_PHASES from '@/components/Fab/constants/waferPhases';
 import PhasePipeline from '@/components/Fab/PhasePipeline';
 const F=I;
 const InProgressRow=({request,navigate,open,onToggle})=>{const sampleCount=request.sampleCount??request.samples?.length??0;const[detail,setDetail]=React.useState(null);const[detailLoading,setDetailLoading]=React.useState(false);const[detailError,setDetailError]=React.useState(null);React.useEffect(()=>{if(!open||detail||detailLoading||!api?.requests)return;setDetailLoading(true);setDetailError(null);api.requests.get(request.id).then(d=>setDetail(d)).catch(e=>setDetailError(e.message||String(e))).finally(()=>setDetailLoading(false));},[open,detail,detailLoading,request.id]);const wafers=detail?.samples||[];const overallIdx=wafers.length?Math.min(...wafers.map(s=>phaseIndexFor(s,detail||request))):null;return<div style={{borderTop:'1px solid #f5f5f9'}}>

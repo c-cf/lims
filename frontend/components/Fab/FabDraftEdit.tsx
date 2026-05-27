@@ -1,7 +1,7 @@
 // @ts-nocheck
 "use client";
 import * as I from '@/components/ui/I';
-import useRequestDetail from '@/components/Fab/useRequestDetail';
+import useRequestDetail from '@/components/Fab/hooks/useRequestDetail';
 import FabPage from '@/components/Fab/FabPage';
 import FabNewRequest from '@/components/Fab/FabNewRequest';
 const F=I;

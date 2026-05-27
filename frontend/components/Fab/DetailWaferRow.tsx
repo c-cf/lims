@@ -1,7 +1,7 @@
 // @ts-nocheck
 "use client";
 import * as I from '@/components/ui/I';
-import phaseIndexFor from '@/components/Fab/phaseIndexFor';
+import phaseIndexFor from '@/components/Fab/utils/phaseIndexFor';
 import PhasePipeline from '@/components/Fab/PhasePipeline';
 const F=I;
 const DetailWaferRow=({wafer,request})=>{const idx=phaseIndexFor(wafer,request);return<div style={{display:'grid',gridTemplateColumns:'180px minmax(0, 1fr)',alignItems:'center',gap:22,padding:'16px 18px',background:'#fff',borderRadius:12,border:'1px solid rgba(0,0,0,0.07)'}}>

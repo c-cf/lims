@@ -2,18 +2,18 @@
 "use client";
 import React from 'react';
 import * as I from '@/components/ui/I';
-import EXPERIMENTS from '@/components/Lab/EXPERIMENTS';
+import EXPERIMENTS from '@/components/Lab/constants/experiments';
 import Modal from '@/components/Manager/Modal';
 import SecondaryBtn from '@/components/Manager/SecondaryBtn';
 import PrimaryBtn from '@/components/Manager/PrimaryBtn';
 import FieldLabel from '@/components/Manager/FieldLabel';
 import TextInput from '@/components/Manager/TextInput';
 import SelectInput from '@/components/Manager/SelectInput';
-import muted from '@/components/Lab/muted';
+import { muted } from '@/lib/colors';
 import TextArea from '@/components/Manager/TextArea';
-import line from '@/components/Lab/line';
-import bgSoft from '@/components/Lab/bgSoft';
-import text2 from '@/components/Lab/text2';
+import { line } from '@/lib/colors';
+import { bgSoft } from '@/lib/colors';
+import { text2 } from '@/lib/colors';
 const LF=I;
 const NewEquipmentModal=({open,onClose,onSubmit,existingIds})=>{const[name,setName]=React.useState('');const[type,setType]=React.useState(EXPERIMENTS[0].code);const[description,setDescription]=React.useState('');const[capacity,setCapacity]=React.useState('1');const[paramRows,setParamRows]=React.useState([{key:'',value:''}]);React.useEffect(()=>{if(!open)return;setName('');setType(EXPERIMENTS[0].code);setDescription('');setCapacity('1');setParamRows([{key:'',value:''}]);},[open]);const capNum=parseInt(capacity,10);const idClash=existingIds&&existingIds.includes(name.trim());const valid=name.trim().length>0&&!idClash&&capNum>0;const setRow=(i,field,val)=>setParamRows(rs=>rs.map((r,j)=>j===i?{...r,[field]:val}:r));const removeRow=i=>setParamRows(rs=>rs.length===1?rs:rs.filter((_,j)=>j!==i));const addRow=()=>setParamRows(rs=>[...rs,{key:'',value:''}]);const handle=()=>{const params=Object.fromEntries(paramRows.filter(r=>r.key.trim()).map(r=>[r.key.trim(),r.value.trim()]));const model=(description.split('\n')[0]||`${type} unit`).trim();onSubmit({id:name.trim(),name:name.trim(),type,model,description:description.trim(),capacity:capNum,params,status:'idle',currentWipId:null});};return<Modal open={open}onClose={onClose}title="Add Equipment"width={620}footer={<>
         <SecondaryBtn onClick={onClose}>Cancel</SecondaryBtn>

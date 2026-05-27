@@ -3,20 +3,20 @@
 import React from 'react';
 import api from '@/lib/api';
 import * as I from '@/components/ui/I';
-import useWaferDetail from '@/components/Lab/useWaferDetail';
-import useLabExperimentTypes from '@/components/Lab/useLabExperimentTypes';
+import useWaferDetail from '@/components/Lab/hooks/useWaferDetail';
+import useLabExperimentTypes from '@/components/Lab/hooks/useLabExperimentTypes';
 import Page from '@/components/Manager/Page';
-import muted from '@/components/Lab/muted';
+import { muted } from '@/lib/colors';
 import Breadcrumb from '@/components/Manager/Breadcrumb';
 import Pill from '@/components/Manager/Pill';
 import SecondaryBtn from '@/components/Manager/SecondaryBtn';
 import PrimaryBtn from '@/components/Manager/PrimaryBtn';
 import Card from '@/components/Manager/Card';
 import CardHeader from '@/components/Manager/CardHeader';
-import text2 from '@/components/Lab/text2';
-import ink from '@/components/Lab/ink';
-import lineSoft from '@/components/Lab/lineSoft';
-import accent from '@/components/Lab/accent';
+import { text2 } from '@/lib/colors';
+import { ink } from '@/lib/colors';
+import { lineSoft } from '@/lib/colors';
+import { accent } from '@/lib/colors';
 const LF=I;
 const LabWaferDetail=({id,navigate,showToast})=>{const{data,loading,error,refresh}=useWaferDetail(id);const{data:expTypes}=useLabExperimentTypes();const[busy,setBusy]=React.useState(false);const[actionError,setActionError]=React.useState(null);const runAction=async(op,label)=>{setBusy(true);setActionError(null);try{await op();showToast&&showToast(label);refresh();}catch(e){setActionError(e.message||String(e));}finally{setBusy(false);}};if(loading&&!data){return<Page title="Loading wafer…">
         <div style={{padding:'60px 20px',textAlign:'center',color:muted,fontSize:14}}>Loading…</div>

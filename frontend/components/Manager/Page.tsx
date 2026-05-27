@@ -1,7 +1,7 @@
 // @ts-nocheck
 "use client";
-import mInk from '@/components/Manager/mInk';
-import mText2 from '@/components/Manager/mText2';
+import { ink as mInk } from '@/lib/colors';
+import { text2 as mText2 } from '@/lib/colors';
 
 const Page=({title,subtitle,breadcrumb,right,children})=><div style={{padding:'32px 44px 80px',maxWidth:1320,margin:'0 auto'}}>
     {breadcrumb}
