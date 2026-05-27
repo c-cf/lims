@@ -8,6 +8,10 @@ This repository contains the rebuilt LIMS MVP:
 ## Run With Docker Compose
 
 ```bash
+git submodule update --init --recursive
+git -C frontend checkout -b nextjs origin/nextjs
+git -C backend checkout -b test-warren origin/test-warren
+
 cp .env.example .env
 docker compose up --build
 ```
