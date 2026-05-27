@@ -18,20 +18,12 @@ function pathToFabPage(pathname: string): string {
   return 'fab_dashboard';
 }
 
-function readFabAuth(): { user: Record<string, unknown> | null; ok: boolean } {
-  if (typeof window === 'undefined') return { user: null, ok: false };
-  try {
-    const stored = localStorage.getItem(SESSION_KEY);
-    if (!stored) return { user: null, ok: false };
-    const u = JSON.parse(stored);
-    return { user: u, ok: u.role === 'fab_user' };
-  } catch { return { user: null, ok: false }; }
-}
+type AuthState = { user: Record<string, unknown> | null; ok: boolean };
 
 export default function FabLayout({ children }: { children: React.ReactNode }) {
   const router = useRouter();
   const pathname = usePathname();
-  const [auth] = useState(readFabAuth);
+  const [auth, setAuth] = useState<AuthState>({ user: null, ok: false });
   const [t, setTweak] = useTweaks(TWEAK_DEFAULTS);
 
   useEffect(() => {
@@ -39,16 +31,17 @@ export default function FabLayout({ children }: { children: React.ReactNode }) {
     root.style.setProperty('--tweak-fab-bg', t.fabBg);
   }, [t.fabBg]);
 
-  // Redirect if not authenticated as fab_user
   useEffect(() => {
-    if (auth.ok) return;
     try {
       const stored = localStorage.getItem(SESSION_KEY);
       if (!stored) { router.replace('/login'); return; }
-      router.replace(roleHome(JSON.parse(stored).role));
+      const u = JSON.parse(stored);
+      if (u.role !== 'fab_user') { router.replace(roleHome(u.role)); return; }
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setAuth({ user: u, ok: true });
     } catch { router.replace('/login'); }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [auth.ok]);
+  }, []);
 
   if (!auth.ok) return null;
 

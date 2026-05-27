@@ -20,31 +20,27 @@ function pathToLabPage(pathname: string): string {
   return 'lab_dashboard';
 }
 
-function readLabAuth(): { user: Record<string, unknown> | null; ok: boolean } {
-  if (typeof window === 'undefined') return { user: null, ok: false };
-  try {
-    const stored = localStorage.getItem(SESSION_KEY);
-    if (!stored) return { user: null, ok: false };
-    const u = JSON.parse(stored);
-    return { user: u, ok: u.role === 'lab_member' || u.role === 'lab_mem' };
-  } catch { return { user: null, ok: false }; }
-}
+type AuthState = { user: Record<string, unknown> | null; ok: boolean };
 
 export default function LabLayout({ children }: { children: React.ReactNode }) {
   const router = useRouter();
   const pathname = usePathname();
-  const [auth] = useState(readLabAuth);
+  const [auth, setAuth] = useState<AuthState>({ user: null, ok: false });
   const [t, setTweak] = useTweaks(TWEAK_DEFAULTS);
 
   useEffect(() => {
-    if (auth.ok) return;
     try {
       const stored = localStorage.getItem(SESSION_KEY);
       if (!stored) { router.replace('/login'); return; }
-      router.replace(roleHome(JSON.parse(stored).role));
+      const u = JSON.parse(stored);
+      if (u.role !== 'lab_member' && u.role !== 'lab_mem') {
+        router.replace(roleHome(u.role)); return;
+      }
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setAuth({ user: u, ok: true });
     } catch { router.replace('/login'); }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [auth.ok]);
+  }, []);
 
   if (!auth.ok) return null;
 
