@@ -2,7 +2,7 @@ name: Backend Image Smoke
 
 on:
   push:
-    branches: ["**"]
+    branches-ignore: ["main"]
     paths:
       - "backend/**"
       - ".github/workflows/backend-image-smoke.yml"
