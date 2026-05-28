@@ -23,7 +23,7 @@ services:
     environment:
       DEBUG: "True"
       DJANGO_SECRET_KEY: "dev-compose-secret-change-me-please-rotate"
-      DJANGO_ALLOWED_HOSTS: "localhost,127.0.0.1,backend,${SERVER_IP}"
+      DJANGO_ALLOWED_HOSTS: "localhost,127.0.0.1,backend,backend:8000,${SERVER_IP}"
       CORS_ALLOWED_ORIGINS: "http://localhost:3000,http://127.0.0.1:3000,http://${SERVER_IP}:${FRONTEND_PORT}"
       DATABASE_URL: "postgres://lims:lims@postgres:5432/lims"
       CELERY_TASK_ALWAYS_EAGER: "True"
