@@ -9,8 +9,15 @@ import Card from '@/components/Manager/Card';
 import SectionLabel from '@/components/Fab/SectionLabel';
 import KV from '@/components/PostLogin/KV';
 import IDChip from '@/components/ui/IDChip';
+import type { User, OnLogout, Route } from '@/lib/types';
 
-const PostLogin = ({ user, onLogout }) => {
+const PostLogin = ({
+  user,
+  onLogout,
+}: {
+  user: User & { display: string; subtitle: string };
+  onLogout: OnLogout;
+}) => {
   const isFab = user.role === 'fab_user';
   const labNav = [
     { id: 'dashboard', label: 'Dashboard', cn: '儀表板', icon: 'Home' },
@@ -28,7 +35,7 @@ const PostLogin = ({ user, onLogout }) => {
   const navItems = isFab ? fabNav : labNav;
   const [active, setActive] = React.useState(navItems[0].id);
   const route = { page: active };
-  const navigate = (r) => setActive(r.page);
+  const navigate = (r: Route) => setActive(r.page);
   const today = '2026-05-11';
   const heroTitle = isFab ? `Welcome back, ${user.display}` : `Welcome back, ${user.display}`;
   const heroSub = isFab

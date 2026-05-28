@@ -1,11 +1,22 @@
 'use client';
 import TweakRow from '@/components/Tweaks/TweakRow';
+import type { TweakOption } from '@/components/Tweaks/types';
 
-function TweakSelect({ label, value, options, onChange }) {
+function TweakSelect({
+  label,
+  value,
+  options,
+  onChange,
+}: {
+  label: string;
+  value: string;
+  options: TweakOption[];
+  onChange: (v: string) => void;
+}) {
   return (
     <TweakRow label={label}>
       <select className="twk-field" value={value} onChange={(e) => onChange(e.target.value)}>
-        {options.map((o) => {
+        {options.map((o: TweakOption) => {
           const v = typeof o === 'object' ? o.value : o;
           const l = typeof o === 'object' ? o.label : o;
           return (

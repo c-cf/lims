@@ -3,7 +3,19 @@ import TweakRow from '@/components/Tweaks/TweakRow';
 import __TwkCheck from '@/components/Tweaks/__TwkCheck';
 import __twkIsLight from '@/components/Tweaks/__twkIsLight';
 
-function TweakColor({ label, value, options, onChange }) {
+type ColorOption = string | string[];
+
+function TweakColor({
+  label,
+  value,
+  options,
+  onChange,
+}: {
+  label: string;
+  value: string;
+  options?: ColorOption[];
+  onChange: (v: ColorOption) => void;
+}) {
   if (!options || !options.length) {
     return (
       <div className="twk-row twk-row-h">
@@ -19,12 +31,12 @@ function TweakColor({ label, value, options, onChange }) {
       </div>
     );
   }
-  const key = (o) => String(JSON.stringify(o)).toLowerCase();
+  const key = (o: ColorOption) => String(JSON.stringify(o)).toLowerCase();
   const cur = key(value);
   return (
     <TweakRow label={label}>
       <div className="twk-chips" role="radiogroup">
-        {options.map((o, i) => {
+        {options.map((o: ColorOption, i: number) => {
           const colors = Array.isArray(o) ? o : [o];
           const [hero, ...rest] = colors;
           const sup = rest.slice(0, 4);

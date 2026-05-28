@@ -1,6 +1,6 @@
 'use client';
 
-function formatDuration(totalSec) {
+function formatDuration(totalSec: number | null | undefined) {
   if (totalSec == null) return '—';
   if (totalSec === 0) return '0s';
   const d = Math.floor(totalSec / 86400);

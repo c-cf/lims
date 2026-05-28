@@ -4,9 +4,17 @@ import __TWEAKS_STYLE from '@/components/Tweaks/__TWEAKS_STYLE';
 import TweakSection from '@/components/Tweaks/TweakSection';
 import TweakToggle from '@/components/Tweaks/TweakToggle';
 
-function TweaksPanel({ title = 'Tweaks', noDeckControls = false, children }) {
+function TweaksPanel({
+  title = 'Tweaks',
+  noDeckControls = false,
+  children,
+}: {
+  title?: string;
+  noDeckControls?: boolean;
+  children?: React.ReactNode;
+}) {
   const [open, setOpen] = React.useState(false);
-  const dragRef = React.useRef(null);
+  const dragRef = React.useRef<HTMLDivElement | null>(null);
   const hasDeckStage = React.useMemo(
     () => typeof document !== 'undefined' && !!document.querySelector('deck-stage'),
     [],
@@ -19,7 +27,7 @@ function TweaksPanel({ title = 'Tweaks', noDeckControls = false, children }) {
   );
   React.useEffect(() => {
     if (!hasDeckStage || railEnabled) return undefined;
-    const onMsg = (e) => {
+    const onMsg = (e: MessageEvent) => {
       if (e.data && e.data.type === '__omelette_rail_enabled') setRailEnabled(true);
     };
     window.addEventListener('message', onMsg);
@@ -32,7 +40,7 @@ function TweaksPanel({ title = 'Tweaks', noDeckControls = false, children }) {
       return true;
     }
   });
-  const toggleRail = (on) => {
+  const toggleRail = (on: boolean) => {
     setRailVisible(on);
     window.postMessage({ type: '__deck_rail_visible', on }, '*');
   };
@@ -64,7 +72,7 @@ function TweaksPanel({ title = 'Tweaks', noDeckControls = false, children }) {
     return () => ro.disconnect();
   }, [open, clampToViewport]);
   React.useEffect(() => {
-    const onMsg = (e) => {
+    const onMsg = (e: MessageEvent) => {
       const t = e?.data?.type;
       if (t === '__activate_edit_mode') setOpen(true);
       else if (t === '__deactivate_edit_mode') setOpen(false);
@@ -77,7 +85,7 @@ function TweaksPanel({ title = 'Tweaks', noDeckControls = false, children }) {
     setOpen(false);
     window.parent.postMessage({ type: '__edit_mode_dismissed' }, '*');
   };
-  const onDragStart = (e) => {
+  const onDragStart = (e: React.MouseEvent<HTMLDivElement>) => {
     const panel = dragRef.current;
     if (!panel) return;
     const r = panel.getBoundingClientRect();
@@ -85,7 +93,7 @@ function TweaksPanel({ title = 'Tweaks', noDeckControls = false, children }) {
       sy = e.clientY;
     const startRight = window.innerWidth - r.right;
     const startBottom = window.innerHeight - r.bottom;
-    const move = (ev) => {
+    const move = (ev: MouseEvent) => {
       offsetRef.current = { x: startRight - (ev.clientX - sx), y: startBottom - (ev.clientY - sy) };
       clampToViewport();
     };

@@ -1,7 +1,17 @@
 'use client';
 import TweakRow from '@/components/Tweaks/TweakRow';
 
-function TweakText({ label, value, placeholder, onChange }) {
+function TweakText({
+  label,
+  value,
+  placeholder,
+  onChange,
+}: {
+  label: string;
+  value: string;
+  placeholder?: string;
+  onChange: (v: string) => void;
+}) {
   return (
     <TweakRow label={label}>
       <input

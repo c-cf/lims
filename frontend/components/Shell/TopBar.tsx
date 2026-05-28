@@ -1,6 +1,17 @@
 'use client';
+import React from 'react';
 
-const TopBar = ({ title, subtitle = undefined, breadcrumb = undefined, right = undefined }) => (
+const TopBar = ({
+  title,
+  subtitle = undefined,
+  breadcrumb = undefined,
+  right = undefined,
+}: {
+  title: string;
+  subtitle?: string;
+  breadcrumb?: React.ReactNode;
+  right?: React.ReactNode;
+}) => (
   <header
     style={{
       display: 'flex',

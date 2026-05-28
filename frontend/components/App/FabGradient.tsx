@@ -1,6 +1,12 @@
 'use client';
 import { FAB_OPTIONS } from './constants';
-export default function FabGradient({ value, onChange }) {
+export default function FabGradient({
+  value,
+  onChange,
+}: {
+  value: string;
+  onChange: (v: string) => void;
+}) {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 6, padding: '6px 10px 10px' }}>
       <div

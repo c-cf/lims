@@ -1,7 +1,17 @@
 'use client';
 import React from 'react';
 
-const EmptyState = ({ icon, title, message, action }) => (
+const EmptyState = ({
+  icon,
+  title,
+  message,
+  action,
+}: {
+  icon?: React.ReactElement;
+  title: string;
+  message?: string;
+  action?: React.ReactNode;
+}) => (
   <div
     style={{
       display: 'flex',
@@ -15,7 +25,9 @@ const EmptyState = ({ icon, title, message, action }) => (
     }}
   >
     {icon && (
-      <div style={{ color: 'var(--text-muted)' }}>{React.cloneElement(icon, { size: 28 })}</div>
+      <div style={{ color: 'var(--text-muted)' }}>
+        {React.cloneElement(icon as React.ReactElement<{ size?: number }>, { size: 28 })}
+      </div>
     )}
     <div style={{ fontSize: 14, fontWeight: 500, color: 'var(--text-secondary)' }}>{title}</div>
     {message && (

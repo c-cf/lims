@@ -1,12 +1,16 @@
 'use client';
 import React from 'react';
 
-function useTweaks(defaults) {
-  const [values, setValues] = React.useState(defaults);
-  const setTweak = React.useCallback((keyOrEdits, val) => {
-    const edits =
-      typeof keyOrEdits === 'object' && keyOrEdits !== null ? keyOrEdits : { [keyOrEdits]: val };
-    setValues((prev) => ({ ...prev, ...edits }));
+function useTweaks<T extends Record<string, string>>(
+  defaults: T,
+): [T, (keyOrEdits: keyof T | Partial<T>, val?: T[keyof T]) => void] {
+  const [values, setValues] = React.useState<T>(defaults);
+  const setTweak = React.useCallback((keyOrEdits: keyof T | Partial<T>, val?: T[keyof T]) => {
+    const edits: Partial<T> =
+      typeof keyOrEdits === 'object' && keyOrEdits !== null
+        ? keyOrEdits
+        : ({ [keyOrEdits as string]: val } as Partial<T>);
+    setValues((prev: T) => ({ ...prev, ...edits }));
     window.parent.postMessage({ type: '__edit_mode_set_keys', edits }, '*');
     window.dispatchEvent(new CustomEvent('tweakchange', { detail: edits }));
   }, []);

@@ -1,6 +1,19 @@
 'use client';
+import React from 'react';
 
-const IDChip = ({ id, prefix = '#', size = 'md', muted = false, style = undefined }) => {
+const IDChip = ({
+  id,
+  prefix = '#',
+  size = 'md',
+  muted = false,
+  style = undefined,
+}: {
+  id: string | number;
+  prefix?: string;
+  size?: 'sm' | 'md';
+  muted?: boolean;
+  style?: React.CSSProperties;
+}) => {
   const fs = size === 'sm' ? 11 : 12;
   const ph = size === 'sm' ? '2px 6px' : '3px 8px';
   return (

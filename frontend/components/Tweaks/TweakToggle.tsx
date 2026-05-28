@@ -1,6 +1,14 @@
 'use client';
 
-function TweakToggle({ label, value, onChange }) {
+function TweakToggle({
+  label,
+  value,
+  onChange,
+}: {
+  label: string;
+  value: boolean;
+  onChange: (v: boolean) => void;
+}) {
   return (
     <div className="twk-row twk-row-h">
       <div className="twk-lbl">

@@ -1,6 +1,17 @@
 'use client';
+import React from 'react';
 
-const Card = ({ children, style, padding = 0, ...rest }) => (
+const Card = ({
+  children,
+  style,
+  padding = 0,
+  ...rest
+}: {
+  children?: React.ReactNode;
+  style?: React.CSSProperties;
+  padding?: number;
+  [key: string]: unknown;
+}) => (
   <div
     {...rest}
     style={{

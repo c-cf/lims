@@ -3,12 +3,13 @@ import React, { useState } from 'react';
 import Sidebar from '@/components/Shell/Sidebar';
 import FAB_NAV_ITEMS from '@/components/Shell/FAB_NAV_ITEMS';
 import FabApp from '@/components/Fab/FabApp';
-export default function FabRoot({ user, onLogout, tweaksUI }) {
+import type { AppShellProps } from '@/lib/types';
+export default function FabRoot({ user, onLogout, tweaksUI }: AppShellProps) {
   const [route, setRoute] = useState<{ page: string; tab?: string; id?: number | string }>({
     page: 'fab_dashboard',
   });
-  const navigate = (r) => setRoute(r);
-  const navFromSidebar = (r) => {
+  const navigate = (r: { page: string; tab?: string; id?: number | string }) => setRoute(r);
+  const navFromSidebar = (r: { page: string; tab?: string; id?: number | string }) => {
     if (r.page === 'fab_requests') setRoute({ page: 'fab_requests', tab: 'all' });
     else setRoute(r);
   };

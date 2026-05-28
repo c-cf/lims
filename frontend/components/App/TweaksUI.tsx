@@ -5,7 +5,14 @@ import TweaksPanel from '@/components/Tweaks/TweaksPanel';
 import TweakSection from '@/components/Tweaks/TweakSection';
 import TweakColor from '@/components/Tweaks/TweakColor';
 import TweakButton from '@/components/Tweaks/TweakButton';
-export default function TweaksUI({ t, setTweak }) {
+
+type TweakDefaults = typeof TWEAK_DEFAULTS;
+type SetTweak = (
+  keyOrEdits: keyof TweakDefaults | Partial<TweakDefaults>,
+  val?: TweakDefaults[keyof TweakDefaults],
+) => void;
+
+export default function TweaksUI({ t, setTweak }: { t: TweakDefaults; setTweak: SetTweak }) {
   return (
     <TweaksPanel>
       <TweakSection label="Sign in button" />
@@ -13,13 +20,13 @@ export default function TweaksUI({ t, setTweak }) {
         label="Background"
         value={t.signInBg}
         options={SIGNIN_OPTIONS}
-        onChange={(v) => setTweak('signInBg', v)}
+        onChange={(v) => setTweak('signInBg', String(v))}
       />
       <TweakColor
         label="Text"
         value={t.signInFg}
         options={['#ffffff', '#1e1e24', '#f7f8fa']}
-        onChange={(v) => setTweak('signInFg', v)}
+        onChange={(v) => setTweak('signInFg', String(v))}
       />
       <TweakSection label="fab_user icon" />
       <FabGradient value={t.fabBg} onChange={(v) => setTweak('fabBg', v)} />

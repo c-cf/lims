@@ -1,6 +1,14 @@
 'use client';
 
-const Avatar = ({ name, size = 32, bg = '#6c67b8' }) => {
+const Avatar = ({
+  name,
+  size = 32,
+  bg = '#6c67b8',
+}: {
+  name: string;
+  size?: number;
+  bg?: string;
+}) => {
   const initial = (name || '?')[0].toUpperCase();
   return (
     <span

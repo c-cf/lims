@@ -1,4 +1,5 @@
 'use client';
+import React from 'react';
 
 const FlowDots = ({
   steps,
@@ -8,11 +9,19 @@ const FlowDots = ({
   doneColor = 'var(--primary)',
   currentColor = 'var(--primary)',
   style = undefined,
+}: {
+  steps: string[];
+  current: string;
+  size?: number;
+  gap?: number;
+  doneColor?: string;
+  currentColor?: string;
+  style?: React.CSSProperties;
 }) => {
   const idx = steps.indexOf(current);
   return (
     <span style={{ display: 'inline-flex', alignItems: 'center', gap, ...style }}>
-      {steps.map((s, i) => (
+      {steps.map((s: string, i: number) => (
         <span
           key={s}
           style={{

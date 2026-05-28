@@ -1,7 +1,23 @@
 'use client';
 import TweakRow from '@/components/Tweaks/TweakRow';
 
-function TweakSlider({ label, value, min = 0, max = 100, step = 1, unit = '', onChange }) {
+function TweakSlider({
+  label,
+  value,
+  min = 0,
+  max = 100,
+  step = 1,
+  unit = '',
+  onChange,
+}: {
+  label: string;
+  value: number;
+  min?: number;
+  max?: number;
+  step?: number;
+  unit?: string;
+  onChange: (v: number) => void;
+}) {
   return (
     <TweakRow label={label} value={`${value}${unit}`}>
       <input

@@ -4,7 +4,7 @@ import { useRouter } from 'next/navigation';
 import { SESSION_KEY } from '@/components/App/constants';
 import { roleHome } from '@/lib/navigate';
 
-export default function Page() {
+export default function Page(): null {
   const router = useRouter();
   useEffect(() => {
     try {
