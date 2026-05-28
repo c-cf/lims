@@ -1,5 +1,6 @@
 'use client';
 import React from 'react';
+import type { Route, Navigate } from '@/lib/types';
 import LabDashboard from '@/components/Lab/LabDashboard';
 import LabSamples from '@/components/Lab/LabSamples';
 import LabWaferDetail from '@/components/Lab/LabWaferDetail';
@@ -10,9 +11,17 @@ import LabDispatchDetail from '@/components/Lab/LabDispatchDetail';
 import LabEquipment from '@/components/Lab/LabEquipment';
 import { ink } from '@/lib/colors';
 
-const LabApp = ({ route, navigate, canManage = false }) => {
-  const [toast, setToast] = React.useState(null);
-  const showToast = (msg) => {
+const LabApp = ({
+  route,
+  navigate,
+  canManage = false,
+}: {
+  route: Route;
+  navigate: Navigate;
+  canManage?: boolean;
+}) => {
+  const [toast, setToast] = React.useState<{ msg: string; t: number } | null>(null);
+  const showToast = (msg: string) => {
     setToast({ msg, t: Date.now() });
     setTimeout(() => setToast(null), 2200);
   };

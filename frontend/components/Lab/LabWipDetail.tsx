@@ -19,12 +19,21 @@ import { ink } from '@/lib/colors';
 import { text2 } from '@/lib/colors';
 import { accent } from '@/lib/colors';
 import AddDispatchModal from '@/components/Lab/AddDispatchModal';
+import type { Navigate, ShowToast } from '@/lib/types';
 const LF = I;
-const LabWipDetail = ({ id, navigate, showToast }) => {
+const LabWipDetail = ({
+  id,
+  navigate,
+  showToast,
+}: {
+  id: number | string;
+  navigate: Navigate;
+  showToast?: ShowToast;
+}) => {
   const { wip: w, loading, error, refresh } = useLabWipDetail(id);
   const [busy, setBusy] = React.useState(false);
   const [actionError, setActionError] = React.useState(null);
-  const runAction = async (op, label) => {
+  const runAction = async (op: () => Promise<unknown>, label: string) => {
     setBusy(true);
     setActionError(null);
     try {
@@ -79,14 +88,14 @@ const LabWipDetail = ({ id, navigate, showToast }) => {
     (w.experimentName
       ? w.experimentName
           .split(/\s+/)
-          .map((t) => t[0])
+          .map((t: string) => t[0])
           .join('')
           .slice(0, 4)
           .toUpperCase()
       : '—');
   const isActive = w.status !== 'completed' && w.status !== 'aborted';
   const hasActiveDispatch = w.dispatches.some(
-    (d) =>
+    (d: { status: string; raw_status: string }) =>
       d.status !== 'completed' && d.status !== 'aborted' && d.raw_status !== 'pending_redispatch',
   );
   return (
@@ -171,7 +180,9 @@ const LabWipDetail = ({ id, navigate, showToast }) => {
       )}
 
       {(() => {
-        const exceptionDispatch = w.dispatches.find((d) => d.raw_status === 'execution_exception');
+        const exceptionDispatch = w.dispatches.find(
+          (d: { raw_status: string }) => d.raw_status === 'execution_exception',
+        );
         if (!exceptionDispatch) return null;
         return (
           <div
@@ -266,61 +277,75 @@ const LabWipDetail = ({ id, navigate, showToast }) => {
                   <div>Status</div>
                   <div style={{ textAlign: 'right' }}>Action</div>
                 </div>
-                {w.dispatches.map((d) => (
-                  <div
-                    key={d.id}
-                    style={{
-                      display: 'grid',
-                      gridTemplateColumns: '80px 1.4fr 1.4fr 1.1fr 80px 130px 80px',
-                      alignItems: 'center',
-                      gap: 8,
-                      padding: '13px 20px',
-                      borderTop: `1px solid ${lineSoft}`,
-                    }}
-                  >
-                    <span style={{ fontFamily: 'var(--font-mono)', fontSize: 12.5, color: muted }}>
-                      {d.code}
-                    </span>
-                    <span style={{ fontSize: 13, color: ink }}>{d.experimentName || '—'}</span>
-                    <span
+                {w.dispatches.map(
+                  (d: {
+                    id: number;
+                    code: string;
+                    experimentId: number;
+                    experimentName?: string;
+                    recipeName?: string;
+                    equipmentName?: string;
+                    estimatedDurationSeconds?: number | null;
+                    status: string;
+                    raw_status: string;
+                  }) => (
+                    <div
+                      key={d.id}
                       style={{
-                        fontFamily: 'var(--font-mono)',
-                        fontSize: 12,
-                        color: text2,
-                        overflow: 'hidden',
-                        textOverflow: 'ellipsis',
-                        whiteSpace: 'nowrap',
+                        display: 'grid',
+                        gridTemplateColumns: '80px 1.4fr 1.4fr 1.1fr 80px 130px 80px',
+                        alignItems: 'center',
+                        gap: 8,
+                        padding: '13px 20px',
+                        borderTop: `1px solid ${lineSoft}`,
                       }}
                     >
-                      {d.recipeName || '—'}
-                    </span>
-                    <span style={{ fontFamily: 'var(--font-mono)', fontSize: 12, color: text2 }}>
-                      {d.equipmentName || '—'}
-                    </span>
-                    <span style={{ fontFamily: 'var(--font-mono)', fontSize: 12, color: text2 }}>
-                      {UI.formatDuration(d.estimatedDurationSeconds)}
-                    </span>
-                    <span>
-                      <Pill kind={d.status} dotted={d.status === 'running'} />
-                    </span>
-                    <button
-                      onClick={() => navigate({ page: 'lab_dispatch_detail', id: d.id })}
-                      style={{
-                        background: 'transparent',
-                        border: 'none',
-                        cursor: 'pointer',
-                        color: accent,
-                        fontWeight: 600,
-                        fontSize: 12.5,
-                        textAlign: 'right',
-                        padding: 0,
-                        fontFamily: 'inherit',
-                      }}
-                    >
-                      Manage
-                    </button>
-                  </div>
-                ))}
+                      <span
+                        style={{ fontFamily: 'var(--font-mono)', fontSize: 12.5, color: muted }}
+                      >
+                        {d.code}
+                      </span>
+                      <span style={{ fontSize: 13, color: ink }}>{d.experimentName || '—'}</span>
+                      <span
+                        style={{
+                          fontFamily: 'var(--font-mono)',
+                          fontSize: 12,
+                          color: text2,
+                          overflow: 'hidden',
+                          textOverflow: 'ellipsis',
+                          whiteSpace: 'nowrap',
+                        }}
+                      >
+                        {d.recipeName || '—'}
+                      </span>
+                      <span style={{ fontFamily: 'var(--font-mono)', fontSize: 12, color: text2 }}>
+                        {d.equipmentName || '—'}
+                      </span>
+                      <span style={{ fontFamily: 'var(--font-mono)', fontSize: 12, color: text2 }}>
+                        {UI.formatDuration(d.estimatedDurationSeconds)}
+                      </span>
+                      <span>
+                        <Pill kind={d.status} dotted={d.status === 'running'} />
+                      </span>
+                      <button
+                        onClick={() => navigate({ page: 'lab_dispatch_detail', id: d.id })}
+                        style={{
+                          background: 'transparent',
+                          border: 'none',
+                          cursor: 'pointer',
+                          color: accent,
+                          fontWeight: 600,
+                          fontSize: 12.5,
+                          textAlign: 'right',
+                          padding: 0,
+                          fontFamily: 'inherit',
+                        }}
+                      >
+                        Manage
+                      </button>
+                    </div>
+                  ),
+                )}
               </>
             )}
           </Card>
@@ -344,43 +369,51 @@ const LabWipDetail = ({ id, navigate, showToast }) => {
                   No samples on this WIP.
                 </div>
               ) : (
-                w.samples.map((s) => (
-                  <button
-                    key={s.id}
-                    onClick={() => navigate({ page: 'lab_wafer', id: s.id })}
-                    style={{
-                      width: '100%',
-                      display: 'grid',
-                      gridTemplateColumns: '1fr auto',
-                      alignItems: 'center',
-                      gap: 8,
-                      padding: '13px 20px',
-                      borderTop: `1px solid ${lineSoft}`,
-                      background: '#fff',
-                      border: 'none',
-                      cursor: 'pointer',
-                      textAlign: 'left',
-                      fontFamily: 'inherit',
-                    }}
-                  >
-                    <div>
-                      <div
-                        style={{
-                          fontFamily: 'var(--font-mono)',
-                          fontSize: 13,
-                          fontWeight: 700,
-                          color: ink,
-                        }}
-                      >
-                        {s.wafer}
+                w.samples.map(
+                  (s: {
+                    id: number;
+                    wafer: string;
+                    size: string;
+                    status: string;
+                    requestId?: number;
+                  }) => (
+                    <button
+                      key={s.id}
+                      onClick={() => navigate({ page: 'lab_wafer', id: s.id })}
+                      style={{
+                        width: '100%',
+                        display: 'grid',
+                        gridTemplateColumns: '1fr auto',
+                        alignItems: 'center',
+                        gap: 8,
+                        padding: '13px 20px',
+                        borderTop: `1px solid ${lineSoft}`,
+                        background: '#fff',
+                        border: 'none',
+                        cursor: 'pointer',
+                        textAlign: 'left',
+                        fontFamily: 'inherit',
+                      }}
+                    >
+                      <div>
+                        <div
+                          style={{
+                            fontFamily: 'var(--font-mono)',
+                            fontSize: 13,
+                            fontWeight: 700,
+                            color: ink,
+                          }}
+                        >
+                          {s.wafer}
+                        </div>
+                        <div style={{ fontSize: 11.5, color: muted, marginTop: 2 }}>
+                          {s.size} — Req #{String(s.requestId).padStart(4, '0')}
+                        </div>
                       </div>
-                      <div style={{ fontSize: 11.5, color: muted, marginTop: 2 }}>
-                        {s.size} — Req #{String(s.requestId).padStart(4, '0')}
-                      </div>
-                    </div>
-                    <Pill kind={s.status} />
-                  </button>
-                ))
+                      <Pill kind={s.status} />
+                    </button>
+                  ),
+                )
               )}
             </div>
           </Card>

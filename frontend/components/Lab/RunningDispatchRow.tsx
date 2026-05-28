@@ -1,12 +1,29 @@
 'use client';
 import React from 'react';
 import findExp from '@/components/Lab/utils/findExp';
+import type { Navigate } from '@/lib/types';
+type DispatchRow = {
+  id: number;
+  experimentId: string | number;
+  status: string;
+  startedAt?: string | null;
+  equipmentId?: number;
+};
+type WipRow = { equipmentId?: number; waferIds?: number[] };
 import { lineSoft } from '@/lib/colors';
 import { muted } from '@/lib/colors';
 import { ink } from '@/lib/colors';
 import Pill from '@/components/Manager/Pill';
 
-const RunningDispatchRow = ({ d, wip, navigate }) => {
+const RunningDispatchRow = ({
+  d,
+  wip,
+  navigate,
+}: {
+  d: DispatchRow;
+  wip?: WipRow;
+  navigate: Navigate;
+}) => {
   const exp = findExp(d.experimentId);
   const isRunning = d.status === 'running';
   const pct = React.useMemo(() => {

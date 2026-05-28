@@ -2,9 +2,12 @@
 import React from 'react';
 import api from '@/lib/api';
 
+type Sample = Awaited<ReturnType<typeof api.samples.list>>[number];
+type Request = Awaited<ReturnType<typeof api.requests.list>>[number];
+
 const useLabSamples = () => {
-  const [samples, setSamples] = React.useState([]);
-  const [requestsById, setRequestsById] = React.useState(new Map());
+  const [samples, setSamples] = React.useState<Sample[]>([]);
+  const [requestsById, setRequestsById] = React.useState<Map<number, Request>>(new Map());
   const [loading, setLoading] = React.useState(true);
   const [error, setError] = React.useState(null);
   const refresh = React.useCallback(() => {
@@ -13,11 +16,11 @@ const useLabSamples = () => {
       return;
     }
     setLoading(true);
-    Promise.all([api.samples.list(), api.requests.list().catch(() => [])])
+    Promise.all([api.samples.list(), api.requests.list().catch((): Request[] => [])])
       .then(([ss, rs]) => {
-        const visible = ss.filter((s) => s.raw_status !== 'created');
+        const visible = ss.filter((s: Sample) => s.raw_status !== 'created');
         setSamples(visible);
-        setRequestsById(new Map(rs.map((r) => [r.id, r])));
+        setRequestsById(new Map(rs.map((r: Request) => [r.id, r])));
         setError(null);
       })
       .catch((err) => setError(err.message || String(err)))

@@ -15,7 +15,26 @@ import { accent } from '@/lib/colors';
 import { ink } from '@/lib/colors';
 import TextArea from '@/components/Manager/TextArea';
 
-const EquipmentModal = ({ open, onClose, onSaved, initial }) => {
+type EquipmentInitial = {
+  id: number;
+  name?: string;
+  model?: string;
+  capacity?: number;
+  raw_status?: string;
+  capabilities?: { id: number }[];
+  parameters?: Record<string, unknown>;
+};
+const EquipmentModal = ({
+  open,
+  onClose,
+  onSaved,
+  initial,
+}: {
+  open: boolean;
+  onClose: () => void;
+  onSaved?: () => void;
+  initial?: EquipmentInitial;
+}) => {
   const { data: experimentTypes, loading: typesLoading } = useLabExperimentTypes();
   const [name, setName] = React.useState('');
   const [modelName, setModelName] = React.useState('');
@@ -26,12 +45,12 @@ const EquipmentModal = ({ open, onClose, onSaved, initial }) => {
   const [busy, setBusy] = React.useState(false);
   const [err, setErr] = React.useState(null);
   const isEdit = !!initial;
-  const initialCapIds = (initial?.capabilities || []).map((c) => c.id);
+  const initialCapIds = (initial?.capabilities || []).map((c: { id: number }) => c.id);
   const capsChanged =
     isEdit &&
     (capIds.length !== initialCapIds.length ||
-      capIds.some((id) => !initialCapIds.includes(id)) ||
-      initialCapIds.some((id) => !capIds.includes(id)));
+      capIds.some((id: number) => !initialCapIds.includes(id)) ||
+      initialCapIds.some((id: number) => !capIds.includes(id)));
   React.useEffect(() => {
     if (!open) return;
     setErr(null);
@@ -57,7 +76,7 @@ const EquipmentModal = ({ open, onClose, onSaved, initial }) => {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps -- intentional init-on-open; initialCapIds derived from initial and stable for the modal session
   }, [open, initial]);
-  const toggleCap = (id) => {
+  const toggleCap = (id: number) => {
     setCapIds((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
   };
   const capacityNum = parseInt(capacity, 10);
@@ -160,7 +179,7 @@ const EquipmentModal = ({ open, onClose, onSaved, initial }) => {
             <FieldLabel required>Name</FieldLabel>
             <TextInput
               value={name}
-              onChange={(e) => setName(e.target.value)}
+              onChange={(e: React.ChangeEvent<HTMLInputElement>) => setName(e.target.value)}
               placeholder="e.g. QA-TCT-03"
             />
           </div>
@@ -168,7 +187,7 @@ const EquipmentModal = ({ open, onClose, onSaved, initial }) => {
             <FieldLabel required>Model</FieldLabel>
             <TextInput
               value={modelName}
-              onChange={(e) => setModelName(e.target.value)}
+              onChange={(e: React.ChangeEvent<HTMLInputElement>) => setModelName(e.target.value)}
               placeholder="e.g. ESPEC ARS-1100"
             />
           </div>
@@ -180,14 +199,17 @@ const EquipmentModal = ({ open, onClose, onSaved, initial }) => {
               type="number"
               min="1"
               value={capacity}
-              onChange={(e) => setCapacity(e.target.value)}
+              onChange={(e: React.ChangeEvent<HTMLInputElement>) => setCapacity(e.target.value)}
             />
             <div style={{ fontSize: 12, color: muted, marginTop: 4 }}>Wafers per batch.</div>
           </div>
           {isEdit && (
             <div>
               <FieldLabel required>Status</FieldLabel>
-              <SelectInput value={status} onChange={(e) => setStatus(e.target.value)}>
+              <SelectInput
+                value={status}
+                onChange={(e: React.ChangeEvent<HTMLSelectElement>) => setStatus(e.target.value)}
+              >
                 <option value="available">Available</option>
                 <option value="maintenance">Maintenance</option>
                 <option value="disabled">Disabled</option>
@@ -250,7 +272,7 @@ const EquipmentModal = ({ open, onClose, onSaved, initial }) => {
           <FieldLabel>Parameters (JSON)</FieldLabel>
           <TextArea
             value={paramsJson}
-            onChange={(e) => setParamsJson(e.target.value)}
+            onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) => setParamsJson(e.target.value)}
             placeholder='{"key": "value"}'
             style={{ fontFamily: 'var(--font-mono)', fontSize: 12.5, minHeight: 100 }}
           />

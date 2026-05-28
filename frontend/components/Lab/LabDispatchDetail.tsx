@@ -22,8 +22,17 @@ import { bgSoft } from '@/lib/colors';
 import RecordResultModal from '@/components/Lab/RecordResultModal';
 import Modal from '@/components/Manager/Modal';
 import TextArea from '@/components/Manager/TextArea';
+import type { Navigate, ShowToast } from '@/lib/types';
 const LF = I;
-const LabDispatchDetail = ({ id, navigate, showToast }) => {
+const LabDispatchDetail = ({
+  id,
+  navigate,
+  showToast,
+}: {
+  id: number | string;
+  navigate: Navigate;
+  showToast?: ShowToast;
+}) => {
   const { dispatch: d, waferResults, loading, error, refresh } = useLabDispatchDetail(id);
   const [, setTick] = React.useState(0);
   React.useEffect(() => {
@@ -36,7 +45,7 @@ const LabDispatchDetail = ({ id, navigate, showToast }) => {
   const [exceptionNote, setExceptionNote] = React.useState('');
   const [busy, setBusy] = React.useState(false);
   const [actionError, setActionError] = React.useState(null);
-  const runAction = async (op, label) => {
+  const runAction = async (op: () => Promise<unknown>, label: string) => {
     setBusy(true);
     setActionError(null);
     try {
@@ -49,7 +58,7 @@ const LabDispatchDetail = ({ id, navigate, showToast }) => {
       setBusy(false);
     }
   };
-  const confirmThen = (msg, op, label) => {
+  const confirmThen = (msg: string, op: () => Promise<unknown>, label: string) => {
     if (!window.confirm(msg)) return;
     return runAction(op, label);
   };
@@ -281,7 +290,7 @@ const LabDispatchDetail = ({ id, navigate, showToast }) => {
                       whiteSpace: 'nowrap',
                     }}
                   >
-                    {PILL[s].label}
+                    {PILL[s as keyof typeof PILL].label}
                   </span>
                 </div>
                 {i < STATUS_FLOW.length - 1 && (
@@ -658,7 +667,7 @@ const LabDispatchDetail = ({ id, navigate, showToast }) => {
         onClose={() => setRecordOpen(false)}
         dispatch={d}
         waferResults={waferResults}
-        onSubmit={async (payload) => {
+        onSubmit={async (payload: { comment: string }) => {
           setRecordOpen(false);
           await runAction(
             () => api.dispatches.recordResult(d.id, payload),
@@ -708,7 +717,7 @@ const LabDispatchDetail = ({ id, navigate, showToast }) => {
         </label>
         <TextArea
           value={exceptionNote}
-          onChange={(e) => setExceptionNote(e.target.value)}
+          onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) => setExceptionNote(e.target.value)}
           placeholder="e.g. Equipment malfunction — temperature spike at 15 min mark"
           style={{ width: '100%' }}
         />

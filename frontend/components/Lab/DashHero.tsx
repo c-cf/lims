@@ -1,8 +1,11 @@
 'use client';
 import React from 'react';
 import TODAY from '@/components/Lab/constants/today';
+import type { Navigate } from '@/lib/types';
 
-const DashHero = ({ counts, navigate }) => {
+type Counts = { running: number; needsRecord: number; incoming: number };
+
+const DashHero = ({ counts, navigate }: { counts: Counts; navigate: Navigate }) => {
   const hour = new Date().getHours();
   const greeting =
     hour < 5
@@ -14,7 +17,7 @@ const DashHero = ({ counts, navigate }) => {
           : 'Good evening';
   const stars = React.useMemo(() => {
     const arr = [];
-    const rng = (seed) => {
+    const rng = (seed: number) => {
       const x = seed * 9301 + 49297;
       return (x % 233280) / 233280;
     };

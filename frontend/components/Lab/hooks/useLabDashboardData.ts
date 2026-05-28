@@ -19,18 +19,20 @@ const useLabDashboardData = () => {
       api.samples.list(),
       api.wips.list(),
       api.dispatches.list(),
-      api.equipment.list().catch(() => []),
-      api.experimentTypes.list().catch(() => []),
+      api.equipment.list().catch((): Awaited<ReturnType<typeof api.equipment.list>> => []),
+      api.experimentTypes
+        .list()
+        .catch((): Awaited<ReturnType<typeof api.experimentTypes.list>> => []),
     ])
       .then(([ss, ws, ds, eqs, exps]) => {
-        setSamples(ss.filter((s) => s.raw_status !== 'created'));
+        setSamples(ss.filter((s: { raw_status: string }) => s.raw_status !== 'created'));
         setWips(ws);
         setEquipment(eqs);
         type NamedRow = { id: number; name?: string };
-        const expById = new Map((exps as NamedRow[]).map((e) => [e.id, e] as const));
-        const eqById = new Map((eqs as NamedRow[]).map((e) => [e.id, e] as const));
+        const expById = new Map((exps as NamedRow[]).map((e: NamedRow) => [e.id, e] as const));
+        const eqById = new Map((eqs as NamedRow[]).map((e: NamedRow) => [e.id, e] as const));
         setDispatches(
-          ds.map((d) => ({
+          ds.map((d: { experimentId: number; equipmentId: number }) => ({
             ...d,
             experimentName: expById.get(d.experimentId)?.name || null,
             equipmentName: eqById.get(d.equipmentId)?.name || null,

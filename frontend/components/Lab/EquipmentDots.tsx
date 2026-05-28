@@ -1,6 +1,6 @@
 'use client';
 
-const EquipmentDots = ({ used, capacity }) => {
+const EquipmentDots = ({ used, capacity }: { used: number; capacity: number }) => {
   const cells = Array.from({ length: capacity });
   return (
     <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', marginTop: 6 }}>

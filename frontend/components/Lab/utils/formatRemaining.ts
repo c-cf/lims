@@ -1,6 +1,6 @@
 'use client';
 
-const formatRemaining = (ms) => {
+const formatRemaining = (ms: number | null | undefined) => {
   if (ms == null) return { text: '—', level: 'none' };
   if (ms < 0) {
     const d = Math.ceil(-ms / 86400000);

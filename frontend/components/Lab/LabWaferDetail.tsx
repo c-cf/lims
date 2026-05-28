@@ -16,13 +16,32 @@ import { text2 } from '@/lib/colors';
 import { ink } from '@/lib/colors';
 import { lineSoft } from '@/lib/colors';
 import { accent } from '@/lib/colors';
+import type { Navigate, ShowToast } from '@/lib/types';
+type SampleExperiment = Awaited<ReturnType<typeof api.samples.getExperiments>>[number];
+type ExpRow = {
+  id: number | null;
+  name: string;
+  group: string;
+  status: string;
+  verdict: string | null;
+  dispatchId: number | null;
+  result: SampleExperiment['result'];
+};
 const LF = I;
-const LabWaferDetail = ({ id, navigate, showToast }) => {
+const LabWaferDetail = ({
+  id,
+  navigate,
+  showToast,
+}: {
+  id: number | string;
+  navigate: Navigate;
+  showToast?: ShowToast;
+}) => {
   const { data, loading, error, refresh } = useWaferDetail(id);
   const { data: expTypes } = useLabExperimentTypes();
   const [busy, setBusy] = React.useState(false);
   const [actionError, setActionError] = React.useState(null);
-  const runAction = async (op, label) => {
+  const runAction = async (op: () => Promise<unknown>, label: string) => {
     setBusy(true);
     setActionError(null);
     try {
@@ -66,7 +85,7 @@ const LabWaferDetail = ({ id, navigate, showToast }) => {
   const { sample: w, request, wip, experiments } = data;
   const urgency = request?.urgency || '1w';
   const labCategoryById = new Map((expTypes || []).map((t) => [t.id, t.labCategory]));
-  const expRows = (experiments || []).map((e) => ({
+  const expRows = (experiments || []).map((e: SampleExperiment) => ({
     id: e.experimentTypeId,
     name: e.experimentName,
     group: labCategoryById.get(e.experimentTypeId) || '',
@@ -75,7 +94,7 @@ const LabWaferDetail = ({ id, navigate, showToast }) => {
     dispatchId: e.dispatchId,
     result: e.result,
   }));
-  const doneCount = expRows.filter((r) => r.status === 'done').length;
+  const doneCount = expRows.filter((r: ExpRow) => r.status === 'done').length;
   const onReceive = () => runAction(() => api.samples.receive(w.id), `${w.wafer} received`);
   const onReject = () =>
     runAction(() => api.samples.rejectReceiving(w.id, ''), `${w.wafer} rejected`);
@@ -200,7 +219,7 @@ const LabWaferDetail = ({ id, navigate, showToast }) => {
                   background: '#fafafd',
                 }}
               >
-                {expRows.map((e) => {
+                {expRows.map((e: ExpRow) => {
                   const done = e.status === 'done';
                   const running = e.status === 'running';
                   const fail = done && e.verdict === 'fail';
@@ -326,34 +345,42 @@ const LabWaferDetail = ({ id, navigate, showToast }) => {
               </button>
               {(wip.dispatches || []).length > 0 && (
                 <div style={{ borderTop: `1px solid ${lineSoft}` }}>
-                  {(wip.dispatches || []).map((d) => (
-                    <button
-                      key={d.id}
-                      onClick={() => navigate({ page: 'lab_dispatch_detail', id: d.id })}
-                      style={{
-                        display: 'grid',
-                        gridTemplateColumns: '90px 1fr 130px',
-                        gap: 12,
-                        alignItems: 'center',
-                        width: '100%',
-                        padding: '12px 22px',
-                        borderTop: `1px solid ${lineSoft}`,
-                        background: '#fff',
-                        border: 'none',
-                        cursor: 'pointer',
-                        textAlign: 'left',
-                        fontFamily: 'inherit',
-                      }}
-                    >
-                      <span
-                        style={{ fontFamily: 'var(--font-mono)', fontSize: 12.5, color: text2 }}
+                  {(wip.dispatches || []).map(
+                    (d: {
+                      id: number;
+                      code: string;
+                      status: string;
+                      raw_status?: string;
+                      experimentName?: string;
+                    }) => (
+                      <button
+                        key={d.id}
+                        onClick={() => navigate({ page: 'lab_dispatch_detail', id: d.id })}
+                        style={{
+                          display: 'grid',
+                          gridTemplateColumns: '90px 1fr 130px',
+                          gap: 12,
+                          alignItems: 'center',
+                          width: '100%',
+                          padding: '12px 22px',
+                          borderTop: `1px solid ${lineSoft}`,
+                          background: '#fff',
+                          border: 'none',
+                          cursor: 'pointer',
+                          textAlign: 'left',
+                          fontFamily: 'inherit',
+                        }}
                       >
-                        {d.code}
-                      </span>
-                      <span style={{ fontSize: 13, color: ink }}>{d.experimentName || '—'}</span>
-                      <Pill kind={d.status} />
-                    </button>
-                  ))}
+                        <span
+                          style={{ fontFamily: 'var(--font-mono)', fontSize: 12.5, color: text2 }}
+                        >
+                          {d.code}
+                        </span>
+                        <span style={{ fontSize: 13, color: ink }}>{d.experimentName || '—'}</span>
+                        <Pill kind={d.status} />
+                      </button>
+                    ),
+                  )}
                 </div>
               )}
             </Card>
@@ -389,7 +416,7 @@ const LabWaferDetail = ({ id, navigate, showToast }) => {
               cancelled: 1,
               returned: 1,
             };
-            const cur = order[w.status] ?? 0;
+            const cur = order[w.status as keyof typeof order] ?? 0;
             const reached = i <= cur && w.status !== 'rejected';
             return (
               <div

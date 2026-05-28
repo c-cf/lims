@@ -13,20 +13,34 @@ import findExp from '@/components/Lab/utils/findExp';
 import Pill from '@/components/Manager/Pill';
 import { lineSoft } from '@/lib/colors';
 import { accent } from '@/lib/colors';
+import type { Navigate } from '@/lib/types';
+import api from '@/lib/api';
+type Dispatch = Awaited<ReturnType<typeof api.dispatches.list>>[number] & {
+  experimentName?: string | null;
+  equipmentName?: string | null;
+};
 const LF = I;
-const LabDispatchList = ({ navigate, defaultTab = 'active' }) => {
+const LabDispatchList = ({
+  navigate,
+  defaultTab = 'active',
+}: {
+  navigate: Navigate;
+  defaultTab?: string;
+}) => {
   const { dispatches, loading, error } = useLabDispatches();
   const [tab, setTab] = React.useState(defaultTab);
-  const groups = {
+  const groups: Record<string, string[] | null> = {
     active: ['dispatched', 'pending', 'running'],
     record: ['unloaded', 'exception'],
     done: ['completed', 'aborted'],
     all: null,
   };
   const filtered =
-    groups[tab] === null ? dispatches : dispatches.filter((d) => groups[tab].includes(d.status));
+    groups[tab] === null
+      ? dispatches
+      : dispatches.filter((d: Dispatch) => groups[tab]!.includes(d.status));
   const [, setTick] = React.useState(0);
-  const hasRunning = filtered.some((d) => d.status === 'running');
+  const hasRunning = filtered.some((d: Dispatch) => d.status === 'running');
   React.useEffect(() => {
     if (!hasRunning) return;
     const h = setInterval(() => setTick((t) => t + 1), 1000);
@@ -73,7 +87,7 @@ const LabDispatchList = ({ navigate, defaultTab = 'active' }) => {
           const n = (
             groups[t.id] === null
               ? dispatches
-              : dispatches.filter((d) => groups[t.id].includes(d.status))
+              : dispatches.filter((d: Dispatch) => groups[t.id]!.includes(d.status))
           ).length;
           return (
             <button
@@ -125,7 +139,7 @@ const LabDispatchList = ({ navigate, defaultTab = 'active' }) => {
             <div style={{ fontSize: 14, fontWeight: 600, color: text2 }}>No dispatches</div>
           </Card>
         ) : (
-          filtered.map((d) => {
+          filtered.map((d: Dispatch) => {
             let pct = 0,
               remainLabel = null,
               showBar = false;
@@ -143,7 +157,7 @@ const LabDispatchList = ({ navigate, defaultTab = 'active' }) => {
               (d.experimentName
                 ? d.experimentName
                     .split(/\s+/)
-                    .map((t) => t[0])
+                    .map((t: string) => t[0])
                     .join('')
                     .slice(0, 4)
                     .toUpperCase()

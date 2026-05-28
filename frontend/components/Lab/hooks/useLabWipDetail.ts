@@ -2,7 +2,7 @@
 import React from 'react';
 import api from '@/lib/api';
 
-const useLabWipDetail = (id) => {
+const useLabWipDetail = (id: number | string | null | undefined) => {
   const [wip, setWip] = React.useState(null);
   const [loading, setLoading] = React.useState(true);
   const [error, setError] = React.useState(null);
