@@ -1,4 +1,4 @@
-"use client";
+'use client';
 import { useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { SESSION_KEY } from '@/components/App/constants';

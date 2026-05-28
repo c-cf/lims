@@ -1,6 +1,5 @@
-"use client";
+'use client';
 
-
-const ymd=s=>s;
+const ymd = (s) => s;
 export default ymd;
 export { ymd };

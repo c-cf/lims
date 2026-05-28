@@ -1,6 +1,11 @@
-"use client";
+'use client';
 import inputStyle from '@/components/Manager/utils/inputStyle';
 
-const TextArea=p=><textarea{...p}style={{...inputStyle,minHeight:70,resize:'vertical',fontFamily:'inherit',...p.style}}/>;
+const TextArea = (p) => (
+  <textarea
+    {...p}
+    style={{ ...inputStyle, minHeight: 70, resize: 'vertical', fontFamily: 'inherit', ...p.style }}
+  />
+);
 export default TextArea;
 export { TextArea };
