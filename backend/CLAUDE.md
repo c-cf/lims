@@ -119,5 +119,5 @@ uv run pytest                # 測試
 ```
 DJANGO_SECRET_KEY=<generated key>
 DEBUG=True
-ALLOWED_HOSTS=localhost,127.0.0.1
+DJANGO_ALLOWED_HOSTS=localhost,127.0.0.1
 ```
