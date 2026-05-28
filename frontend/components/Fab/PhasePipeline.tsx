@@ -1,4 +1,3 @@
-// @ts-nocheck
 "use client";
 import React from 'react';
 import WAFER_PHASES from '@/components/Fab/constants/waferPhases';

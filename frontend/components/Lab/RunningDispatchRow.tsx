@@ -1,4 +1,3 @@
-// @ts-nocheck
 "use client";
 import React from 'react';
 import findExp from '@/components/Lab/utils/findExp';

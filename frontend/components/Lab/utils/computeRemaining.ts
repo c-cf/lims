@@ -1,4 +1,3 @@
-// @ts-nocheck
 "use client";
 import URGENCY_DAYS from '@/components/Lab/constants/urgencyDays';
 

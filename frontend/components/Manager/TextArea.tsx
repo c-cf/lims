@@ -1,4 +1,3 @@
-// @ts-nocheck
 "use client";
 import inputStyle from '@/components/Manager/utils/inputStyle';
 

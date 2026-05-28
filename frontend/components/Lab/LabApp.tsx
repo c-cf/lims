@@ -1,4 +1,3 @@
-// @ts-nocheck
 "use client";
 import React from 'react';
 import LabDashboard from '@/components/Lab/LabDashboard';

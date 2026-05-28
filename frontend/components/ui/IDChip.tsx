@@ -1,4 +1,3 @@
-// @ts-nocheck
 "use client";
 import { muted } from '@/lib/colors';
 

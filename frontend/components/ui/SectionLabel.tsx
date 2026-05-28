@@ -1,4 +1,3 @@
-// @ts-nocheck
 "use client";
 
 const SectionLabel = ({ children, style, right }) => (

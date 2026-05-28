@@ -1,4 +1,3 @@
-// @ts-nocheck
 "use client";
 
 const Card = ({ children, style, padding = 0, ...rest }) => (

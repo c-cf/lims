@@ -1,4 +1,3 @@
-// @ts-nocheck
 "use client";
 import { line as mLine } from '@/lib/colors';
 

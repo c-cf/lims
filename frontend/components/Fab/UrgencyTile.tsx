@@ -1,4 +1,3 @@
-// @ts-nocheck
 "use client";
 import * as I from '@/components/ui/I';
 const F=I;

@@ -1,4 +1,3 @@
-// @ts-nocheck
 export { default as Card } from './Card';
 export { default as SectionLabel } from './SectionLabel';
 export { default as Badge } from './Badge';
