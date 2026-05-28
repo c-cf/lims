@@ -1,7 +1,6 @@
 "use client";
 import React from 'react';
 import { line as mLine } from '@/lib/colors';
-import { accent } from '@/lib/colors';
 import { text2 as mText2 } from '@/lib/colors';
 import { ink as mInk } from '@/lib/colors';
 

@@ -16,7 +16,7 @@ import TrendChart from '@/components/Manager/TrendChart';
 const MI=I;
 const MgrDashboard=({navigate})=>{const{requests,equipmentCount,loading:countsLoading,error:countsError}=useMgrDashboardData();const pending=requests.filter(r=>r.status==='submitted');const inProgress=requests.filter(r=>r.status==='in_progress').length;const completed=requests.filter(r=>r.status==='completed').length;const initialLoad=countsLoading&&requests.length===0;const v=n=>initialLoad?'—':n;return<Page title="Dashboard"subtitle="Welcome back, lab_manager">
       {countsError&&<div style={{padding:'12px 16px',marginBottom:14,borderRadius:10,background:'#fde4e4',color:'#c0394a',fontSize:13.5,fontWeight:500,border:'1px solid #f6c4c4'}}>
-          Couldn't load tile counts: {countsError}
+          Couldn&apos;t load tile counts: {countsError}
         </div>}
       {}
       <div style={{display:'grid',gridTemplateColumns:'repeat(4, 1fr)',gap:14,marginBottom:22}}>

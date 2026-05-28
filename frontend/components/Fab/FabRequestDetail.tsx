@@ -16,7 +16,7 @@ import HistoryDot from '@/components/Fab/HistoryDot';
 import DetailWaferRow from '@/components/Fab/DetailWaferRow';
 import CancelRequestModal from '@/components/Fab/CancelRequestModal';
 const F=I;
-const FabRequestDetail=({id,navigate,showToast})=>{const{data:r,loading,error,refresh}=useRequestDetail(id);const{data:liveTypes}=useExperimentTypes();const{byId:expsBySample}=useSampleExperimentsForRequest(r?.samples);const[cancelOpen,setCancelOpen]=React.useState(false);const[shipBusy,setShipBusy]=React.useState(false);const onShip=async()=>{if(!r)return;if(!window.confirm('Ship all wafers for this request to the lab?'))return;setShipBusy(true);try{await api.requests.ship(r.id);showToast&&showToast('Wafers shipped');refresh();}catch(e){showToast&&showToast(`Ship failed: ${e.message||e}`);}finally{setShipBusy(false);}};if(loading&&!r){return<FabPage title="Loading request…">
+const FabRequestDetail=({id,navigate,showToast})=>{const{data:r,loading,error,refresh}=useRequestDetail(id);const{data:liveTypes}=useExperimentTypes();const{byId:expsBySample}=useSampleExperimentsForRequest(r?.samples);const[cancelOpen,setCancelOpen]=React.useState(false);const[shipBusy,setShipBusy]=React.useState(false);const onShip=async()=>{if(!r)return;if(!window.confirm('Ship all wafers for this request to the lab?'))return;setShipBusy(true);try{await api.requests.ship(r.id);showToast?.('Wafers shipped');refresh();}catch(e){showToast?.(`Ship failed: ${e.message||e}`);}finally{setShipBusy(false);}};if(loading&&!r){return<FabPage title="Loading request…">
           <div style={{padding:'60px 20px',textAlign:'center',color:'var(--text-muted)',fontSize:14}}>
             Loading…
           </div>
@@ -108,7 +108,7 @@ const FabRequestDetail=({id,navigate,showToast})=>{const{data:r,loading,error,re
                       <div style={{fontSize:11.5,color:'var(--text-muted)',marginTop:4,marginLeft:23}}>{s.size}</div>
                     </div>
                     <div style={{display:'flex',flexWrap:'wrap',gap:8}}>
-                      {exps.map(e=>{const row=rollupByExpId.get(e.id);const st=row?.status||'pending';const v=row?.verdict||null;const done=st==='done';const pass=done&&v==='pass';const fail=done&&v==='fail';return<span key={e.id}style={{display:'inline-flex',alignItems:'center',gap:7,padding:'6px 12px 6px 7px',borderRadius:999,background:fail?'#fde4e4':done?'#e7f6ec':'#f4f4f7',border:`1px solid ${fail?'#f4b4b9':done?'#9ad9b7':'rgba(0,0,0,0.08)'}`}}>
+                      {exps.map(e=>{const row=rollupByExpId.get(e.id);const st=row?.status||'pending';const v=row?.verdict||null;const done=st==='done';const fail=done&&v==='fail';return<span key={e.id}style={{display:'inline-flex',alignItems:'center',gap:7,padding:'6px 12px 6px 7px',borderRadius:999,background:fail?'#fde4e4':done?'#e7f6ec':'#f4f4f7',border:`1px solid ${fail?'#f4b4b9':done?'#9ad9b7':'rgba(0,0,0,0.08)'}`}}>
                             <span style={{fontSize:10,fontWeight:700,padding:'3px 7px',borderRadius:999,background:fail?'#a93445':done?'#157a4a':'#cbcbd6',color:'#fff',letterSpacing:'0.05em'}}>{e.group}</span>
                             <span style={{fontSize:13,fontWeight:500,color:fail?'#5a1a22':done?'#1f3d2c':'#a8a8b8'}}>{e.name}</span>
                             {fail?<F.X size={13}color="#a93445"strokeWidth={3}/>:done?<F.Check size={13}color="#157a4a"strokeWidth={3}/>:<span style={{width:13,height:13,borderRadius:999,border:'1.5px dashed #cbcbd6'}}/>}

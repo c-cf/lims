@@ -1,6 +1,5 @@
 "use client";
 import FabCard from '@/components/Fab/FabCard';
-import { accent } from '@/lib/colors';
 
 const StatTile=({label,value,accent=undefined,valueBg=undefined})=><FabCard padding={20}style={{display:'flex',alignItems:'center',gap:16}}>
       <div style={{width:56,height:56,borderRadius:12,background:valueBg,display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0}}>

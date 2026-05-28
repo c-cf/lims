@@ -13,13 +13,13 @@ import findExp from '@/components/Lab/utils/findExp';
 import Pill from '@/components/Manager/Pill';
 import WipCreationModal from '@/components/Lab/WipCreationModal';
 const LF=I;
-const LabWipList=({navigate,showToast})=>{const{wips,loading,error,refresh}=useLabWips();const[tab,setTab]=React.useState('active');const[modalOpen,setModalOpen]=React.useState(false);const isWipActive=w=>w.status!=='completed'&&w.status!=='aborted';const filtered=tab==='active'?wips.filter(isWipActive):tab==='completed'?wips.filter(w=>!isWipActive(w)):wips;const openModal=()=>setModalOpen(true);const closeModal=()=>setModalOpen(false);const onSaved=newWip=>{closeModal();showToast&&showToast(`${newWip.code} created`);refresh();if(newWip?.id!=null)navigate({page:'lab_wip_detail',id:newWip.id});};if(loading&&wips.length===0){return<Page title="WIP"subtitle="Loading…">
+const LabWipList=({navigate,showToast})=>{const{wips,loading,error,refresh}=useLabWips();const[tab,setTab]=React.useState('active');const[modalOpen,setModalOpen]=React.useState(false);const isWipActive=w=>w.status!=='completed'&&w.status!=='aborted';const filtered=tab==='active'?wips.filter(isWipActive):tab==='completed'?wips.filter(w=>!isWipActive(w)):wips;const openModal=()=>setModalOpen(true);const closeModal=()=>setModalOpen(false);const onSaved=newWip=>{closeModal();showToast?.(`${newWip.code} created`);refresh();if(newWip?.id!=null)navigate({page:'lab_wip_detail',id:newWip.id});};if(loading&&wips.length===0){return<Page title="WIP"subtitle="Loading…">
         <div style={{padding:'60px 20px',textAlign:'center',color:muted,fontSize:14}}>
           Loading…
         </div>
       </Page>;}return<Page title="WIP"subtitle="Work-in-progress units — each WIP runs one experiment on one piece of equipment"right={<PrimaryBtn icon={<LF.Plus size={14}/>}onClick={openModal}>New WIP</PrimaryBtn>}>
       {error&&<div style={{padding:'12px 16px',marginBottom:14,borderRadius:10,background:'#fde4e4',color:'#c0394a',fontSize:13.5,fontWeight:500,border:'1px solid #f6c4c4'}}>
-          Couldn't load WIPs: {error}
+          Couldn&apos;t load WIPs: {error}
         </div>}
       <div style={{display:'flex',gap:4,marginBottom:14,borderBottom:`1px solid ${line}`}}>
         {[{id:'active',label:'Active',n:wips.filter(isWipActive).length},{id:'completed',label:'Completed',n:wips.filter(w=>!isWipActive(w)).length},{id:'all',label:'All',n:wips.length}].map(t=><button key={t.id}onClick={()=>setTab(t.id)}style={{display:'inline-flex',alignItems:'center',gap:6,padding:'10px 14px',background:'transparent',border:'none',borderBottom:`2px solid ${tab===t.id?ink:'transparent'}`,color:tab===t.id?ink:text2,fontWeight:600,fontSize:13,cursor:'pointer',fontFamily:'inherit',marginBottom:-1}}>

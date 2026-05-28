@@ -35,9 +35,7 @@ export default function LabLayout({ children }: { children: React.ReactNode }) {
       const u = JSON.parse(stored);
       if (u.role !== 'lab_member' && u.role !== 'lab_mem') {
         router.replace(roleHome(u.role)); return;
-      }
-      // eslint-disable-next-line react-hooks/set-state-in-effect
-      setAuth({ user: u, ok: true });
+      }      setAuth({ user: u, ok: true });
     } catch { router.replace('/login'); }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);

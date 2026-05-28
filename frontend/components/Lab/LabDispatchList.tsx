@@ -18,7 +18,7 @@ const LabDispatchList=({navigate,defaultTab='active'})=>{const{dispatches,loadin
         <div style={{padding:'60px 20px',textAlign:'center',color:muted,fontSize:14}}>Loading…</div>
       </Page>;}return<Page title="Dispatches"subtitle="One experiment run on one piece of equipment, derived from a WIP">
       {error&&<div style={{padding:'12px 16px',marginBottom:14,borderRadius:10,background:'#fde4e4',color:'#c0394a',fontSize:13.5,fontWeight:500,border:'1px solid #f6c4c4'}}>
-          Couldn't load dispatches: {error}
+          Couldn&apos;t load dispatches: {error}
         </div>}
       <div style={{display:'flex',gap:4,marginBottom:14,borderBottom:`1px solid ${line}`}}>
         {tabs.map(t=>{const n=(groups[t.id]===null?dispatches:dispatches.filter(d=>groups[t.id].includes(d.status))).length;return<button key={t.id}onClick={()=>setTab(t.id)}style={{display:'inline-flex',alignItems:'center',gap:6,padding:'10px 14px',background:'transparent',border:'none',borderBottom:`2px solid ${tab===t.id?ink:'transparent'}`,color:tab===t.id?ink:text2,fontWeight:600,fontSize:13,cursor:'pointer',fontFamily:'inherit',marginBottom:-1}}>

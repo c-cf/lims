@@ -6,7 +6,6 @@ import TweaksUI from '@/components/App/TweaksUI';
 import useTweaks from '@/components/Tweaks/useTweaks';
 import { SESSION_KEY, TWEAK_DEFAULTS } from '@/components/App/constants';
 import { roleHome } from '@/lib/navigate';
-import api from '@/lib/api';
 
 export default function Page() {
   const router = useRouter();
@@ -28,7 +27,7 @@ export default function Page() {
         router.replace(roleHome(u.role));
       }
     } catch {}
-  }, []);
+  }, [router]);
 
   const handleLogin = (user) => {
     localStorage.setItem(SESSION_KEY, JSON.stringify(user));

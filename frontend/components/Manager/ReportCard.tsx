@@ -3,7 +3,6 @@ import React from 'react';
 import * as I from '@/components/ui/I';
 import Card from '@/components/Manager/Card';
 import CardHeader from '@/components/Manager/CardHeader';
-import { accent } from '@/lib/colors';
 import { ink as mInk } from '@/lib/colors';
 import { text2 as mText2 } from '@/lib/colors';
 import FieldLabel from '@/components/Manager/FieldLabel';

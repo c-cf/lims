@@ -9,7 +9,7 @@ import { muted } from '@/lib/colors';
 import { ink } from '@/lib/colors';
 import TextArea from '@/components/Manager/TextArea';
 
-const RecordResultModal=({open,onClose,dispatch,waferResults=[],onSubmit})=>{const[comment,setComment]=React.useState('');React.useEffect(()=>{if(open)setComment('');},[open]);return<Modal open={open}onClose={onClose}title="Record Experiment Result"width={560}footer={<>
+const RecordResultModal=({open,onClose,dispatch:_dispatch,waferResults=[],onSubmit})=>{const[comment,setComment]=React.useState('');React.useEffect(()=>{if(open)setComment('');},[open]);return<Modal open={open}onClose={onClose}title="Record Experiment Result"width={560}footer={<>
         <SecondaryBtn onClick={onClose}>Cancel</SecondaryBtn>
         <PrimaryBtn onClick={()=>onSubmit({comment:comment.trim()})}>Submit Result</PrimaryBtn>
       </>}>
