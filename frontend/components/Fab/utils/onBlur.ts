@@ -1,6 +1,7 @@
 'use client';
+import React from 'react';
 
-const onBlur = (e) => {
+const onBlur = (e: React.FocusEvent<HTMLInputElement | HTMLTextAreaElement>) => {
   e.target.style.borderColor = 'rgba(0,0,0,0.12)';
   e.target.style.background = '#f8f8fb';
   e.target.style.boxShadow = 'none';

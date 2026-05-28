@@ -10,8 +10,20 @@ import FabCard from '@/components/Fab/FabCard';
 import RequestFlow from '@/components/Fab/RequestFlow';
 import UrgencyPill from '@/components/Fab/UrgencyPill';
 import StatusPill from '@/components/Fab/StatusPill';
+import type { Navigate } from '@/lib/types';
 const F = I;
-const FabRequestList = ({ navigate, initialTab = 'all', titleOverride = '', drafts = false }) => {
+type RequestRow = Awaited<ReturnType<typeof api.requests.list>>[number];
+const FabRequestList = ({
+  navigate,
+  initialTab = 'all',
+  titleOverride = '',
+  drafts = false,
+}: {
+  navigate: Navigate;
+  initialTab?: string;
+  titleOverride?: string;
+  drafts?: boolean;
+}) => {
   const { data: requests, loading, error, refresh } = useRequests();
   const [tab, setTab] = React.useState(initialTab);
   const [search, setSearch] = React.useState('');
@@ -37,9 +49,9 @@ const FabRequestList = ({ navigate, initialTab = 'all', titleOverride = '', draf
     // eslint-disable-next-line react-hooks/exhaustive-deps -- tabFilter recomputed each render; depending on it would create new ref and recompute infinitely
   }, [baseList, tab, search, urgency, sort, drafts]);
   const inProgressCount = requests.filter((r) => r.status === 'in_progress').length;
-  const onRowClick = (r) =>
+  const onRowClick = (r: RequestRow) =>
     navigate(drafts ? { page: 'fab_draft_edit', id: r.id } : { page: 'fab_request', id: r.id });
-  const handleDeleteDraft = (r) => {
+  const handleDeleteDraft = (r: RequestRow) => {
     if (!window.confirm(`Delete draft "${r.title || 'Untitled draft'}"? This cannot be undone.`))
       return;
     setDeletingId(r.id);

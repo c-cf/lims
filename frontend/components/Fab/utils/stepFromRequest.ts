@@ -1,6 +1,10 @@
 'use client';
+import type api from '@/lib/api';
 
-const stepFromRequest = (r) => {
+type RequestRow = Awaited<ReturnType<typeof api.requests.list>>[number];
+type SampleItem = { status: string; raw_status?: string };
+
+const stepFromRequest = (r: RequestRow) => {
   if (
     r.status === 'draft' ||
     r.status === 'cancelled' ||
@@ -14,7 +18,7 @@ const stepFromRequest = (r) => {
     return { idx: -1 };
   }
   if (r.status === 'completed' || raw === 'completed' || raw === 'closed') return { idx: 3 };
-  const samples = r.samples || [];
+  const samples: SampleItem[] = r.samples || [];
   if (samples.length > 0) {
     const allDone = samples.every((s) => s.status === 'completed');
     if (allDone) return { idx: 3 };

@@ -3,8 +3,17 @@ import * as I from '@/components/ui/I';
 import useRequestDetail from '@/components/Fab/hooks/useRequestDetail';
 import FabPage from '@/components/Fab/FabPage';
 import FabNewRequest from '@/components/Fab/FabNewRequest';
+import type { Navigate, ShowToast } from '@/lib/types';
 const F = I;
-const FabDraftEdit = ({ id, navigate, showToast }) => {
+const FabDraftEdit = ({
+  id,
+  navigate,
+  showToast,
+}: {
+  id: number | string;
+  navigate: Navigate;
+  showToast: ShowToast;
+}) => {
   const { data: draft, loading, error } = useRequestDetail(id);
   if (loading && !draft) {
     return (

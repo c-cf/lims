@@ -1,7 +1,18 @@
 'use client';
+import React from 'react';
 import FabCard from '@/components/Fab/FabCard';
 
-const StatTile = ({ label, value, accent = undefined, valueBg = undefined }) => (
+const StatTile = ({
+  label,
+  value,
+  accent = undefined,
+  valueBg = undefined,
+}: {
+  label: string;
+  value: React.ReactNode;
+  accent?: string;
+  valueBg?: string;
+}) => (
   <FabCard padding={20} style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
     <div
       style={{

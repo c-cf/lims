@@ -1,4 +1,5 @@
 'use client';
+import React from 'react';
 
 const FabPage = ({
   title,
@@ -6,6 +7,12 @@ const FabPage = ({
   breadcrumb = undefined,
   right = undefined,
   children,
+}: {
+  title: React.ReactNode;
+  subtitle?: React.ReactNode;
+  breadcrumb?: React.ReactNode;
+  right?: React.ReactNode;
+  children?: React.ReactNode;
 }) => (
   <div style={{ padding: '32px 44px 80px', maxWidth: 1280, margin: '0 auto' }}>
     {breadcrumb}

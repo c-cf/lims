@@ -1,6 +1,15 @@
 'use client';
+import React from 'react';
 
-const HeaderLinkButton = ({ children, onClick, accent }) => (
+const HeaderLinkButton = ({
+  children,
+  onClick,
+  accent,
+}: {
+  children: React.ReactNode;
+  onClick: () => void;
+  accent: string;
+}) => (
   <button
     onClick={onClick}
     style={{

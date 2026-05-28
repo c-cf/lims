@@ -17,8 +17,21 @@ import SectionLabel from '@/components/Fab/SectionLabel';
 import UrgencyPill from '@/components/Fab/UrgencyPill';
 import SecondaryBtn from '@/components/Manager/SecondaryBtn';
 import PrimaryBtn from '@/components/Manager/PrimaryBtn';
+import type { Navigate, ShowToast } from '@/lib/types';
 const F = I;
-const FabNewRequest = ({ navigate, draft = null, isEdit = false, showToast }) => {
+type RequestDetail = Awaited<ReturnType<typeof api.requests.get>>;
+type WaferEntry = { wafer: string; size: string; expIds: number[] };
+const FabNewRequest = ({
+  navigate,
+  draft = null,
+  isEdit = false,
+  showToast,
+}: {
+  navigate: Navigate;
+  draft?: RequestDetail | null;
+  isEdit?: boolean;
+  showToast?: ShowToast;
+}) => {
   const { data: liveExperiments, error: experimentsError } = useExperimentTypes();
   const experimentChoices = liveExperiments.map((e) => ({
     id: e.id,
@@ -29,7 +42,7 @@ const FabNewRequest = ({ navigate, draft = null, isEdit = false, showToast }) =>
   const [title, setTitle] = React.useState(draft?.title || '');
   const [note, setNote] = React.useState(draft?.note || '');
   const [urgency, setUrgency] = React.useState(draft?.urgency || '1w');
-  const [wafers, setWafers] = React.useState(
+  const [wafers, setWafers] = React.useState<WaferEntry[]>(
     draft?.samples?.length
       ? draft.samples.map((s) => ({ wafer: s.wafer, size: s.size, expIds: draft.expIds || [] }))
       : [{ wafer: '', size: '200mm', expIds: [] }],
@@ -37,27 +50,28 @@ const FabNewRequest = ({ navigate, draft = null, isEdit = false, showToast }) =>
   const [busy, setBusy] = React.useState(false);
   const [apiError, setApiError] = React.useState(null);
   const addWafer = () => setWafers((w) => [...w, { wafer: '', size: '200mm', expIds: [] }]);
-  const removeWafer = (i) => setWafers((w) => (w.length === 1 ? w : w.filter((_, j) => j !== i)));
-  const updateWafer = (i, key, value) =>
-    setWafers((w) => w.map((s, j) => (j === i ? { ...s, [key]: value } : s)));
-  const toggleExp = (i, expId) =>
+  const removeWafer = (i: number) =>
+    setWafers((w) => (w.length === 1 ? w : w.filter((_: WaferEntry, j: number) => j !== i)));
+  const updateWafer = (i: number, key: string, value: string) =>
+    setWafers((w) => w.map((s: WaferEntry, j: number) => (j === i ? { ...s, [key]: value } : s)));
+  const toggleExp = (i: number, expId: number) =>
     setWafers((w) =>
-      w.map((s, j) =>
+      w.map((s: WaferEntry, j: number) =>
         j === i
           ? {
               ...s,
               expIds: s.expIds.includes(expId)
-                ? s.expIds.filter((x) => x !== expId)
+                ? s.expIds.filter((x: number) => x !== expId)
                 : [...s.expIds, expId],
             }
           : s,
       ),
     );
-  const totalExp = wafers.reduce((acc, w) => acc + w.expIds.length, 0);
+  const totalExp = wafers.reduce((acc: number, w: WaferEntry) => acc + w.expIds.length, 0);
   const basicValid = title.trim().length > 0;
   const samplesValid = wafers.every((w) => w.wafer.trim() && w.expIds.length > 0);
   const valid = basicValid && samplesValid;
-  const handle = async (publish) => {
+  const handle = async (publish: boolean) => {
     setBusy(true);
     setApiError(null);
     try {

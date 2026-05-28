@@ -1,18 +1,21 @@
 'use client';
+import type api from '@/lib/api';
 import * as UI from '@/components/ui/UI';
 import stepFromRequest from '@/components/Fab/utils/stepFromRequest';
 import WORKFLOW_STEPS from '@/components/Fab/constants/workflowSteps';
 import WORKFLOW_LABELS from '@/components/Fab/constants/workflowLabels';
 const FUI = UI;
-const RequestFlow = ({ request, label = false }) => {
+type RequestRow = Awaited<ReturnType<typeof api.requests.list>>[number];
+const ABORTED_COLORS: Record<string, { dot: string; text: string }> = {
+  draft: { dot: '#a8a8b8', text: 'Draft' },
+  cancelled: { dot: '#a8a8b8', text: 'Cancelled' },
+  rejected: { dot: '#c0394a', text: 'Rejected' },
+  returned: { dot: '#a73d56', text: 'Returned' },
+};
+const RequestFlow = ({ request, label = false }: { request: RequestRow; label?: boolean }) => {
   const s = stepFromRequest(request);
   if (s.aborted) {
-    const colors = {
-      draft: { dot: '#a8a8b8', text: 'Draft' },
-      cancelled: { dot: '#a8a8b8', text: 'Cancelled' },
-      rejected: { dot: '#c0394a', text: 'Rejected' },
-      returned: { dot: '#a73d56', text: 'Returned' },
-    }[s.status] || { dot: '#a8a8b8', text: s.status };
+    const colors = ABORTED_COLORS[s.status] || { dot: '#a8a8b8', text: s.status };
     return (
       <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
         <span style={{ display: 'inline-flex', gap: 4 }}>

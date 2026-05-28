@@ -1,7 +1,21 @@
 'use client';
 import React from 'react';
 
-const FabStatTile = ({ label, value, icon, tint, accent, onClick = undefined }) => (
+const FabStatTile = ({
+  label,
+  value,
+  icon,
+  tint,
+  accent,
+  onClick = undefined,
+}: {
+  label: string;
+  value: React.ReactNode;
+  icon: React.ReactElement<{ color?: string }>;
+  tint: string;
+  accent: string;
+  onClick?: () => void;
+}) => (
   <button
     onClick={onClick}
     style={{

@@ -1,6 +1,13 @@
 'use client';
+import React from 'react';
 
-const SectionLabel = ({ children, style = undefined }) => (
+const SectionLabel = ({
+  children,
+  style = undefined,
+}: {
+  children?: React.ReactNode;
+  style?: React.CSSProperties;
+}) => (
   <div
     style={{
       fontSize: 11,

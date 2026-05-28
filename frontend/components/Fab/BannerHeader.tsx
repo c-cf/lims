@@ -9,6 +9,14 @@ const BannerHeader = ({
   twinkle = true,
   right = undefined,
   accentLight = undefined,
+}: {
+  icon: React.ReactElement<{ color?: string }>;
+  title: string;
+  count?: number;
+  accent: string;
+  twinkle?: boolean;
+  right?: React.ReactNode;
+  accentLight?: string;
 }) => (
   <div
     style={{

@@ -10,8 +10,12 @@ import BannerHeader from '@/components/Fab/BannerHeader';
 import HeaderLinkButton from '@/components/Fab/HeaderLinkButton';
 import InProgressRow from '@/components/Fab/InProgressRow';
 import StatusPill from '@/components/Fab/StatusPill';
+import type { Navigate } from '@/lib/types';
+import type api from '@/lib/api';
 const F = I;
-const FabDashboard = ({ navigate }) => {
+type RequestRow = Awaited<ReturnType<typeof api.requests.list>>[number];
+type ActivityItem = { action: string; at: string; request: RequestRow };
+const FabDashboard = ({ navigate }: { navigate: Navigate }) => {
   const { data: requests, loading, error } = useRequests();
   const inProgress = requests.filter((r) => r.status === 'in_progress').slice(0, 5);
   const drafts = requests.filter((r) => r.status === 'draft');
@@ -19,12 +23,12 @@ const FabDashboard = ({ navigate }) => {
     .filter((r) => r.status === 'returned' || r.status === 'rejected')
     .slice(0, 3);
   const waitingApproval = requests.filter((r) => r.status === 'submitted');
-  const [expandedId, setExpandedId] = React.useState(undefined);
+  const [expandedId, setExpandedId] = React.useState<number | null | undefined>(undefined);
   React.useEffect(() => {
     if (expandedId === undefined && inProgress.length > 0) setExpandedId(inProgress[0].id);
   }, [inProgress, expandedId]);
   const activity = React.useMemo(() => {
-    const items = [];
+    const items: ActivityItem[] = [];
     requests.forEach((r) => {
       const at = r.updated || r.created;
       if (!at) return;
@@ -360,54 +364,64 @@ const FabDashboard = ({ navigate }) => {
 
         <div style={{ padding: '24px 28px 26px' }}>
           {(() => {
-            const STYLES = {
+            type StyleEntry = {
+              dot: string;
+              tintBg: string;
+              tintFg: string;
+              verb: string;
+              icon: (c: string) => React.ReactElement;
+              text: (a: ActivityItem) => React.ReactElement;
+            };
+            const STYLES: Record<string, StyleEntry> = {
               APPROVE: {
                 dot: '#1f8a5b',
                 tintBg: '#e8f6ee',
                 tintFg: '#157a4a',
                 verb: 'Approved',
-                icon: (c) => <F.Check size={12} color={c} strokeWidth={3} />,
-                text: (a) => <>{a.request.title} approved — awaiting sample shipment</>,
+                icon: (c: string) => <F.Check size={12} color={c} strokeWidth={3} />,
+                text: (a: ActivityItem) => (
+                  <>{a.request.title} approved — awaiting sample shipment</>
+                ),
               },
               SHIP: {
                 dot: '#2980b9',
                 tintBg: '#ddeef8',
                 tintFg: '#1a6696',
                 verb: 'Shipped',
-                icon: (c) => <F.Package size={11} color={c} strokeWidth={2.5} />,
-                text: (a) => <>{a.request.title} — samples shipped to lab</>,
+                icon: (c: string) => <F.Package size={11} color={c} strokeWidth={2.5} />,
+                text: (a: ActivityItem) => <>{a.request.title} — samples shipped to lab</>,
               },
               IN_PROG: {
                 dot: '#6c67b8',
                 tintBg: '#ecebf7',
                 tintFg: '#5550a0',
                 verb: 'In Progress',
-                icon: (c) => <F.Activity size={11} color={c} strokeWidth={2.5} />,
-                text: (a) => <>{a.request.title} — processing in progress</>,
+                icon: (c: string) => <F.Activity size={11} color={c} strokeWidth={2.5} />,
+                text: (a: ActivityItem) => <>{a.request.title} — processing in progress</>,
               },
               COMPLETED: {
                 dot: '#0f766e',
                 tintBg: '#ccfbf1',
                 tintFg: '#0f766e',
                 verb: 'Completed',
-                icon: (c) => <F.CircleCheck size={11} color={c} strokeWidth={2.5} />,
-                text: (a) => <>{a.request.title} — experiment completed</>,
+                icon: (c: string) => <F.CircleCheck size={11} color={c} strokeWidth={2.5} />,
+                text: (a: ActivityItem) => <>{a.request.title} — experiment completed</>,
               },
               RETURN: {
                 dot: '#c1556e',
                 tintBg: '#fceef2',
                 tintFg: '#a73d56',
                 verb: 'Returned',
-                icon: (c) => <F.Refresh size={11} color={c} strokeWidth={2.5} />,
-                text: (a) => <>{a.request.title} returned for correction</>,
+                icon: (c: string) => <F.Refresh size={11} color={c} strokeWidth={2.5} />,
+                text: (a: ActivityItem) => <>{a.request.title} returned for correction</>,
               },
               REJECT: {
                 dot: '#d24a5d',
                 tintBg: '#fde6e6',
                 tintFg: '#c0394a',
                 verb: 'Rejected',
-                icon: (c) => <F.X size={11} color={c} strokeWidth={3} />,
-                text: (a) => <>{a.request.title} rejected</>,
+                icon: (c: string) => <F.X size={11} color={c} strokeWidth={3} />,
+                text: (a: ActivityItem) => <>{a.request.title} rejected</>,
               },
             };
             const MONTH = [
@@ -424,7 +438,7 @@ const FabDashboard = ({ navigate }) => {
               'Nov',
               'Dec',
             ];
-            const groups = {};
+            const groups: Record<string, ActivityItem[]> = {};
             activity.forEach((a) => {
               const day = a.at.split(' ')[0];
               (groups[day] = groups[day] || []).push(a);
@@ -447,7 +461,7 @@ const FabDashboard = ({ navigate }) => {
 
                 {days.map((day, di) => {
                   const [, m, d] = day.split('-');
-                  const items = groups[day];
+                  const items: ActivityItem[] = groups[day];
                   return (
                     <div
                       key={day}

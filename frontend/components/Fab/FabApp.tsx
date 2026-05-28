@@ -5,10 +5,10 @@ import FabRequestList from '@/components/Fab/FabRequestList';
 import FabNewRequest from '@/components/Fab/FabNewRequest';
 import FabDraftEdit from '@/components/Fab/FabDraftEdit';
 import FabRequestDetail from '@/components/Fab/FabRequestDetail';
-
-const FabApp = ({ route, navigate }) => {
-  const [toast, setToast] = React.useState(null);
-  const showToast = (msg) => {
+import type { Route, Navigate } from '@/lib/types';
+const FabApp = ({ route, navigate }: { route: Route; navigate: Navigate }) => {
+  const [toast, setToast] = React.useState<{ msg: string; t: number } | null>(null);
+  const showToast = (msg: string) => {
     setToast({ msg, t: Date.now() });
     setTimeout(() => setToast(null), 2200);
   };
