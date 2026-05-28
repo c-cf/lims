@@ -1,7 +1,7 @@
 "use client";
 
 
-const FabPage=({title,subtitle,breadcrumb,right,children})=><div style={{padding:'32px 44px 80px',maxWidth:1280,margin:'0 auto'}}>
+const FabPage=({title,subtitle=undefined,breadcrumb=undefined,right=undefined,children})=><div style={{padding:'32px 44px 80px',maxWidth:1280,margin:'0 auto'}}>
       {breadcrumb}
       <div style={{display:'flex',alignItems:'flex-start',justifyContent:'space-between',gap:24,marginBottom:24}}>
         <div style={{minWidth:0,flex:1}}>

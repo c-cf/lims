@@ -2,7 +2,7 @@
 import { ink as mInk } from '@/lib/colors';
 import { text2 as mText2 } from '@/lib/colors';
 
-const Page=({title,subtitle,breadcrumb,right,children})=><div style={{padding:'32px 44px 80px',maxWidth:1320,margin:'0 auto'}}>
+const Page=({title,subtitle=undefined,breadcrumb=undefined,right=undefined,children})=><div style={{padding:'32px 44px 80px',maxWidth:1320,margin:'0 auto'}}>
     {breadcrumb}
     <div style={{display:'flex',alignItems:'flex-start',justifyContent:'space-between',gap:24,marginBottom:24}}>
       <div style={{minWidth:0}}>

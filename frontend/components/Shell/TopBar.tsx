@@ -1,7 +1,7 @@
 "use client";
 
 
-const TopBar=({title,subtitle,breadcrumb,right})=><header style={{display:'flex',alignItems:'flex-start',justifyContent:'space-between',padding:'24px 32px 0',gap:24}}>
+const TopBar=({title,subtitle=undefined,breadcrumb=undefined,right=undefined})=><header style={{display:'flex',alignItems:'flex-start',justifyContent:'space-between',padding:'24px 32px 0',gap:24}}>
     <div style={{minWidth:0,flex:1}}>
       {breadcrumb&&<div style={{display:'flex',alignItems:'center',gap:6,marginBottom:8,color:'var(--text-secondary)',fontSize:13}}>
           {breadcrumb}

@@ -1,4 +1,3 @@
-// @ts-nocheck
 "use client";
 import React from 'react';
 import api from '@/lib/api';
@@ -163,7 +162,7 @@ const LabDispatchDetail=({id,navigate,showToast})=>{const{dispatch:d,waferResult
         <Card padding={0}>
           <CardHeader>Recipe Parameters</CardHeader>
           <div style={{padding:22,display:'grid',gridTemplateColumns:'110px 1fr',rowGap:10}}>
-            {rec?Object.entries(rec.params).map(([k,v])=><React.Fragment key={k}>
+            {rec?Object.entries(rec.params).map(([k,v]:[string,any])=><React.Fragment key={k}>
                 <div style={{fontSize:12.5,color:text2,textTransform:'capitalize'}}>{k.replace(/_/g,' ')}</div>
                 <div style={{fontFamily:'var(--font-mono)',fontSize:13,color:ink}}>{v}</div>
               </React.Fragment>):<div style={{color:muted,fontSize:13}}>No recipe selected</div>}

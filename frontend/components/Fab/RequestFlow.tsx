@@ -1,4 +1,3 @@
-// @ts-nocheck
 "use client";
 import * as UI from '@/components/ui/UI';
 import stepFromRequest from '@/components/Fab/utils/stepFromRequest';
