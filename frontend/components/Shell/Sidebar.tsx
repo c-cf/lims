@@ -1,11 +1,10 @@
-// @ts-nocheck
 "use client";
 import React from 'react';
 import NAV_ITEMS from '@/components/Shell/NAV_ITEMS';
 import I from '@/components/ui/I';
 import Icon from '@/components/ui/Icon';
 
-const Sidebar=({route,navigate,counts,user,onLogout,navItems=NAV_ITEMS,navSections,sectionLabel='Lab Operations',sublabel='Lab Operator'})=>{const isFab=false;const sections=navSections||[{label:sectionLabel,items:navItems}];const allItems=sections.flatMap(s=>s.items);return<aside style={{width:'var(--sidebar-width)',height:'100vh',position:'fixed',left:0,top:0,background:isFab?'#0f172a':'var(--bg-sidebar)',color:'#cbd5e1',display:'flex',flexDirection:'column',borderRight:'1px solid rgba(255,255,255,0.04)',zIndex:20,overflow:'hidden'}}>
+const Sidebar=({route,navigate,counts={},user,onLogout,navItems=NAV_ITEMS,navSections=null,sectionLabel='Lab Operations',sublabel='Lab Operator'})=>{const isFab=false;const sections=navSections||[{label:sectionLabel,items:navItems}];const allItems=sections.flatMap(s=>s.items);return<aside style={{width:'var(--sidebar-width)',height:'100vh',position:'fixed',left:0,top:0,background:isFab?'#0f172a':'var(--bg-sidebar)',color:'#cbd5e1',display:'flex',flexDirection:'column',borderRight:'1px solid rgba(255,255,255,0.04)',zIndex:20,overflow:'hidden'}}>
     {!isFab&&<>
       {}
       <div style={{position:'absolute',top:-40,right:-50,width:180,height:180,borderRadius:'50%',background:'radial-gradient(circle, rgba(244,168,191,0.18) 0%, transparent 65%)',pointerEvents:'none',filter:'blur(8px)'}}/>

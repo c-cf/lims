@@ -1,4 +1,3 @@
-// @ts-nocheck
 "use client";
 import STATUS_MAP from '@/components/ui/STATUS_MAP';
 

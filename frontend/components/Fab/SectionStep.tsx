@@ -1,4 +1,3 @@
-// @ts-nocheck
 "use client";
 import FabCard from '@/components/Fab/FabCard';
 

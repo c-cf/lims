@@ -1,4 +1,3 @@
-// @ts-nocheck
 "use client";
 import SAMPLE_STATUS_LABEL from '@/components/Fab/constants/sampleStatusLabel';
 import Pill from '@/components/Manager/Pill';

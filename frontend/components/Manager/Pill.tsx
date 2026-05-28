@@ -1,4 +1,3 @@
-// @ts-nocheck
 "use client";
 import STATUS_LABEL from '@/components/Manager/constants/statusLabel';
 

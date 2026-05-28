@@ -1,4 +1,3 @@
-// @ts-nocheck
 "use client";
 import RA_EXPERIMENTS from '@/components/Fab/constants/raExperiments';
 import TM_EXPERIMENTS from '@/components/Fab/constants/tmExperiments';

@@ -1,4 +1,3 @@
-// @ts-nocheck
 "use client";
 import EXPERIMENTS from '@/components/Lab/constants/experiments';
 

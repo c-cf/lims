@@ -1,4 +1,3 @@
-// @ts-nocheck
 "use client";
 import WipCreationModalInner from '@/components/Lab/WipCreationModalInner';
 

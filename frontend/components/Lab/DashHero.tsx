@@ -1,4 +1,3 @@
-// @ts-nocheck
 "use client";
 import React from 'react';
 import TODAY from '@/components/Lab/constants/today';

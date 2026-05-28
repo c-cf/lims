@@ -1,4 +1,3 @@
-// @ts-nocheck
 "use client";
 import { lineSoft as mLineSft } from '@/lib/colors';
 import { text2 as mText2 } from '@/lib/colors';

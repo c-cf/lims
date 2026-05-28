@@ -1,4 +1,3 @@
-// @ts-nocheck
 "use client";
 import * as I from '@/components/ui/I';
 import CATEGORY_BADGE from '@/components/Fab/constants/categoryBadge';

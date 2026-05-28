@@ -1,4 +1,3 @@
-// @ts-nocheck
 "use client";
 import { ink as mInk } from '@/lib/colors';
 

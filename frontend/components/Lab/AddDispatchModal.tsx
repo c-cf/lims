@@ -1,4 +1,3 @@
-// @ts-nocheck
 "use client";
 import AddDispatchModalInner from '@/components/Lab/AddDispatchModalInner';
 

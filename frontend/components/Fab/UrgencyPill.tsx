@@ -1,4 +1,3 @@
-// @ts-nocheck
 "use client";
 import URGENCY_LABEL from '@/components/Manager/constants/urgencyLabel';
 import Pill from '@/components/Manager/Pill';
