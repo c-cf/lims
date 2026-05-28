@@ -4,7 +4,17 @@ import api from '@/lib/api';
 import SecondaryBtn from '@/components/Manager/SecondaryBtn';
 import PrimaryBtn from '@/components/Manager/PrimaryBtn';
 
-const CancelRequestModal = ({ requestId, onClose, onCancelled, showToast }) => {
+const CancelRequestModal = ({
+  requestId,
+  onClose,
+  onCancelled,
+  showToast,
+}: {
+  requestId: number;
+  onClose: () => void;
+  onCancelled?: () => void;
+  showToast?: (msg: string) => void;
+}) => {
   const [reason, setReason] = React.useState('');
   const [busy, setBusy] = React.useState(false);
   const [err, setErr] = React.useState(null);

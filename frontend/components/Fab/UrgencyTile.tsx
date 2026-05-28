@@ -1,7 +1,16 @@
 'use client';
 import * as I from '@/components/ui/I';
 const F = I;
-const UrgencyTile = ({ opt, active, onClick }) => (
+type UrgencyOpt = { id: string; label: string; sub?: string };
+const UrgencyTile = ({
+  opt,
+  active,
+  onClick,
+}: {
+  opt: UrgencyOpt;
+  active: boolean;
+  onClick: () => void;
+}) => (
   <button
     onClick={onClick}
     style={{

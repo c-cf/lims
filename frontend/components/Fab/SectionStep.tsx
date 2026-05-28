@@ -1,7 +1,18 @@
 'use client';
+import React from 'react';
 import FabCard from '@/components/Fab/FabCard';
 
-const SectionStep = ({ n, title, subtitle, children }) => (
+const SectionStep = ({
+  n,
+  title,
+  subtitle,
+  children,
+}: {
+  n: number;
+  title: string;
+  subtitle?: string;
+  children?: React.ReactNode;
+}) => (
   <FabCard padding={0} style={{ marginBottom: 18 }}>
     <div style={{ display: 'flex', alignItems: 'center', gap: 14, padding: '22px 24px 18px' }}>
       <div

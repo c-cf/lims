@@ -1,9 +1,20 @@
 'use client';
+import React from 'react';
 import * as I from '@/components/ui/I';
 import CATEGORY_BADGE from '@/components/Fab/constants/categoryBadge';
 const F = I;
-const ExpCard = ({ exp, active, onClick }) => {
-  const badge = CATEGORY_BADGE[exp.group] || { bg: '#ecedf0', fg: '#5a5a6e' };
+type ExpItem = { id: number; name: string; desc?: string; group?: string };
+const BADGE_MAP: Record<string, { bg: string; fg: string }> = CATEGORY_BADGE;
+const ExpCard = ({
+  exp,
+  active,
+  onClick,
+}: {
+  exp: ExpItem;
+  active: boolean;
+  onClick: () => void;
+}) => {
+  const badge = BADGE_MAP[exp.group ?? ''] || { bg: '#ecedf0', fg: '#5a5a6e' };
   return (
     <button
       onClick={onClick}

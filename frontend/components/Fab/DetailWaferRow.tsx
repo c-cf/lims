@@ -1,9 +1,17 @@
 'use client';
+import type api from '@/lib/api';
 import * as I from '@/components/ui/I';
 import phaseIndexFor from '@/components/Fab/utils/phaseIndexFor';
 import PhasePipeline from '@/components/Fab/PhasePipeline';
 const F = I;
-const DetailWaferRow = ({ wafer, request }) => {
+type RequestDetail = Awaited<ReturnType<typeof api.requests.get>>;
+const DetailWaferRow = ({
+  wafer,
+  request,
+}: {
+  wafer: RequestDetail['samples'][number];
+  request: RequestDetail;
+}) => {
   const idx = phaseIndexFor(wafer, request);
   return (
     <div

@@ -2,7 +2,7 @@
 import React from 'react';
 import api from '@/lib/api';
 
-const useRequestDetail = (id) => {
+const useRequestDetail = (id: number | string | null | undefined) => {
   const [data, setData] = React.useState(null);
   const [loading, setLoading] = React.useState(true);
   const [error, setError] = React.useState(null);

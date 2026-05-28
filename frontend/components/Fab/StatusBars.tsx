@@ -1,6 +1,7 @@
 'use client';
 
-const StatusBars = ({ requests }) => {
+type StatusRequest = { status: string };
+const StatusBars = ({ requests }: { requests: StatusRequest[] }) => {
   const buckets = [
     { key: 'in_progress', label: 'In Progress', color: '#9ebbc8' },
     { key: 'returned', label: 'Returned', color: '#f4a8bf' },

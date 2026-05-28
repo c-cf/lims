@@ -1,6 +1,13 @@
 'use client';
+import React from 'react';
 
-const PlainCardHeader = ({ children, right = undefined }) => (
+const PlainCardHeader = ({
+  children,
+  right = undefined,
+}: {
+  children?: React.ReactNode;
+  right?: React.ReactNode;
+}) => (
   <div
     style={{
       display: 'flex',

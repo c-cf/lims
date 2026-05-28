@@ -1,6 +1,7 @@
 'use client';
 import React from 'react';
 import api from '@/lib/api';
+import type { Navigate, ShowToast } from '@/lib/types';
 import * as I from '@/components/ui/I';
 import useRequestDetail from '@/components/Fab/hooks/useRequestDetail';
 import useExperimentTypes from '@/components/Fab/hooks/useExperimentTypes';
@@ -16,7 +17,16 @@ import HistoryDot from '@/components/Fab/HistoryDot';
 import DetailWaferRow from '@/components/Fab/DetailWaferRow';
 import CancelRequestModal from '@/components/Fab/CancelRequestModal';
 const F = I;
-const FabRequestDetail = ({ id, navigate, showToast }) => {
+type RequestDetail = Awaited<ReturnType<typeof api.requests.get>>;
+const FabRequestDetail = ({
+  id,
+  navigate,
+  showToast,
+}: {
+  id: number | string | undefined;
+  navigate: Navigate;
+  showToast?: ShowToast;
+}) => {
   const { data: r, loading, error, refresh } = useRequestDetail(id);
   const { data: liveTypes } = useExperimentTypes();
   const { byId: expsBySample } = useSampleExperimentsForRequest(r?.samples);
@@ -80,19 +90,25 @@ const FabRequestDetail = ({ id, navigate, showToast }) => {
       </FabPage>
     );
   }
+  type ExpTypeItem = RequestDetail['experiment_types'][number];
+  type SampleItem = RequestDetail['samples'][number];
+  type HistoryItem = RequestDetail['history'][number];
+  type ExpEntry = { id: number; name: string; group: string };
   const labCategoryById = new Map(liveTypes.map((t) => [t.id, t.labCategory]));
-  const exps = (r.experiment_types || []).map((et) => ({
+  const exps: ExpEntry[] = (r.experiment_types || []).map((et: ExpTypeItem) => ({
     id: et.id,
     name: et.name,
     group: labCategoryById.get(et.id) || '',
   }));
   const canCancel = r.status === 'in_progress' || r.status === 'submitted';
-  const overallIdx = r.samples.length ? Math.min(...r.samples.map((s) => phaseIndexFor(s, r))) : 0;
+  const overallIdx = r.samples.length
+    ? Math.min(...r.samples.map((s: SampleItem) => phaseIndexFor(s, r)))
+    : 0;
   const completedAt =
     r.status === 'completed' && r.history.length
       ? r.history[r.history.length - 1].at.split(' ')[0]
       : null;
-  const stateMap = {
+  const stateMap: Record<string, string> = {
     in_progress: 'In Progress',
     returned: 'Returned',
     rejected: 'Rejected',
@@ -274,7 +290,7 @@ const FabRequestDetail = ({ id, navigate, showToast }) => {
             <div
               style={{ padding: '18px 24px', display: 'flex', flexDirection: 'column', gap: 14 }}
             >
-              {r.history.map((h, i) => {
+              {r.history.map((h: HistoryItem, i: number) => {
                 const c = HistoryDot({ action: h.action });
                 return (
                   <div
@@ -383,7 +399,7 @@ const FabRequestDetail = ({ id, navigate, showToast }) => {
             background: '#fafafd',
           }}
         >
-          {r.samples.map((s, i) => (
+          {r.samples.map((s: SampleItem, i: number) => (
             <DetailWaferRow key={i} wafer={s} request={r} />
           ))}
         </div>
@@ -438,7 +454,7 @@ const FabRequestDetail = ({ id, navigate, showToast }) => {
             background: '#fafafd',
           }}
         >
-          {r.samples.map((s, si) => {
+          {r.samples.map((s: SampleItem, si: number) => {
             type ExpRollupRow = {
               experimentTypeId: number | null;
               status: string;

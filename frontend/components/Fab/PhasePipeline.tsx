@@ -2,8 +2,8 @@
 import React from 'react';
 import WAFER_PHASES from '@/components/Fab/constants/waferPhases';
 
-const PhasePipeline = ({ idx, compact = false }) => {
-  const dot = (active, done) => (
+const PhasePipeline = ({ idx, compact = false }: { idx: number; compact?: boolean }) => {
+  const dot = (active: boolean, done: boolean) => (
     <span
       style={{
         width: active ? 11 : 9,

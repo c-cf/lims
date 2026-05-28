@@ -1,6 +1,15 @@
 'use client';
+import React from 'react';
 
-const FabCard = ({ children, padding = 22, style = undefined }) => (
+const FabCard = ({
+  children,
+  padding = 22,
+  style = undefined,
+}: {
+  children?: React.ReactNode;
+  padding?: number;
+  style?: React.CSSProperties;
+}) => (
   <div
     style={{
       background: '#fff',

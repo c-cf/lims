@@ -5,10 +5,23 @@ import * as I from '@/components/ui/I';
 import phaseIndexFor from '@/components/Fab/utils/phaseIndexFor';
 import WAFER_PHASES from '@/components/Fab/constants/waferPhases';
 import PhasePipeline from '@/components/Fab/PhasePipeline';
+import type { Navigate } from '@/lib/types';
 const F = I;
-const InProgressRow = ({ request, navigate, open, onToggle }) => {
+type RequestRow = Awaited<ReturnType<typeof api.requests.list>>[number];
+type RequestDetail = Awaited<ReturnType<typeof api.requests.get>>;
+const InProgressRow = ({
+  request,
+  navigate,
+  open,
+  onToggle,
+}: {
+  request: RequestRow;
+  navigate: Navigate;
+  open: boolean;
+  onToggle: () => void;
+}) => {
   const sampleCount = request.sampleCount ?? request.samples?.length ?? 0;
-  const [detail, setDetail] = React.useState(null);
+  const [detail, setDetail] = React.useState<RequestDetail | null>(null);
   const [detailLoading, setDetailLoading] = React.useState(false);
   const [detailError, setDetailError] = React.useState(null);
   React.useEffect(() => {

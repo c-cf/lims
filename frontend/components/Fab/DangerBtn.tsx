@@ -1,6 +1,15 @@
 'use client';
+import React from 'react';
 
-const DangerBtn = ({ children, onClick, style }) => (
+const DangerBtn = ({
+  children,
+  onClick,
+  style,
+}: {
+  children: React.ReactNode;
+  onClick?: () => void;
+  style?: React.CSSProperties;
+}) => (
   <button
     onClick={onClick}
     style={{

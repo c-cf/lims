@@ -1,6 +1,14 @@
 'use client';
+import type api from '@/lib/api';
 
-const phaseIndexFor = (sample, request) => {
+type RequestRow = Awaited<ReturnType<typeof api.requests.list>>[number];
+type RequestDetail = Awaited<ReturnType<typeof api.requests.get>>;
+type SampleBrief = RequestDetail['samples'][number];
+
+const phaseIndexFor = (
+  sample: SampleBrief | RequestRow['samples'][number],
+  request: RequestRow | RequestDetail,
+) => {
   const rawReq = request.rawStatus || request.status;
   if (rawReq === 'draft' || rawReq === 'submitted' || rawReq === 'pending_approval') return -1;
   if (request.status === 'completed' || sample.status === 'completed') return 4;
