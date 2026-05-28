@@ -1,5 +1,6 @@
 'use client';
 import React from 'react';
+import type { ReactElement } from 'react';
 import * as I from '@/components/ui/I';
 import Card from '@/components/Manager/Card';
 import CardHeader from '@/components/Manager/CardHeader';
@@ -9,10 +10,25 @@ import FieldLabel from '@/components/Manager/FieldLabel';
 import TextInput from '@/components/Manager/TextInput';
 import PrimaryBtn from '@/components/Manager/PrimaryBtn';
 const MI = I;
-const ReportCard = ({ title, subtitle, accent, accentBg, icon, onGenerate }) => {
+type ReportEntry = { label: string; value: string | number };
+const ReportCard = ({
+  title,
+  subtitle,
+  accent,
+  accentBg,
+  icon,
+  onGenerate,
+}: {
+  title: string;
+  subtitle: string;
+  accent: string;
+  accentBg: string;
+  icon: ReactElement<{ color?: string; size?: number }>;
+  onGenerate: (range: { start: string; end: string }) => Promise<ReportEntry[]>;
+}) => {
   const [start, setStart] = React.useState('');
   const [end, setEnd] = React.useState('');
-  const [generated, setGenerated] = React.useState(null);
+  const [generated, setGenerated] = React.useState<ReportEntry[] | null>(null);
   const [busy, setBusy] = React.useState(false);
   const [err, setErr] = React.useState(null);
   const valid = start && end;

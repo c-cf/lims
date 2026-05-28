@@ -1,4 +1,5 @@
 'use client';
+import type { ReactNode, CSSProperties } from 'react';
 import { ink as mInk } from '@/lib/colors';
 import { line as mLine } from '@/lib/colors';
 
@@ -9,6 +10,13 @@ const SecondaryBtn = ({
   disabled = false,
   danger = false,
   style = undefined,
+}: {
+  children?: ReactNode;
+  onClick?: () => void;
+  icon?: ReactNode;
+  disabled?: boolean;
+  danger?: boolean;
+  style?: CSSProperties;
 }) => (
   <button
     onClick={onClick}

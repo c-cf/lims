@@ -1,6 +1,6 @@
 'use client';
 
-const smoothPath = (pts) => {
+const smoothPath = (pts: [number, number][]) => {
   if (pts.length === 0) return '';
   if (pts.length === 1) return `M ${pts[0][0]},${pts[0][1]}`;
   let d = `M ${pts[0][0]},${pts[0][1]}`;

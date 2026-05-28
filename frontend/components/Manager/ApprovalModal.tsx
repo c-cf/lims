@@ -7,7 +7,18 @@ import FieldLabel from '@/components/Manager/FieldLabel';
 import TextArea from '@/components/Manager/TextArea';
 import { muted as mMuted } from '@/lib/colors';
 
-const ApprovalModal = ({ open, onClose, action, onSubmit }) => {
+type ApprovalAction = 'APPROVE' | 'RETURN' | 'REJECT';
+const ApprovalModal = ({
+  open,
+  onClose,
+  action,
+  onSubmit,
+}: {
+  open: boolean;
+  onClose: () => void;
+  action: ApprovalAction | null;
+  onSubmit: (reason: string) => void;
+}) => {
   const [reason, setReason] = React.useState('');
   React.useEffect(() => {
     if (open) setReason('');
@@ -32,7 +43,7 @@ const ApprovalModal = ({ open, onClose, action, onSubmit }) => {
         needs: true,
         hint: 'Tell the requester why.',
       },
-    }[action] || {};
+    }[action as ApprovalAction] || {};
   const valid = !map.needs || reason.trim().length > 0;
   return (
     <Modal

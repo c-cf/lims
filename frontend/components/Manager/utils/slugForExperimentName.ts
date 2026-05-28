@@ -1,6 +1,6 @@
 'use client';
 
-const slugForExperimentName = (name) => {
+const slugForExperimentName = (name: string | null | undefined) => {
   if (!name) return null;
   const l = name.toLowerCase();
   if (l.includes('temperature cycling')) return 'tct';

@@ -2,8 +2,10 @@
 import React from 'react';
 import api from '@/lib/api';
 
+type Recipe = Awaited<ReturnType<typeof api.recipes.list>>[number];
+
 const useMgrRecipes = () => {
-  const [data, setData] = React.useState([]);
+  const [data, setData] = React.useState<Recipe[]>([]);
   const [loading, setLoading] = React.useState(true);
   const [error, setError] = React.useState(null);
   const refresh = React.useCallback(() => {

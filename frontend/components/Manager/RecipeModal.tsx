@@ -16,12 +16,25 @@ import TextArea from '@/components/Manager/TextArea';
 import { line as mLine } from '@/lib/colors';
 import { bgSoft as mBgSoft } from '@/lib/colors';
 
-const RecipeModal = ({ open, onClose, onSaved, initial }) => {
+type Recipe = Awaited<ReturnType<typeof api.recipes.list>>[number];
+type RecipeInitial = Recipe & { experimentName?: string | null };
+
+const RecipeModal = ({
+  open,
+  onClose,
+  onSaved,
+  initial,
+}: {
+  open: boolean;
+  onClose: () => void;
+  onSaved?: () => void;
+  initial?: RecipeInitial | null;
+}) => {
   const { data: experimentTypes, loading: typesLoading } = useMgrExperimentTypes();
   const [name, setName] = React.useState('');
   const [experimentTypeId, setExperimentTypeId] = React.useState<string | number>('');
   const [desc, setDesc] = React.useState('');
-  const [paramsKv, setParamsKv] = React.useState({});
+  const [paramsKv, setParamsKv] = React.useState<Record<string, string>>({});
   const [paramsJson, setParamsJson] = React.useState('{}');
   const [busy, setBusy] = React.useState(false);
   const [err, setErr] = React.useState(null);
@@ -125,7 +138,7 @@ const RecipeModal = ({ open, onClose, onSaved, initial }) => {
       ? slug.toUpperCase()
       : lockedExpName
           .split(/\s+/)
-          .map((t) => t[0])
+          .map((t: string) => t[0])
           .join('')
           .slice(0, 4)
           .toUpperCase()

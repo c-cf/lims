@@ -13,8 +13,9 @@ import { text2 as mText2 } from '@/lib/colors';
 import Pill from '@/components/Manager/Pill';
 import URGENCY_LABEL from '@/components/Manager/constants/urgencyLabel';
 import TrendChart from '@/components/Manager/TrendChart';
+import type { Navigate } from '@/lib/types';
 const MI = I;
-const MgrDashboard = ({ navigate }) => {
+const MgrDashboard = ({ navigate }: { navigate: Navigate }) => {
   const {
     requests,
     equipmentCount,
@@ -25,7 +26,7 @@ const MgrDashboard = ({ navigate }) => {
   const inProgress = requests.filter((r) => r.status === 'in_progress').length;
   const completed = requests.filter((r) => r.status === 'completed').length;
   const initialLoad = countsLoading && requests.length === 0;
-  const v = (n) => (initialLoad ? '—' : n);
+  const v = (n: number) => (initialLoad ? '—' : n);
   return (
     <Page title="Dashboard" subtitle="Welcome back, lab_manager">
       {countsError && (

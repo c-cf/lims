@@ -1,7 +1,14 @@
 'use client';
+import type { ReactNode } from 'react';
 import { text2 as mText2 } from '@/lib/colors';
 
-const FieldLabel = ({ children, required = false }) => (
+const FieldLabel = ({
+  children,
+  required = false,
+}: {
+  children?: ReactNode;
+  required?: boolean;
+}) => (
   <div style={{ fontSize: 12, fontWeight: 600, color: mText2, marginBottom: 6 }}>
     {children}
     {required && <span style={{ color: '#c0394a', marginLeft: 4 }}>*</span>}

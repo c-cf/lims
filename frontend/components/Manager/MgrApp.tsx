@@ -1,5 +1,6 @@
 'use client';
 import React from 'react';
+import type { Route, Navigate } from '@/lib/types';
 import MgrDashboard from '@/components/Manager/MgrDashboard';
 import MgrAllRequests from '@/components/Manager/MgrAllRequests';
 import MgrRequestDetail from '@/components/Manager/MgrRequestDetail';
@@ -7,9 +8,9 @@ import MgrRecipes from '@/components/Manager/MgrRecipes';
 import MgrReports from '@/components/Manager/MgrReports';
 import { ink as mInk } from '@/lib/colors';
 
-const MgrApp = ({ route, navigate }) => {
-  const [toast, setToast] = React.useState(null);
-  const showToast = (msg) => {
+const MgrApp = ({ route, navigate }: { route: Route; navigate: Navigate }) => {
+  const [toast, setToast] = React.useState<string | null>(null);
+  const showToast = (msg: string) => {
     setToast(msg);
     setTimeout(() => setToast(null), 2200);
   };

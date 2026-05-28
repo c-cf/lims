@@ -2,8 +2,10 @@
 import React from 'react';
 import api from '@/lib/api';
 
-const useMgrRequestDetail = (id) => {
-  const [data, setData] = React.useState(null);
+type RequestDetail = Awaited<ReturnType<typeof api.requests.get>>;
+
+const useMgrRequestDetail = (id: number | string | undefined) => {
+  const [data, setData] = React.useState<RequestDetail | null>(null);
   const [loading, setLoading] = React.useState(true);
   const [error, setError] = React.useState(null);
   const refresh = React.useCallback(() => {

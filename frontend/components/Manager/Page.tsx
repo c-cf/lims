@@ -1,4 +1,5 @@
 'use client';
+import type { ReactNode } from 'react';
 import { ink as mInk } from '@/lib/colors';
 import { text2 as mText2 } from '@/lib/colors';
 
@@ -8,6 +9,12 @@ const Page = ({
   breadcrumb = undefined,
   right = undefined,
   children,
+}: {
+  title?: ReactNode;
+  subtitle?: ReactNode;
+  breadcrumb?: ReactNode;
+  right?: ReactNode;
+  children?: ReactNode;
 }) => (
   <div style={{ padding: '32px 44px 80px', maxWidth: 1320, margin: '0 auto' }}>
     {breadcrumb}

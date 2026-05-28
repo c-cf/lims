@@ -13,18 +13,20 @@ import { bgSoft as mBgSoft } from '@/lib/colors';
 import { lineSoft as mLineSft } from '@/lib/colors';
 import { accent as mAccent } from '@/lib/colors';
 import RecipeModal from '@/components/Manager/RecipeModal';
+import type { ShowToast } from '@/lib/types';
+type Recipe = Awaited<ReturnType<typeof api.recipes.list>>[number];
 const MI = I;
-const MgrRecipes = ({ showToast }) => {
+const MgrRecipes = ({ showToast }: { showToast?: ShowToast }) => {
   const { data: recipes, loading, error, refresh } = useMgrRecipes();
   const [modalOpen, setModalOpen] = React.useState(false);
-  const [editing, setEditing] = React.useState(null);
+  const [editing, setEditing] = React.useState<Recipe | null>(null);
   const [busyDeleteId, setBusyDeleteId] = React.useState(null);
   const [deleteError, setDeleteError] = React.useState(null);
   const openNew = () => {
     setEditing(null);
     setModalOpen(true);
   };
-  const openEdit = (rec) => {
+  const openEdit = (rec: Recipe) => {
     setEditing(rec);
     setModalOpen(true);
   };
@@ -38,7 +40,7 @@ const MgrRecipes = ({ showToast }) => {
     showToast?.(wasEdit ? 'Recipe updated' : 'Recipe created');
     refresh();
   };
-  const onDelete = async (rec) => {
+  const onDelete = async (rec: Recipe) => {
     if (!window.confirm(`Delete recipe "${rec.name}"? This can't be undone.`)) return;
     setBusyDeleteId(rec.id);
     setDeleteError(null);
@@ -115,7 +117,7 @@ const MgrRecipes = ({ showToast }) => {
             const expCode = rec.experimentName
               ? rec.experimentName
                   .split(/\s+/)
-                  .map((t) => t[0])
+                  .map((t: string) => t[0])
                   .join('')
                   .slice(0, 4)
                   .toUpperCase()

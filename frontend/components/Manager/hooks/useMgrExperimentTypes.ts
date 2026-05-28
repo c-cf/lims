@@ -2,8 +2,10 @@
 import React from 'react';
 import api from '@/lib/api';
 
+type ExperimentType = Awaited<ReturnType<typeof api.experimentTypes.list>>[number];
+
 const useMgrExperimentTypes = () => {
-  const [data, setData] = React.useState([]);
+  const [data, setData] = React.useState<ExperimentType[]>([]);
   const [loading, setLoading] = React.useState(true);
   const [error, setError] = React.useState(null);
   React.useEffect(() => {
