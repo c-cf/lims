@@ -1,7 +1,11 @@
 'use client';
 
-const PriorityMarker = ({ priority }) => {
-  const colorMap = { high: '#f59e0b', urgent: '#ef4444', normal: 'transparent' };
+const PriorityMarker = ({ priority }: { priority: string }) => {
+  const colorMap: Record<string, string> = {
+    high: '#f59e0b',
+    urgent: '#ef4444',
+    normal: 'transparent',
+  };
   const c = colorMap[priority] || 'transparent';
   return (
     <span

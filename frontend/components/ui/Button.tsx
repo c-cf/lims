@@ -9,6 +9,14 @@ const Button = ({
   style = undefined,
   disabled = false,
   ...rest
+}: {
+  variant?: 'primary' | 'secondary' | 'ghost' | 'danger' | 'success' | 'dark';
+  size?: 'sm' | 'md' | 'lg';
+  icon?: React.ReactElement;
+  children?: React.ReactNode;
+  style?: React.CSSProperties;
+  disabled?: boolean;
+  [key: string]: unknown;
 }) => {
   const sizes = {
     sm: { h: 28, px: 10, fs: 12, gap: 6, iconSize: 13 },
@@ -65,7 +73,8 @@ const Button = ({
       }}
       {...rest}
     >
-      {icon && React.cloneElement(icon, { size: sizes.iconSize })}
+      {icon &&
+        React.cloneElement(icon as React.ReactElement<{ size?: number }>, { size: sizes.iconSize })}
       {children}
     </button>
   );

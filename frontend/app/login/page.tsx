@@ -29,7 +29,7 @@ export default function Page() {
     } catch {}
   }, [router]);
 
-  const handleLogin = (user) => {
+  const handleLogin = (user: { role: string }) => {
     localStorage.setItem(SESSION_KEY, JSON.stringify(user));
     router.push(roleHome(user.role));
   };

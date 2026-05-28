@@ -4,9 +4,10 @@ import Sidebar from '@/components/Shell/Sidebar';
 import NAV_ITEMS from '@/components/Shell/NAV_ITEMS';
 import LabApp from '@/components/Lab/LabApp';
 import MgrApp from '@/components/Manager/MgrApp';
-export default function ManagerRoot({ user, onLogout, tweaksUI }) {
-  const [route, setRoute] = useState({ page: 'mgr_dashboard' });
-  const navigate = (r) => setRoute(r);
+import type { AppShellProps, Route } from '@/lib/types';
+export default function ManagerRoot({ user, onLogout, tweaksUI }: AppShellProps) {
+  const [route, setRoute] = useState<Route>({ page: 'mgr_dashboard' });
+  const navigate = (r: Route) => setRoute(r);
   const LAB_NAV = NAV_ITEMS.map((n) =>
     n.id === 'dashboard' ? { ...n, id: 'mgr_dashboard' } : { ...n, id: 'lab_' + n.id },
   );

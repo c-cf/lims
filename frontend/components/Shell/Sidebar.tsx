@@ -2,6 +2,28 @@
 import React from 'react';
 import NAV_ITEMS from '@/components/Shell/NAV_ITEMS';
 import I from '@/components/ui/I';
+import type { User, Route, Navigate, OnLogout } from '@/lib/types';
+
+type NavItem = { id: string; label: string; cn?: string; icon: string };
+type NavSection = { label: string; items: NavItem[] };
+
+type SidebarUser =
+  | (User & { display?: string; subtitle?: string })
+  | { display?: string; subtitle?: string };
+
+type SidebarProps = {
+  route: Route;
+  navigate: Navigate;
+  counts?: Record<string, number>;
+  user?: SidebarUser | null;
+  onLogout?: OnLogout;
+  navItems?: NavItem[];
+  navSections?: NavSection[] | null;
+  sectionLabel?: string;
+  sublabel?: string;
+};
+
+const Icons = I as Record<string, (p: { size?: number; color?: string }) => React.ReactElement>;
 
 const Sidebar = ({
   route,
@@ -13,7 +35,7 @@ const Sidebar = ({
   navSections = null,
   sectionLabel = 'Lab Operations',
   sublabel: _sublabel = 'Lab Operator',
-}) => {
+}: SidebarProps) => {
   const isFab = false;
   const sections = navSections || [{ label: sectionLabel, items: navItems }];
   return (
@@ -149,7 +171,7 @@ const Sidebar = ({
         (() => {
           const item = navItems[0];
           const active = route.page === item.id;
-          const Icon = I[item.icon];
+          const Icon = Icons[item.icon];
           return (
             <nav style={{ padding: '0 10px', position: 'relative' }}>
               <button
@@ -189,7 +211,7 @@ const Sidebar = ({
         })()}
 
       {}
-      {sections.map((sec, si) => (
+      {sections.map((sec: NavSection, si: number) => (
         <React.Fragment key={si}>
           <div
             style={{
@@ -213,9 +235,9 @@ const Sidebar = ({
               position: 'relative',
             }}
           >
-            {sec.items.map((item) => {
+            {sec.items.map((item: NavItem) => {
               const active = route.page === item.id;
-              const Icon = I[item.icon];
+              const Icon = Icons[item.icon];
               const count = counts && counts[item.id];
               return (
                 <button

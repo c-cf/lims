@@ -1,8 +1,23 @@
 'use client';
 import STATUS_MAP from '@/components/ui/STATUS_MAP';
+import React from 'react';
 
-const Badge = ({ status, label = undefined, dot = false, mono = false, style = undefined }) => {
-  const s = STATUS_MAP[status] || {
+const Badge = ({
+  status,
+  label = undefined,
+  dot = false,
+  mono = false,
+  style = undefined,
+}: {
+  status: string;
+  label?: string;
+  dot?: boolean;
+  mono?: boolean;
+  style?: React.CSSProperties;
+}) => {
+  const s = (STATUS_MAP as Record<string, { bg: string; color: string; label: string }>)[
+    status
+  ] || {
     bg: 'var(--status-created-bg)',
     color: 'var(--status-created-text)',
     label: label || status,

@@ -1,6 +1,7 @@
 'use client';
+import React from 'react';
 
-const KV = ({ label, value }) => (
+const KV = ({ label, value }: { label: string; value: React.ReactNode }) => (
   <div
     style={{
       display: 'flex',

@@ -1,6 +1,6 @@
 'use client';
 
-const __TwkCheck = ({ light }) => (
+const __TwkCheck = ({ light }: { light: boolean }) => (
   <svg viewBox="0 0 14 14" aria-hidden="true">
     <path
       d="M3 7.2 5.8 10 11 4.2"

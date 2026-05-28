@@ -4,13 +4,15 @@ import api from '@/lib/api';
 import ACCOUNTS from '@/components/Login/ACCOUNTS';
 import I from '@/components/ui/I';
 
-const LoginPage = ({ onLogin }) => {
+type LoginUser = { username: string; role: string; display: string; subtitle: string };
+
+const LoginPage = ({ onLogin }: { onLogin: (user: LoginUser) => void }) => {
   const [username, setUsername] = React.useState('');
   const [password, setPassword] = React.useState('');
   const [error, setError] = React.useState('');
   const [showPw, setShowPw] = React.useState(false);
   const [busy, setBusy] = React.useState(false);
-  const submit = async (e) => {
+  const submit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     setError('');
     const u = username.trim();
@@ -29,22 +31,34 @@ const LoginPage = ({ onLogin }) => {
           subtitle: user.department || user.role,
         });
       } catch (err) {
-        setError(err.message || 'Sign-in failed');
+        setError((err as Error).message || 'Sign-in failed');
       } finally {
         setBusy(false);
       }
       return;
     }
-    const acct = ACCOUNTS[u];
+    const acct = (
+      ACCOUNTS as Record<
+        string,
+        { password: string; role: string; display: string; subtitle: string }
+      >
+    )[u];
     if (!acct || acct.password !== password) {
       setError('Invalid username or password');
       return;
     }
     onLogin({ username: u, ...acct });
   };
-  const fillDemo = (u) => {
+  const fillDemo = (u: string) => {
     setUsername(u);
-    setPassword(ACCOUNTS[u].password);
+    setPassword(
+      (
+        ACCOUNTS as Record<
+          string,
+          { password: string; role: string; display: string; subtitle: string }
+        >
+      )[u].password,
+    );
     setError('');
   };
   return (

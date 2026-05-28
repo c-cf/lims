@@ -1,6 +1,23 @@
 'use client';
+import React from 'react';
 
-const Icon = ({ children, size = 16, color = 'currentColor', strokeWidth = 2, style, ...rest }) => (
+type IconProps = {
+  children?: React.ReactNode;
+  size?: number;
+  color?: string;
+  strokeWidth?: number;
+  style?: React.CSSProperties;
+  [key: string]: unknown;
+};
+
+const Icon = ({
+  children,
+  size = 16,
+  color = 'currentColor',
+  strokeWidth = 2,
+  style,
+  ...rest
+}: IconProps) => (
   <svg
     width={size}
     height={size}
@@ -11,7 +28,7 @@ const Icon = ({ children, size = 16, color = 'currentColor', strokeWidth = 2, st
     strokeLinecap="round"
     strokeLinejoin="round"
     style={{ flexShrink: 0, ...style }}
-    {...rest}
+    {...(rest as React.SVGProps<SVGSVGElement>)}
   >
     {children}
   </svg>

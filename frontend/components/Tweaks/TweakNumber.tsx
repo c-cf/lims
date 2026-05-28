@@ -1,18 +1,34 @@
 'use client';
 import React from 'react';
 
-function TweakNumber({ label, value, min, max, step = 1, unit = '', onChange }) {
-  const clamp = (n) => {
+function TweakNumber({
+  label,
+  value,
+  min,
+  max,
+  step = 1,
+  unit = '',
+  onChange,
+}: {
+  label: string;
+  value: number;
+  min?: number;
+  max?: number;
+  step?: number;
+  unit?: string;
+  onChange: (v: number) => void;
+}) {
+  const clamp = (n: number) => {
     if (min != null && n < min) return min;
     if (max != null && n > max) return max;
     return n;
   };
   const startRef = React.useRef({ x: 0, val: 0 });
-  const onScrubStart = (e) => {
+  const onScrubStart = (e: React.PointerEvent<HTMLSpanElement>) => {
     e.preventDefault();
     startRef.current = { x: e.clientX, val: value };
     const decimals = (String(step).split('.')[1] || '').length;
-    const move = (ev) => {
+    const move = (ev: PointerEvent) => {
       const dx = ev.clientX - startRef.current.x;
       const raw = startRef.current.val + dx * step;
       const snapped = Math.round(raw / step) * step;

@@ -1,6 +1,14 @@
 'use client';
 
-function TweakButton({ label, onClick, secondary = false }) {
+function TweakButton({
+  label,
+  onClick,
+  secondary = false,
+}: {
+  label: string;
+  onClick: () => void;
+  secondary?: boolean;
+}) {
   return (
     <button type="button" className={secondary ? 'twk-btn secondary' : 'twk-btn'} onClick={onClick}>
       {label}

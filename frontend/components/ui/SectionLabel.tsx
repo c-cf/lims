@@ -1,6 +1,15 @@
 'use client';
+import React from 'react';
 
-const SectionLabel = ({ children, style, right }) => (
+const SectionLabel = ({
+  children,
+  style,
+  right,
+}: {
+  children?: React.ReactNode;
+  style?: React.CSSProperties;
+  right?: React.ReactNode;
+}) => (
   <div
     style={{
       display: 'flex',

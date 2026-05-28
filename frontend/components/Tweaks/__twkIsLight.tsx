@@ -1,6 +1,6 @@
 'use client';
 
-function __twkIsLight(hex) {
+function __twkIsLight(hex: string) {
   const h = String(hex).replace('#', '');
   const x = h.length === 3 ? h.replace(/./g, (c) => c + c) : h.padEnd(6, '0');
   const n = parseInt(x.slice(0, 6), 16);
