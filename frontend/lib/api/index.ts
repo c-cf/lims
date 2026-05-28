@@ -1,6 +1,7 @@
 'use client';
 
 import type { components } from './types.gen';
+import type { User } from '../types';
 
 declare global {
   interface Window {
@@ -99,12 +100,29 @@ type DispatchInput = {
 type EquipmentInput = Schemas['EquipmentOut'];
 type RecipeInput = Schemas['RecipeOut'];
 
+// Shapes for the normalized rows that normalizeRequestRow returns as
+// placeholders (overwritten by normalizeRequestDetail's spread).
+type NormalizedSampleBrief = {
+  id: number;
+  wafer: string;
+  size: string;
+  status: string;
+  raw_status: string;
+};
+
+type NormalizedApprovalLog = {
+  action: string;
+  by: string | undefined;
+  at: string | null;
+  note: string;
+};
+
 const DEFAULT_BASE = '/api';
 const BASE = ((typeof window !== 'undefined' && window.LIMS_API_BASE) || DEFAULT_BASE).replace(
   /\/+$/,
   '',
 );
-const memStore = {};
+const memStore: Record<string, string> = {};
 let useLocalStorage = true;
 try {
   const probe = '__lims_probe__';
@@ -114,11 +132,11 @@ try {
   useLocalStorage = false;
 }
 const store = {
-  get(k) {
+  get(k: string): string | null {
     if (useLocalStorage) return globalThis.localStorage.getItem(k);
     return memStore[k] || null;
   },
-  set(k, v) {
+  set(k: string, v: string | null): void {
     if (useLocalStorage) {
       if (v == null) globalThis.localStorage.removeItem(k);
       else globalThis.localStorage.setItem(k, v);
@@ -127,17 +145,17 @@ const store = {
       else memStore[k] = v;
     }
   },
-  clear() {
+  clear(): void {
     ['lims.access', 'lims.refresh', 'lims.user'].forEach((k) => this.set(k, null));
   },
 };
-const ROLE_MAP = {
+const ROLE_MAP: Record<string, string> = {
   fab_user: 'fab_user',
   lab_staff: 'lab_member',
   lab_manager: 'lab_manager',
 };
-const normalizeRole = (r) => ROLE_MAP[r] || r;
-const REQUEST_STATUS_MAP = {
+const normalizeRole = (r: string): string => ROLE_MAP[r] || r;
+const REQUEST_STATUS_MAP: Record<string, string> = {
   draft: 'draft',
   pending_approval: 'submitted',
   approved: 'in_progress',
@@ -150,7 +168,7 @@ const REQUEST_STATUS_MAP = {
   rejected: 'rejected',
   cancelled: 'cancelled',
 };
-const SAMPLE_STATUS_MAP = {
+const SAMPLE_STATUS_MAP: Record<string, string> = {
   created: 'incoming',
   shipped: 'incoming',
   received: 'received',
@@ -163,7 +181,7 @@ const SAMPLE_STATUS_MAP = {
   returned: 'returned',
   voided: 'cancelled',
 };
-const DISPATCH_STATUS_MAP = {
+const DISPATCH_STATUS_MAP: Record<string, string> = {
   pending: 'pending',
   dispatched: 'dispatched',
   running: 'running',
@@ -174,18 +192,18 @@ const DISPATCH_STATUS_MAP = {
   pending_redispatch: 'exception',
   aborted: 'aborted',
 };
-const EQUIPMENT_STATUS_MAP = {
+const EQUIPMENT_STATUS_MAP: Record<string, string> = {
   available: 'idle',
   maintenance: 'maintenance',
   disabled: 'maintenance',
 };
-const wipCode = (id) => `WIP-${String(id).padStart(4, '0')}`;
-const dispatchCode = (id) => `DP-${String(id).padStart(4, '0')}`;
-const formatTimestamp = (iso) => {
+const wipCode = (id: number | string) => `WIP-${String(id).padStart(4, '0')}`;
+const dispatchCode = (id: number | string) => `DP-${String(id).padStart(4, '0')}`;
+const formatTimestamp = (iso: string | null | undefined): string | null => {
   if (!iso) return iso || null;
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return iso;
-  const pad = (n) => String(n).padStart(2, '0');
+  const pad = (n: number) => String(n).padStart(2, '0');
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
 };
 function normalizeRequestRow(r: RequestRowInput) {
@@ -204,8 +222,8 @@ function normalizeRequestRow(r: RequestRowInput) {
     sampleCount: r.sample_count ?? 0,
     expIds: (r.experiment_types || []).map((et) => et.id),
     experiment_types: r.experiment_types || [],
-    samples: [],
-    history: [],
+    samples: [] as NormalizedSampleBrief[],
+    history: [] as NormalizedApprovalLog[],
   };
 }
 function normalizeRequestDetail(r: RequestDetailInput) {
@@ -345,7 +363,7 @@ function normalizeRecipe(r: RecipeInput) {
     active: r.is_active,
   };
 }
-let refreshInflight = null;
+let refreshInflight: Promise<boolean> | null = null;
 async function rawFetch(path: string, opts?: RequestOpts) {
   const url = path.startsWith('http') ? path : `${BASE}${path}`;
   const access = store.get('lims.access');
@@ -387,7 +405,7 @@ async function call(path: string, opts?: RequestOpts) {
         if (typeof body.detail === 'string') {
           detail = body.detail;
         } else if (Array.isArray(body.detail)) {
-          detail = body.detail.map((e) => e.msg || JSON.stringify(e)).join('; ');
+          detail = body.detail.map((e: { msg?: string }) => e.msg || JSON.stringify(e)).join('; ');
         } else {
           detail = JSON.stringify(body.detail);
         }
@@ -421,8 +439,8 @@ async function doRefresh() {
 const api = {
   base: BASE,
   auth: {
-    async login(username, password) {
-      const out = await call('/auth/login', {
+    async login(username: string, password: string): Promise<User> {
+      const out: Schemas['TokenOut'] = await call('/auth/login', {
         method: 'POST',
         body: JSON.stringify({
           username,
@@ -431,7 +449,7 @@ const api = {
       });
       store.set('lims.access', out.access_token);
       store.set('lims.refresh', out.refresh_token);
-      const user = {
+      const user: User = {
         id: out.id,
         username: out.username,
         role: normalizeRole(out.role),
@@ -441,7 +459,7 @@ const api = {
       store.set('lims.user', JSON.stringify(user));
       return user;
     },
-    async logout() {
+    async logout(): Promise<void> {
       const refresh = store.get('lims.refresh');
       try {
         if (refresh)
@@ -454,8 +472,8 @@ const api = {
       } catch {}
       store.clear();
     },
-    async me() {
-      const out = await call('/auth/me');
+    async me(): Promise<User> {
+      const out: Schemas['UserOut'] = await call('/auth/me');
       return {
         id: out.id,
         username: out.username,
@@ -464,20 +482,20 @@ const api = {
         department: out.department,
       };
     },
-    cachedUser() {
+    cachedUser(): User | null {
       try {
         const raw = store.get('lims.user');
-        return raw ? JSON.parse(raw) : null;
+        return raw ? (JSON.parse(raw) as User) : null;
       } catch {
         return null;
       }
     },
   },
   experimentTypes: {
-    async list(q = {}) {
+    async list(q: Record<string, string> = {}) {
       const usp = new URLSearchParams(q);
       const out = await call(`/experiment-types?${usp}`);
-      return out.map((e) => ({
+      return out.map((e: Schemas['ExperimentTypeOut']) => ({
         id: e.id,
         name: e.name,
         description: e.description,
@@ -486,7 +504,7 @@ const api = {
     },
   },
   equipment: {
-    async list(q = {}) {
+    async list(q: Record<string, string> = {}) {
       const usp = new URLSearchParams(q);
       const out = await call(`/equipment?${usp}`);
       return out.map(normalizeEquipment);
@@ -498,6 +516,13 @@ const api = {
       status = undefined,
       experimentTypeIds = [],
       parameters = {},
+    }: {
+      name: string;
+      modelName: string;
+      capacity: number;
+      status?: string;
+      experimentTypeIds?: number[];
+      parameters?: Record<string, unknown>;
     }) {
       const body: Record<string, unknown> = {
         name,
@@ -513,7 +538,22 @@ const api = {
       });
       return normalizeEquipment(out);
     },
-    async update(id, { name, modelName, capacity, status, parameters }) {
+    async update(
+      id: number | string,
+      {
+        name,
+        modelName,
+        capacity,
+        status,
+        parameters,
+      }: {
+        name?: string;
+        modelName?: string;
+        capacity?: number;
+        status?: string;
+        parameters?: Record<string, unknown>;
+      },
+    ) {
       const body: Record<string, unknown> = {};
       if (name !== undefined) body.name = name;
       if (modelName !== undefined) body.model_name = modelName;
@@ -526,7 +566,7 @@ const api = {
       });
       return normalizeEquipment(out);
     },
-    async setCapabilities(id, experimentTypeIds) {
+    async setCapabilities(id: number | string, experimentTypeIds: number[]) {
       const out = await call(`/equipment/${id}/capabilities`, {
         method: 'POST',
         body: {
@@ -537,12 +577,22 @@ const api = {
     },
   },
   recipes: {
-    async list(q = {}) {
+    async list(q: Record<string, string> = {}) {
       const usp = new URLSearchParams(q);
       const out = await call(`/recipes?${usp}`);
       return out.map(normalizeRecipe);
     },
-    async create({ name, description = '', experimentTypeId, parameters = {} }) {
+    async create({
+      name,
+      description = '',
+      experimentTypeId,
+      parameters = {},
+    }: {
+      name: string;
+      description?: string;
+      experimentTypeId: number | string;
+      parameters?: Record<string, unknown>;
+    }) {
       const out = await call('/recipes/', {
         method: 'POST',
         body: {
@@ -554,7 +604,14 @@ const api = {
       });
       return normalizeRecipe(out);
     },
-    async update(id, { name, description, parameters }) {
+    async update(
+      id: number | string,
+      {
+        name,
+        description,
+        parameters,
+      }: { name?: string; description?: string; parameters?: Record<string, unknown> },
+    ) {
       const body: Record<string, unknown> = {};
       if (name !== undefined) body.name = name;
       if (description !== undefined) body.description = description;
@@ -565,7 +622,7 @@ const api = {
       });
       return normalizeRecipe(out);
     },
-    async remove(id) {
+    async remove(id: number | string): Promise<null> {
       await call(`/recipes/${id}`, {
         method: 'DELETE',
       });
@@ -573,44 +630,44 @@ const api = {
     },
   },
   requests: {
-    async list(q = {}) {
+    async list(q: Record<string, string> = {}) {
       const usp = new URLSearchParams(q);
       const out = await call(`/requests?${usp}`);
       return out.map(normalizeRequestRow);
     },
-    async get(id) {
+    async get(id: unknown) {
       const out = await call(`/requests/${id}`);
       return normalizeRequestDetail(out);
     },
-    async create(payload) {
+    async create(payload: unknown) {
       const out = await call('/requests/', {
         method: 'POST',
         body: payload,
       });
       return normalizeRequestDetail(out);
     },
-    async update(id, payload) {
+    async update(id: number | string, payload: unknown) {
       const out = await call(`/requests/${id}`, {
         method: 'PATCH',
         body: payload,
       });
       return normalizeRequestDetail(out);
     },
-    async submit(id) {
+    async submit(id: number | string) {
       return normalizeRequestDetail(
         await call(`/requests/${id}/submit`, {
           method: 'POST',
         }),
       );
     },
-    async approve(id) {
+    async approve(id: number | string) {
       return normalizeRequestDetail(
         await call(`/requests/${id}/approve`, {
           method: 'POST',
         }),
       );
     },
-    async returnRequest(id, comment) {
+    async returnRequest(id: number | string, comment: string) {
       return normalizeRequestDetail(
         await call(`/requests/${id}/return`, {
           method: 'POST',
@@ -620,7 +677,7 @@ const api = {
         }),
       );
     },
-    async reject(id, comment) {
+    async reject(id: number | string, comment: string) {
       return normalizeRequestDetail(
         await call(`/requests/${id}/reject`, {
           method: 'POST',
@@ -630,14 +687,14 @@ const api = {
         }),
       );
     },
-    async ship(id) {
+    async ship(id: number | string) {
       return normalizeRequestDetail(
         await call(`/requests/${id}/ship`, {
           method: 'POST',
         }),
       );
     },
-    async cancel(id, reason) {
+    async cancel(id: number | string, reason: string) {
       return normalizeRequestDetail(
         await call(`/requests/${id}/cancel`, {
           method: 'POST',
@@ -647,39 +704,39 @@ const api = {
         }),
       );
     },
-    async close(id) {
+    async close(id: number | string) {
       return normalizeRequestDetail(
         await call(`/requests/${id}/close`, {
           method: 'POST',
         }),
       );
     },
-    async deleteDraft(id) {
+    async deleteDraft(id: number | string) {
       await call(`/requests/${id}`, {
         method: 'DELETE',
       });
     },
   },
   samples: {
-    async list(q = {}) {
+    async list(q: Record<string, string> = {}) {
       const usp = new URLSearchParams(q);
       const out = await call(`/samples?${usp}`);
       return out.map(normalizeSampleRow);
     },
-    async get(id) {
+    async get(id: number | string) {
       return normalizeSampleRow(await call(`/samples/${id}`));
     },
-    async getExperiments(id) {
+    async getExperiments(id: number | string) {
       return normalizeSampleExperiments(await call(`/samples/${id}/experiments`));
     },
-    async receive(id) {
+    async receive(id: number | string) {
       return normalizeSampleRow(
         await call(`/samples/${id}/receive`, {
           method: 'POST',
         }),
       );
     },
-    async rejectReceiving(id, reason = '') {
+    async rejectReceiving(id: number | string, reason: string = '') {
       return normalizeSampleRow(
         await call(`/samples/${id}/reject-receiving`, {
           method: 'POST',
@@ -689,21 +746,21 @@ const api = {
         }),
       );
     },
-    async reportLost(id) {
+    async reportLost(id: number | string) {
       return normalizeSampleRow(
         await call(`/samples/${id}/report-lost`, {
           method: 'POST',
         }),
       );
     },
-    async void(id) {
+    async void(id: number | string) {
       return normalizeSampleRow(
         await call(`/samples/${id}/void`, {
           method: 'POST',
         }),
       );
     },
-    async return(id) {
+    async return(id: number | string) {
       return normalizeSampleRow(
         await call(`/samples/${id}/return`, {
           method: 'POST',
@@ -712,15 +769,23 @@ const api = {
     },
   },
   wips: {
-    async list(q = {}) {
+    async list(q: Record<string, string> = {}) {
       const usp = new URLSearchParams(q);
       const out = await call(`/wips?${usp}`);
       return out.map(normalizeWip);
     },
-    async get(id) {
+    async get(id: number | string) {
       return normalizeWip(await call(`/wips/${id}`));
     },
-    async create({ experimentTypeId, sampleIds, note = '' }) {
+    async create({
+      experimentTypeId,
+      sampleIds,
+      note = '',
+    }: {
+      experimentTypeId: number | string;
+      sampleIds: number[];
+      note?: string;
+    }) {
       return normalizeWip(
         await call('/wips/', {
           method: 'POST',
@@ -732,7 +797,20 @@ const api = {
         }),
       );
     },
-    async createDispatch(wipId, { equipmentId, recipeId, estimatedDurationSeconds, note = '' }) {
+    async createDispatch(
+      wipId: number | string,
+      {
+        equipmentId,
+        recipeId,
+        estimatedDurationSeconds,
+        note = '',
+      }: {
+        equipmentId: number | string;
+        recipeId: number | string;
+        estimatedDurationSeconds?: number | string | null;
+        note?: string;
+      },
+    ) {
       const body: Record<string, unknown> = {
         equipment_id: equipmentId,
         recipe_id: recipeId,
@@ -748,14 +826,14 @@ const api = {
         }),
       );
     },
-    async complete(id) {
+    async complete(id: number | string) {
       return normalizeWip(
         await call(`/wips/${id}/complete`, {
           method: 'POST',
         }),
       );
     },
-    async abort(id) {
+    async abort(id: number | string) {
       return normalizeWip(
         await call(`/wips/${id}/abort`, {
           method: 'POST',
@@ -764,10 +842,10 @@ const api = {
     },
   },
   dispatches: {
-    async list(q = {}) {
+    async list(q: Record<string, string> = {}) {
       const usp = new URLSearchParams(q);
       const out = await call(`/dispatches?${usp}`);
-      return out.map((d) => ({
+      return out.map((d: Schemas['DispatchListOut']) => ({
         id: d.id,
         code: dispatchCode(d.id),
         wipId: d.wip_id,
@@ -786,24 +864,24 @@ const api = {
         estimatedDurationSeconds: d.estimated_duration_seconds ?? null,
       }));
     },
-    async get(id) {
+    async get(id: number | string) {
       return normalizeDispatch(await call(`/dispatches/${id}`));
     },
-    async start(id) {
+    async start(id: number | string) {
       return normalizeDispatch(
         await call(`/dispatches/${id}/start`, {
           method: 'POST',
         }),
       );
     },
-    async unload(id) {
+    async unload(id: number | string) {
       return normalizeDispatch(
         await call(`/dispatches/${id}/unload`, {
           method: 'POST',
         }),
       );
     },
-    async recordResult(id, { comment = '' } = {}) {
+    async recordResult(id: number | string, { comment = '' }: { comment?: string } = {}) {
       return normalizeDispatch(
         await call(`/dispatches/${id}/record-result`, {
           method: 'POST',
@@ -813,14 +891,14 @@ const api = {
         }),
       );
     },
-    async complete(id) {
+    async complete(id: number | string) {
       return normalizeDispatch(
         await call(`/dispatches/${id}/complete`, {
           method: 'POST',
         }),
       );
     },
-    async reportException(id, note = '') {
+    async reportException(id: number | string, note: string = '') {
       return normalizeDispatch(
         await call(`/dispatches/${id}/report-exception`, {
           method: 'POST',
@@ -830,14 +908,14 @@ const api = {
         }),
       );
     },
-    async redispatch(id) {
+    async redispatch(id: number | string) {
       return normalizeDispatch(
         await call(`/dispatches/${id}/redispatch`, {
           method: 'POST',
         }),
       );
     },
-    async abort(id) {
+    async abort(id: number | string) {
       return normalizeDispatch(
         await call(`/dispatches/${id}/abort`, {
           method: 'POST',
@@ -846,16 +924,16 @@ const api = {
     },
   },
   reports: {
-    async equipmentUtilization(q) {
-      const usp = new URLSearchParams(q);
+    async equipmentUtilization(q: Record<string, string | number>) {
+      const usp = new URLSearchParams(q as Record<string, string>);
       return call(`/reports/equipment-utilization?${usp}`);
     },
-    async requestStatistics(q) {
-      const usp = new URLSearchParams(q);
+    async requestStatistics(q: Record<string, string | number>) {
+      const usp = new URLSearchParams(q as Record<string, string>);
       return call(`/reports/request-statistics?${usp}`);
     },
-    async trends(q = {}) {
-      const usp = new URLSearchParams(q);
+    async trends(q: Record<string, string | number> = {}) {
+      const usp = new URLSearchParams(q as Record<string, string>);
       return call(`/reports/trends?${usp}`);
     },
   },
