@@ -16,6 +16,6 @@ export default function Page() {
       }
     } catch {}
     router.replace('/login');
-  }, []);
+  }, [router]);
   return null;
 }

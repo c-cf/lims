@@ -27,7 +27,7 @@ const PostLogin=({user,onLogout})=>{const isFab=user.role==='fab_user';const lab
                 Foundation · 基礎架構
               </div>
               <div style={{marginTop:3,fontSize:13,color:'var(--text-secondary)',lineHeight:1.5}}>
-                Login + role-aware shell are wired up. You're signed in as <code style={{background:'#ebebf0',padding:'1px 6px',borderRadius:4,fontFamily:'JetBrains Mono, monospace',fontSize:12}}>{user.username}</code> ({user.subtitle}).
+                Login + role-aware shell are wired up. You&apos;re signed in as <code style={{background:'#ebebf0',padding:'1px 6px',borderRadius:4,fontFamily:'JetBrains Mono, monospace',fontSize:12}}>{user.username}</code> ({user.subtitle}).
                 Sidebar nav, top bar, and design tokens are live — the role split routes you to the right surface on sign-in.
               </div>
             </div>

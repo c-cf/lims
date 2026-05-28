@@ -16,7 +16,7 @@ const MgrAllRequests=({navigate})=>{const{data:requests,loading,error}=useMgrReq
         <div style={{padding:'60px 20px',textAlign:'center',color:mMuted,fontSize:14}}>Loading…</div>
       </Page>;}return<Page title="All Requests"subtitle="廠區送審申請 — approve, return, or reject submitted requests">
       {error&&<div style={{padding:'12px 16px',marginBottom:14,borderRadius:10,background:'#fde4e4',color:'#c0394a',fontSize:13.5,fontWeight:500,border:'1px solid #f6c4c4'}}>
-          Couldn't load requests: {error}
+          Couldn&apos;t load requests: {error}
         </div>}
       <div style={{display:'flex',gap:22,borderBottom:`1px solid ${mLine}`,marginBottom:22}}>
         {ALL_REQ_TABS.map(t=>{const active=t.id===tab;return<button key={t.id}onClick={()=>setTab(t.id)}style={{position:'relative',display:'inline-flex',alignItems:'center',gap:8,padding:'12px 0 14px',cursor:'pointer',color:active?mInk:mText2,fontSize:14,fontWeight:active?700:500,fontFamily:'inherit',background:'transparent',border:'none'}}>

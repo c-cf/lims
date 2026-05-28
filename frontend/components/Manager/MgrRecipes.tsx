@@ -14,14 +14,14 @@ import { lineSoft as mLineSft } from '@/lib/colors';
 import { accent as mAccent } from '@/lib/colors';
 import RecipeModal from '@/components/Manager/RecipeModal';
 const MI=I;
-const MgrRecipes=({showToast})=>{const{data:recipes,loading,error,refresh}=useMgrRecipes();const[modalOpen,setModalOpen]=React.useState(false);const[editing,setEditing]=React.useState(null);const[busyDeleteId,setBusyDeleteId]=React.useState(null);const[deleteError,setDeleteError]=React.useState(null);const openNew=()=>{setEditing(null);setModalOpen(true);};const openEdit=rec=>{setEditing(rec);setModalOpen(true);};const closeModal=()=>{setEditing(null);setModalOpen(false);};const onSaved=()=>{const wasEdit=!!editing;closeModal();showToast&&showToast(wasEdit?'Recipe updated':'Recipe created');refresh();};const onDelete=async rec=>{if(!window.confirm(`Delete recipe "${rec.name}"? This can't be undone.`))return;setBusyDeleteId(rec.id);setDeleteError(null);try{await api.recipes.remove(rec.id);showToast&&showToast(`${rec.name} deleted`);refresh();}catch(e){setDeleteError(e.message||String(e));}finally{setBusyDeleteId(null);}};if(loading&&recipes.length===0){return<Page title="Recipes"subtitle="Loading…">
+const MgrRecipes=({showToast})=>{const{data:recipes,loading,error,refresh}=useMgrRecipes();const[modalOpen,setModalOpen]=React.useState(false);const[editing,setEditing]=React.useState(null);const[busyDeleteId,setBusyDeleteId]=React.useState(null);const[deleteError,setDeleteError]=React.useState(null);const openNew=()=>{setEditing(null);setModalOpen(true);};const openEdit=rec=>{setEditing(rec);setModalOpen(true);};const closeModal=()=>{setEditing(null);setModalOpen(false);};const onSaved=()=>{const wasEdit=!!editing;closeModal();showToast?.(wasEdit?'Recipe updated':'Recipe created');refresh();};const onDelete=async rec=>{if(!window.confirm(`Delete recipe "${rec.name}"? This can't be undone.`))return;setBusyDeleteId(rec.id);setDeleteError(null);try{await api.recipes.remove(rec.id);showToast?.(`${rec.name} deleted`);refresh();}catch(e){setDeleteError(e.message||String(e));}finally{setBusyDeleteId(null);}};if(loading&&recipes.length===0){return<Page title="Recipes"subtitle="Loading…">
         <div style={{padding:'60px 20px',textAlign:'center',color:mMuted,fontSize:14}}>Loading…</div>
       </Page>;}return<Page title="Recipes"subtitle="食譜 — experiment recipes referenced by dispatches"right={<PrimaryBtn icon={<MI.Plus size={14}/>}onClick={openNew}>New Recipe</PrimaryBtn>}>
       {deleteError&&<div style={{padding:'12px 16px',marginBottom:14,borderRadius:10,background:'#fde4e4',color:'#c0394a',fontSize:13.5,fontWeight:500,border:'1px solid #f6c4c4'}}>
           {deleteError}
         </div>}
       {error&&<div style={{padding:'12px 16px',marginBottom:14,borderRadius:10,background:'#fde4e4',color:'#c0394a',fontSize:13.5,fontWeight:500,border:'1px solid #f6c4c4'}}>
-          Couldn't load recipes: {error}
+          Couldn&apos;t load recipes: {error}
         </div>}
 
       <div style={{display:'flex',flexDirection:'column',gap:10}}>

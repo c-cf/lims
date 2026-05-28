@@ -2,7 +2,7 @@
 import React from 'react';
 import TODAY from '@/components/Lab/constants/today';
 
-const DashHero=({counts,navigate})=>{const hour=new Date().getHours();const greeting=hour<5?'Working late':hour<12?'Good morning':hour<18?'Good afternoon':'Good evening';const stars=React.useMemo(()=>{const arr=[];const rng=seed=>{let x=seed*9301+49297;return x%233280/233280;};for(let i=0;i<38;i++){arr.push({left:rng(i+1)*100,top:rng(i+17)*100,size:1+rng(i+31)*2.4,delay:rng(i+47)*6,dur:3.5+rng(i+53)*4});}return arr;},[]);return<div style={{position:'relative',overflow:'hidden',borderRadius:18,marginBottom:22,background:'linear-gradient(135deg, #1a1726 0%, #2a2342 45%, #3a2a4f 100%)',color:'#fff',padding:'36px 40px 32px',boxShadow:'0 14px 40px -16px rgba(36, 28, 64, 0.45)'}}>
+const DashHero=({counts,navigate})=>{const hour=new Date().getHours();const greeting=hour<5?'Working late':hour<12?'Good morning':hour<18?'Good afternoon':'Good evening';const stars=React.useMemo(()=>{const arr=[];const rng=seed=>{const x=seed*9301+49297;return x%233280/233280;};for(let i=0;i<38;i++){arr.push({left:rng(i+1)*100,top:rng(i+17)*100,size:1+rng(i+31)*2.4,delay:rng(i+47)*6,dur:3.5+rng(i+53)*4});}return arr;},[]);return<div style={{position:'relative',overflow:'hidden',borderRadius:18,marginBottom:22,background:'linear-gradient(135deg, #1a1726 0%, #2a2342 45%, #3a2a4f 100%)',color:'#fff',padding:'36px 40px 32px',boxShadow:'0 14px 40px -16px rgba(36, 28, 64, 0.45)'}}>
       {}
       <div style={{position:'absolute',inset:0,opacity:0.3,backgroundImage:'radial-gradient(rgba(255,255,255,0.06) 1px, transparent 1px)',backgroundSize:'20px 20px',pointerEvents:'none'}}/>
       {}

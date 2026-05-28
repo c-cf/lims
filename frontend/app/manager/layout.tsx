@@ -35,9 +35,7 @@ export default function ManagerLayout({ children }: { children: React.ReactNode 
       const stored = localStorage.getItem(SESSION_KEY);
       if (!stored) { router.replace('/login'); return; }
       const u = JSON.parse(stored);
-      if (u.role !== 'lab_manager') { router.replace(roleHome(u.role)); return; }
-      // eslint-disable-next-line react-hooks/set-state-in-effect
-      setAuth({ user: u, ok: true });
+      if (u.role !== 'lab_manager') { router.replace(roleHome(u.role)); return; }      setAuth({ user: u, ok: true });
     } catch { router.replace('/login'); }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);

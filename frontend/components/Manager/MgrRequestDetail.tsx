@@ -20,7 +20,7 @@ import { line as mLine } from '@/lib/colors';
 import { accent as mAccent } from '@/lib/colors';
 import ApprovalModal from '@/components/Manager/ApprovalModal';
 const MI=I;
-const MgrRequestDetail=({id,navigate,showToast})=>{const{data:r,loading,error,refresh}=useMgrRequestDetail(id);const[modal,setModal]=React.useState(null);const[busy,setBusy]=React.useState(false);const[actionError,setActionError]=React.useState(null);const runAction=async(op,label)=>{setBusy(true);setActionError(null);try{await op();showToast&&showToast(label);refresh();}catch(e){setActionError(e.message||String(e));}finally{setBusy(false);}};if(loading&&!r){return<Page title="Loading request…">
+const MgrRequestDetail=({id,navigate,showToast})=>{const{data:r,loading,error,refresh}=useMgrRequestDetail(id);const[modal,setModal]=React.useState(null);const[busy,setBusy]=React.useState(false);const[actionError,setActionError]=React.useState(null);const runAction=async(op,label)=>{setBusy(true);setActionError(null);try{await op();showToast?.(label);refresh();}catch(e){setActionError(e.message||String(e));}finally{setBusy(false);}};if(loading&&!r){return<Page title="Loading request…">
         <div style={{padding:'60px 20px',textAlign:'center',color:mMuted,fontSize:14}}>Loading…</div>
       </Page>;}if(error||!r){return<Page breadcrumb={<Breadcrumb items={[{label:'All Requests',onClick:()=>navigate({page:'mgr_all_requests'})},{label:'?'}]}/>}title="Request not found">
         <div style={{padding:24,color:'#c0394a',fontSize:14}}>
