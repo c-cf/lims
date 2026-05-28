@@ -1,11 +1,11 @@
 // Removes every `// @ts-nocheck` line, runs tsc --noEmit once, then restores
 // the working tree. Reports tsc error count per file so we can plan PR slicing.
-import { spawnSync } from "node:child_process";
-import { readdirSync, readFileSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { spawnSync } from 'node:child_process';
+import { readdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
 
 const NOCHECK_RE = /^\s*\/\/\s*@ts-nocheck\s*\r?\n/m;
-const SRC_DIRS = ["app", "components", "lib"];
+const SRC_DIRS = ['app', 'components', 'lib'];
 const SRC_EXT = /\.(ts|tsx|mts|cts)$/;
 
 function walk(dir, out = []) {
@@ -18,30 +18,28 @@ function walk(dir, out = []) {
 }
 
 const candidates = SRC_DIRS.flatMap((d) => walk(d));
-const files = candidates.filter((f) =>
-  readFileSync(f, "utf8").includes("@ts-nocheck"),
-);
+const files = candidates.filter((f) => readFileSync(f, 'utf8').includes('@ts-nocheck'));
 
 console.error(`Found ${files.length} files with @ts-nocheck. Stripping...`);
 
 const originals = new Map();
 for (const f of files) {
-  const content = readFileSync(f, "utf8");
+  const content = readFileSync(f, 'utf8');
   originals.set(f, content);
-  writeFileSync(f, content.replace(NOCHECK_RE, ""));
+  writeFileSync(f, content.replace(NOCHECK_RE, ''));
 }
 
-let tscOutput = "";
+let tscOutput = '';
 try {
-  console.error("Running tsc --noEmit (may take ~30s)...");
+  console.error('Running tsc --noEmit (may take ~30s)...');
   const r = spawnSync(
     process.execPath,
-    ["./node_modules/typescript/bin/tsc", "--noEmit", "--pretty", "false"],
-    { encoding: "utf8", maxBuffer: 50 * 1024 * 1024 },
+    ['./node_modules/typescript/bin/tsc', '--noEmit', '--pretty', 'false'],
+    { encoding: 'utf8', maxBuffer: 50 * 1024 * 1024 },
   );
-  tscOutput = (r.stdout || "") + (r.stderr || "");
+  tscOutput = (r.stdout || '') + (r.stderr || '');
 } finally {
-  console.error("Restoring files...");
+  console.error('Restoring files...');
   for (const [f, content] of originals) writeFileSync(f, content);
 }
 
@@ -50,11 +48,11 @@ const lineRe = /^(.+?)\((\d+),(\d+)\):\s+error\s+TS\d+:/;
 for (const line of tscOutput.split(/\r?\n/)) {
   const m = lineRe.exec(line);
   if (!m) continue;
-  const file = m[1].replace(/\\/g, "/").replace(/^.*?\/frontend\//, "");
+  const file = m[1].replace(/\\/g, '/').replace(/^.*?\/frontend\//, '');
   errorsByFile[file] = (errorsByFile[file] || 0) + 1;
 }
 
-const tracked = new Set(files.map((f) => f.replace(/\\/g, "/")));
+const tracked = new Set(files.map((f) => f.replace(/\\/g, '/')));
 const buckets = { zero: [], small: [], medium: [], large: [] };
 for (const f of tracked) {
   const n = errorsByFile[f] || 0;
@@ -92,8 +90,5 @@ for (const [f, n] of buckets.medium) console.log(`  ${n}  ${f}`);
 console.log(`\n--- LARGE (>10 errors) ---`);
 for (const [f, n] of buckets.large) console.log(`  ${n}  ${f}`);
 
-writeFileSync(
-  "triage-report.json",
-  JSON.stringify({ buckets, errorsByFile, untracked }, null, 2),
-);
+writeFileSync('triage-report.json', JSON.stringify({ buckets, errorsByFile, untracked }, null, 2));
 console.log(`\nFull report written to triage-report.json`);

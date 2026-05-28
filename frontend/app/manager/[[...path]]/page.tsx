@@ -1,4 +1,4 @@
-"use client";
+'use client';
 import React, { use, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { makeMgrNavigate, makeLabNavigate } from '@/lib/navigate';
@@ -43,7 +43,13 @@ export default function ManagerPage({ params }: { params: Promise<{ path?: strin
       if (seg2) {
         page = <LabWaferDetail id={Number(seg2)} navigate={labNavigate} showToast={showToast} />;
       } else {
-        page = <LabSamples navigate={labNavigate} defaultTab={searchParams.get('tab') || 'all'} showToast={showToast} />;
+        page = (
+          <LabSamples
+            navigate={labNavigate}
+            defaultTab={searchParams.get('tab') || 'all'}
+            showToast={showToast}
+          />
+        );
       }
     } else if (seg1 === 'wips') {
       if (seg2) {
@@ -55,7 +61,12 @@ export default function ManagerPage({ params }: { params: Promise<{ path?: strin
       if (seg2) {
         page = <LabDispatchDetail id={Number(seg2)} navigate={labNavigate} showToast={showToast} />;
       } else {
-        page = <LabDispatchList navigate={labNavigate} defaultTab={searchParams.get('tab') || 'active'} />;
+        page = (
+          <LabDispatchList
+            navigate={labNavigate}
+            defaultTab={searchParams.get('tab') || 'active'}
+          />
+        );
       }
     } else if (seg1 === 'equipment') {
       page = <LabEquipment navigate={labNavigate} canManage={true} showToast={showToast} />;
@@ -82,12 +93,25 @@ export default function ManagerPage({ params }: { params: Promise<{ path?: strin
     <>
       {page}
       {toast && (
-        <div style={{
-          position: 'fixed', bottom: 28, left: '50%', transform: 'translateX(-50%)',
-          padding: '12px 20px', borderRadius: 10, background: ink, color: '#fff',
-          fontSize: 14, fontWeight: 500, boxShadow: '0 12px 36px rgba(20,20,28,0.32)',
-          animation: 'slide-in 0.18s ease-out', zIndex: 300,
-        }}>{toast.msg}</div>
+        <div
+          style={{
+            position: 'fixed',
+            bottom: 28,
+            left: '50%',
+            transform: 'translateX(-50%)',
+            padding: '12px 20px',
+            borderRadius: 10,
+            background: ink,
+            color: '#fff',
+            fontSize: 14,
+            fontWeight: 500,
+            boxShadow: '0 12px 36px rgba(20,20,28,0.32)',
+            animation: 'slide-in 0.18s ease-out',
+            zIndex: 300,
+          }}
+        >
+          {toast.msg}
+        </div>
       )}
     </>
   );

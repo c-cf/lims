@@ -1,4 +1,4 @@
-"use client";
+'use client';
 import React, { use, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { makeFabNavigate } from '@/lib/navigate';
@@ -47,12 +47,25 @@ export default function FabPage({ params }: { params: Promise<{ path?: string[] 
     <>
       {page}
       {toast && (
-        <div style={{
-          position: 'fixed', bottom: 28, left: '50%', transform: 'translateX(-50%)',
-          padding: '12px 20px', borderRadius: 10, background: '#1e1e24', color: '#fff',
-          fontSize: 14, fontWeight: 500, boxShadow: '0 12px 36px rgba(30,30,36,0.32)',
-          animation: 'slide-in 0.18s ease-out', zIndex: 100,
-        }}>{toast.msg}</div>
+        <div
+          style={{
+            position: 'fixed',
+            bottom: 28,
+            left: '50%',
+            transform: 'translateX(-50%)',
+            padding: '12px 20px',
+            borderRadius: 10,
+            background: '#1e1e24',
+            color: '#fff',
+            fontSize: 14,
+            fontWeight: 500,
+            boxShadow: '0 12px 36px rgba(30,30,36,0.32)',
+            animation: 'slide-in 0.18s ease-out',
+            zIndex: 100,
+          }}
+        >
+          {toast.msg}
+        </div>
       )}
     </>
   );

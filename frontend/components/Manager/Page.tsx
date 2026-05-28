@@ -1,17 +1,46 @@
-"use client";
+'use client';
 import { ink as mInk } from '@/lib/colors';
 import { text2 as mText2 } from '@/lib/colors';
 
-const Page=({title,subtitle=undefined,breadcrumb=undefined,right=undefined,children})=><div style={{padding:'32px 44px 80px',maxWidth:1320,margin:'0 auto'}}>
+const Page = ({
+  title,
+  subtitle = undefined,
+  breadcrumb = undefined,
+  right = undefined,
+  children,
+}) => (
+  <div style={{ padding: '32px 44px 80px', maxWidth: 1320, margin: '0 auto' }}>
     {breadcrumb}
-    <div style={{display:'flex',alignItems:'flex-start',justifyContent:'space-between',gap:24,marginBottom:24}}>
-      <div style={{minWidth:0}}>
-        {title&&<h1 style={{fontFamily:'var(--font-display)',fontSize:28,fontWeight:700,letterSpacing:'-0.02em',margin:0,color:mInk}}>{title}</h1>}
-        {subtitle&&<div style={{fontSize:13,color:mText2,marginTop:6}}>{subtitle}</div>}
+    <div
+      style={{
+        display: 'flex',
+        alignItems: 'flex-start',
+        justifyContent: 'space-between',
+        gap: 24,
+        marginBottom: 24,
+      }}
+    >
+      <div style={{ minWidth: 0 }}>
+        {title && (
+          <h1
+            style={{
+              fontFamily: 'var(--font-display)',
+              fontSize: 28,
+              fontWeight: 700,
+              letterSpacing: '-0.02em',
+              margin: 0,
+              color: mInk,
+            }}
+          >
+            {title}
+          </h1>
+        )}
+        {subtitle && <div style={{ fontSize: 13, color: mText2, marginTop: 6 }}>{subtitle}</div>}
       </div>
-      {right&&<div style={{display:'inline-flex',gap:10,flexShrink:0}}>{right}</div>}
+      {right && <div style={{ display: 'inline-flex', gap: 10, flexShrink: 0 }}>{right}</div>}
     </div>
     {children}
-  </div>;
+  </div>
+);
 export default Page;
 export { Page };

@@ -1,4 +1,4 @@
-"use client";
+'use client';
 import React, { useEffect, useState } from 'react';
 import { useRouter, usePathname } from 'next/navigation';
 import Sidebar from '@/components/Shell/Sidebar';
@@ -10,13 +10,13 @@ import { makeLabNavigate, roleHome } from '@/lib/navigate';
 import api from '@/lib/api';
 
 function pathToLabPage(pathname: string): string {
-  if (pathname.startsWith('/lab/samples/'))     return 'lab_samples';
-  if (pathname.startsWith('/lab/samples'))      return 'lab_samples';
-  if (pathname.startsWith('/lab/wips/'))        return 'lab_wip';
-  if (pathname.startsWith('/lab/wips'))         return 'lab_wip';
-  if (pathname.startsWith('/lab/dispatches/'))  return 'lab_dispatches';
-  if (pathname.startsWith('/lab/dispatches'))   return 'lab_dispatches';
-  if (pathname.startsWith('/lab/equipment'))    return 'lab_equipment';
+  if (pathname.startsWith('/lab/samples/')) return 'lab_samples';
+  if (pathname.startsWith('/lab/samples')) return 'lab_samples';
+  if (pathname.startsWith('/lab/wips/')) return 'lab_wip';
+  if (pathname.startsWith('/lab/wips')) return 'lab_wip';
+  if (pathname.startsWith('/lab/dispatches/')) return 'lab_dispatches';
+  if (pathname.startsWith('/lab/dispatches')) return 'lab_dispatches';
+  if (pathname.startsWith('/lab/equipment')) return 'lab_equipment';
   return 'lab_dashboard';
 }
 
@@ -31,20 +31,27 @@ export default function LabLayout({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     try {
       const stored = localStorage.getItem(SESSION_KEY);
-      if (!stored) { router.replace('/login'); return; }
+      if (!stored) {
+        router.replace('/login');
+        return;
+      }
       const u = JSON.parse(stored);
       if (u.role !== 'lab_member' && u.role !== 'lab_mem') {
-        router.replace(roleHome(u.role)); return;
-      }      setAuth({ user: u, ok: true });
-    } catch { router.replace('/login'); }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+        router.replace(roleHome(u.role));
+        return;
+      }
+      setAuth({ user: u, ok: true });
+    } catch {
+      router.replace('/login');
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   if (!auth.ok) return null;
 
   const navigate = makeLabNavigate(router.push.bind(router));
   const currentPage = pathToLabPage(pathname);
-  const LAB_NAV = NAV_ITEMS.map(n => ({ ...n, id: 'lab_' + n.id }));
+  const LAB_NAV = NAV_ITEMS.map((n) => ({ ...n, id: 'lab_' + n.id }));
 
   const onLogout = () => {
     localStorage.removeItem(SESSION_KEY);

@@ -1,4 +1,4 @@
-"use client";
+'use client';
 import React, { useEffect, useState } from 'react';
 import { useRouter, usePathname } from 'next/navigation';
 import Sidebar from '@/components/Shell/Sidebar';
@@ -11,10 +11,10 @@ import api from '@/lib/api';
 
 function pathToFabPage(pathname: string): string {
   if (pathname.startsWith('/fab/requests/new')) return 'fab_new';
-  if (pathname.startsWith('/fab/requests/'))   return 'fab_requests';
-  if (pathname.startsWith('/fab/requests'))    return 'fab_requests';
-  if (pathname.startsWith('/fab/drafts/'))     return 'fab_drafts';
-  if (pathname.startsWith('/fab/drafts'))      return 'fab_drafts';
+  if (pathname.startsWith('/fab/requests/')) return 'fab_requests';
+  if (pathname.startsWith('/fab/requests')) return 'fab_requests';
+  if (pathname.startsWith('/fab/drafts/')) return 'fab_drafts';
+  if (pathname.startsWith('/fab/drafts')) return 'fab_drafts';
   return 'fab_dashboard';
 }
 
@@ -34,11 +34,20 @@ export default function FabLayout({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     try {
       const stored = localStorage.getItem(SESSION_KEY);
-      if (!stored) { router.replace('/login'); return; }
+      if (!stored) {
+        router.replace('/login');
+        return;
+      }
       const u = JSON.parse(stored);
-      if (u.role !== 'fab_user') { router.replace(roleHome(u.role)); return; }      setAuth({ user: u, ok: true });
-    } catch { router.replace('/login'); }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+      if (u.role !== 'fab_user') {
+        router.replace(roleHome(u.role));
+        return;
+      }
+      setAuth({ user: u, ok: true });
+    } catch {
+      router.replace('/login');
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   if (!auth.ok) return null;
