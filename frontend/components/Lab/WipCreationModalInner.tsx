@@ -17,7 +17,13 @@ import { lineSoft } from '@/lib/colors';
 import { accent } from '@/lib/colors';
 import TextArea from '@/components/Manager/TextArea';
 
-const WipCreationModalInner = ({ onClose, onSaved }) => {
+const WipCreationModalInner = ({
+  onClose,
+  onSaved,
+}: {
+  onClose: () => void;
+  onSaved?: (wip: Awaited<ReturnType<typeof api.wips.create>>) => void;
+}) => {
   const {
     experimentTypes,
     pickerSamples,
@@ -35,7 +41,7 @@ const WipCreationModalInner = ({ onClose, onSaved }) => {
     ? pickerSamples.filter((s) => (requestExpMap.get(s.requestId) || []).includes(experimentTypeId))
     : [];
   const capableEquipment = equipment.filter((e) =>
-    (e.capabilities || []).some((c) => c.id === experimentTypeId),
+    (e.capabilities || []).some((c: { id: number }) => c.id === experimentTypeId),
   );
   const maxBatch = capableEquipment.reduce((m, e) => Math.max(m, e.capacity || 0), 0);
   const biggest = capableEquipment.reduce(
@@ -46,7 +52,7 @@ const WipCreationModalInner = ({ onClose, onSaved }) => {
     const selectableIds = new Set(eligibleSamples.filter((s) => !s.blockReason).map((s) => s.id));
     setSelectedSampleIds((prev) => prev.filter((id) => selectableIds.has(id)));
   }, [experimentTypeId]);
-  const toggleSample = (id) => {
+  const toggleSample = (id: number) => {
     const s = pickerSamples.find((s) => s.id === id);
     if (s?.blockReason) return;
     setSelectedSampleIds((prev) => {
@@ -114,7 +120,9 @@ const WipCreationModalInner = ({ onClose, onSaved }) => {
           <FieldLabel required>Experiment Type</FieldLabel>
           <SelectInput
             value={experimentTypeId === '' ? '' : String(experimentTypeId)}
-            onChange={(e) => setExperimentTypeId(e.target.value ? Number(e.target.value) : '')}
+            onChange={(e: React.ChangeEvent<HTMLSelectElement>) =>
+              setExperimentTypeId(e.target.value ? Number(e.target.value) : '')
+            }
           >
             <option value="">— pick an experiment type —</option>
             {experimentTypes.map((t) => (
@@ -263,7 +271,7 @@ const WipCreationModalInner = ({ onClose, onSaved }) => {
           <FieldLabel>Note (optional)</FieldLabel>
           <TextArea
             value={note}
-            onChange={(e) => setNote(e.target.value)}
+            onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) => setNote(e.target.value)}
             placeholder="Anything the operator should know."
           />
         </div>

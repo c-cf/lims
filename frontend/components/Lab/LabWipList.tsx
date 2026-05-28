@@ -12,12 +12,15 @@ import Card from '@/components/Manager/Card';
 import findExp from '@/components/Lab/utils/findExp';
 import Pill from '@/components/Manager/Pill';
 import WipCreationModal from '@/components/Lab/WipCreationModal';
+import api from '@/lib/api';
+import type { Navigate, ShowToast } from '@/lib/types';
+type Wip = Awaited<ReturnType<typeof api.wips.list>>[number];
 const LF = I;
-const LabWipList = ({ navigate, showToast }) => {
+const LabWipList = ({ navigate, showToast }: { navigate: Navigate; showToast?: ShowToast }) => {
   const { wips, loading, error, refresh } = useLabWips();
   const [tab, setTab] = React.useState('active');
   const [modalOpen, setModalOpen] = React.useState(false);
-  const isWipActive = (w) => w.status !== 'completed' && w.status !== 'aborted';
+  const isWipActive = (w: Wip) => w.status !== 'completed' && w.status !== 'aborted';
   const filtered =
     tab === 'active'
       ? wips.filter(isWipActive)
@@ -26,7 +29,7 @@ const LabWipList = ({ navigate, showToast }) => {
         : wips;
   const openModal = () => setModalOpen(true);
   const closeModal = () => setModalOpen(false);
-  const onSaved = (newWip) => {
+  const onSaved = (newWip: Awaited<ReturnType<typeof api.wips.create>>) => {
     closeModal();
     showToast?.(`${newWip.code} created`);
     refresh();
@@ -128,7 +131,7 @@ const LabWipList = ({ navigate, showToast }) => {
               (w.experimentName
                 ? w.experimentName
                     .split(/\s+/)
-                    .map((t) => t[0])
+                    .map((t: string) => t[0])
                     .join('')
                     .slice(0, 4)
                     .toUpperCase()

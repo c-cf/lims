@@ -2,11 +2,14 @@
 import React from 'react';
 import api from '@/lib/api';
 
-const useDispatchCreationData = (experimentId) => {
-  const [equipment, setEquipment] = React.useState([]);
-  const [recipes, setRecipes] = React.useState([]);
+type Equipment = Awaited<ReturnType<typeof api.equipment.list>>[number];
+type Recipe = Awaited<ReturnType<typeof api.recipes.list>>[number];
+
+const useDispatchCreationData = (experimentId: number | string | null | undefined) => {
+  const [equipment, setEquipment] = React.useState<Equipment[]>([]);
+  const [recipes, setRecipes] = React.useState<Recipe[]>([]);
   const [loading, setLoading] = React.useState(true);
-  const [error, setError] = React.useState(null);
+  const [error, setError] = React.useState<string | null>(null);
   React.useEffect(() => {
     if (experimentId == null || !api) {
       setLoading(false);
@@ -15,8 +18,12 @@ const useDispatchCreationData = (experimentId) => {
     setLoading(true);
     Promise.all([api.equipment.list(), api.recipes.list()])
       .then(([eqs, recs]) => {
-        setEquipment(eqs.filter((e) => (e.capabilities || []).some((c) => c.id === experimentId)));
-        setRecipes(recs.filter((r) => r.experimentId === experimentId));
+        setEquipment(
+          eqs.filter((e: Equipment) =>
+            (e.capabilities || []).some((c: { id: number }) => c.id === experimentId),
+          ),
+        );
+        setRecipes(recs.filter((r: Recipe) => r.experimentId === experimentId));
         setError(null);
       })
       .catch((err) => setError(err.message || String(err)))

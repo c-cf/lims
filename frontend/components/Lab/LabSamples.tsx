@@ -15,13 +15,23 @@ import formatRemaining from '@/components/Lab/utils/formatRemaining';
 import REMAINING_STYLE from '@/components/Lab/constants/remainingStyle';
 import URGENCY_DAYS from '@/components/Lab/constants/urgencyDays';
 import Pill from '@/components/Manager/Pill';
+import type { Navigate, ShowToast } from '@/lib/types';
+type Wafer = Awaited<ReturnType<typeof api.samples.list>>[number] & { urgency: string };
 const LF = I;
-const LabSamples = ({ navigate, defaultTab = 'all', showToast }) => {
+const LabSamples = ({
+  navigate,
+  defaultTab = 'all',
+  showToast,
+}: {
+  navigate: Navigate;
+  defaultTab?: string;
+  showToast?: ShowToast;
+}) => {
   const { wafers, loading, error, refresh } = useLabSamples();
   const [tab, setTab] = React.useState(defaultTab);
   const [busyIds, setBusyIds] = React.useState(new Set());
   const [actionError, setActionError] = React.useState(null);
-  const runAction = async (id, op, label) => {
+  const runAction = async (id: number, op: () => Promise<unknown>, label: string) => {
     setBusyIds((prev) => new Set(prev).add(id));
     setActionError(null);
     try {
@@ -38,9 +48,9 @@ const LabSamples = ({ navigate, defaultTab = 'all', showToast }) => {
       });
     }
   };
-  const handleReceive = (w) =>
+  const handleReceive = (w: Wafer) =>
     runAction(w.id, () => api.samples.receive(w.id), `${w.wafer} received`);
-  const handleReject = (w) =>
+  const handleReject = (w: Wafer) =>
     runAction(w.id, () => api.samples.rejectReceiving(w.id, ''), `${w.wafer} rejected`);
   const handleBulkReceive = () => {
     wafers.filter((w) => w.status === 'incoming' && !busyIds.has(w.id)).forEach(handleReceive);
@@ -161,7 +171,7 @@ const LabSamples = ({ navigate, defaultTab = 'all', showToast }) => {
           list.map((w) => {
             const remaining = computeRemaining(w);
             const fmt = formatRemaining(remaining);
-            const style = REMAINING_STYLE[fmt.level];
+            const style = REMAINING_STYLE[fmt.level as keyof typeof REMAINING_STYLE];
             const showDot = fmt.level === 'overdue' || fmt.level === 'critical';
             const busy = busyIds.has(w.id);
             return (
@@ -237,9 +247,9 @@ const LabSamples = ({ navigate, defaultTab = 'all', showToast }) => {
                     <span style={{ fontFamily: 'var(--font-mono)' }}>{w.arrivedAt || '—'}</span>
                     <span>·</span>
                     <span>
-                      {URGENCY_DAYS[w.urgency] === 3
+                      {URGENCY_DAYS[w.urgency as keyof typeof URGENCY_DAYS] === 3
                         ? '3-day'
-                        : URGENCY_DAYS[w.urgency] === 7
+                        : URGENCY_DAYS[w.urgency as keyof typeof URGENCY_DAYS] === 7
                           ? '1-week'
                           : '2-week'}{' '}
                       window

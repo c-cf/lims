@@ -2,12 +2,26 @@
 import React from 'react';
 import api from '@/lib/api';
 
-const useLabDispatchDetail = (id) => {
-  const [d, setD] = React.useState(null);
-  const [recipeById, setRecipeById] = React.useState(new Map());
-  const [waferResults, setWaferResults] = React.useState([]);
+type Dispatch = Awaited<ReturnType<typeof api.dispatches.get>>;
+type WipDetail = Awaited<ReturnType<typeof api.wips.get>>;
+type SampleBrief = WipDetail['samples'][number];
+type SampleExperiment = Awaited<ReturnType<typeof api.samples.getExperiments>>[number];
+
+type WaferResult = {
+  sampleId: number;
+  wafer: string;
+  size: string;
+  verdict: string | null;
+  status: string | null;
+};
+type Recipe = Awaited<ReturnType<typeof api.recipes.list>>[number];
+
+const useLabDispatchDetail = (id: number | string | null | undefined) => {
+  const [d, setD] = React.useState<Dispatch | null>(null);
+  const [recipeById, setRecipeById] = React.useState<Map<number | string, Recipe>>(new Map());
+  const [waferResults, setWaferResults] = React.useState<WaferResult[]>([]);
   const [loading, setLoading] = React.useState(true);
-  const [error, setError] = React.useState(null);
+  const [error, setError] = React.useState<string | null>(null);
   const refresh = React.useCallback(() => {
     if (id == null || !api || !api.dispatches) {
       setLoading(false);
@@ -19,33 +33,38 @@ const useLabDispatchDetail = (id) => {
       try {
         const [dp, rs] = await Promise.all([
           api.dispatches.get(id),
-          api.recipes.list().catch(() => []),
+          api.recipes.list().catch((): Awaited<ReturnType<typeof api.recipes.list>> => []),
         ]);
         if (cancelled) return;
         setD(dp);
-        setRecipeById(new Map(rs.map((r) => [r.id, r])));
-        const wip = await api.wips.get(dp.wipId).catch(() => null);
+        setRecipeById(new Map(rs.map((r: Recipe) => [r.id, r])));
+        const wip = await api.wips.get(dp.wipId).catch((): WipDetail | null => null);
         if (cancelled) return;
-        const samples = wip?.samples || [];
+        const samples: SampleBrief[] = wip?.samples || [];
         const rollups = await Promise.all(
-          samples.map((s) =>
+          samples.map((s: SampleBrief) =>
             api.samples
               .getExperiments(s.id)
-              .then((rows) => ({ sample: s, rows }))
-              .catch(() => ({ sample: s, rows: [] })),
+              .then((rows: SampleExperiment[]) => ({ sample: s, rows }))
+              .catch((): { sample: SampleBrief; rows: SampleExperiment[] } => ({
+                sample: s,
+                rows: [],
+              })),
           ),
         );
         if (cancelled) return;
-        const wafers = rollups.map(({ sample, rows }) => {
-          const match = rows.find((r) => r.dispatchId === dp.id);
-          return {
-            sampleId: sample.id,
-            wafer: sample.wafer,
-            size: sample.size,
-            verdict: match?.verdict ?? null,
-            status: match?.status ?? null,
-          };
-        });
+        const wafers = rollups.map(
+          ({ sample, rows }: { sample: SampleBrief; rows: SampleExperiment[] }) => {
+            const match = rows.find((r: SampleExperiment) => r.dispatchId === dp.id);
+            return {
+              sampleId: sample.id,
+              wafer: sample.wafer,
+              size: sample.size,
+              verdict: match?.verdict ?? null,
+              status: match?.status ?? null,
+            };
+          },
+        );
         setWaferResults(wafers);
         setError(null);
       } catch (e) {

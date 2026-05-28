@@ -2,6 +2,8 @@
 import React from 'react';
 import * as I from '@/components/ui/I';
 import useLabEquipment from '@/components/Lab/hooks/useLabEquipment';
+import api from '@/lib/api';
+type Equipment = Awaited<ReturnType<typeof api.equipment.list>>[number];
 import Page from '@/components/Manager/Page';
 import { muted } from '@/lib/colors';
 import PrimaryBtn from '@/components/Manager/PrimaryBtn';
@@ -14,8 +16,17 @@ import Pill from '@/components/Manager/Pill';
 import { accent } from '@/lib/colors';
 import { bgSoft } from '@/lib/colors';
 import EquipmentModal from '@/components/Lab/EquipmentModal';
+import type { Navigate, ShowToast } from '@/lib/types';
 const LF = I;
-const LabEquipment = ({ navigate: _navigate, canManage = false, showToast }) => {
+const LabEquipment = ({
+  navigate: _navigate,
+  canManage = false,
+  showToast,
+}: {
+  navigate: Navigate;
+  canManage?: boolean;
+  showToast?: ShowToast;
+}) => {
   const { equipment, loading, error, refresh } = useLabEquipment();
   const [tab, setTab] = React.useState('all');
   const [modalOpen, setModalOpen] = React.useState(false);
@@ -24,7 +35,7 @@ const LabEquipment = ({ navigate: _navigate, canManage = false, showToast }) => 
     setEditing(null);
     setModalOpen(true);
   };
-  const openEdit = (e) => {
+  const openEdit = (e: Equipment) => {
     setEditing(e);
     setModalOpen(true);
   };
@@ -38,7 +49,7 @@ const LabEquipment = ({ navigate: _navigate, canManage = false, showToast }) => 
     showToast?.(wasEdit ? 'Equipment updated' : 'Equipment created');
     refresh();
   };
-  const counts = {
+  const counts: Record<string, number> = {
     all: equipment.length,
     idle: equipment.filter((e) => e.status === 'idle').length,
     maintenance: equipment.filter((e) => e.status === 'maintenance').length,
@@ -230,7 +241,7 @@ const LabEquipment = ({ navigate: _navigate, canManage = false, showToast }) => 
                     </div>
                     {e.capabilities && e.capabilities.length > 0 ? (
                       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
-                        {e.capabilities.map((c) => (
+                        {e.capabilities.map((c: { id: number; name?: string }) => (
                           <span
                             key={c.id}
                             style={{

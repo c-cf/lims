@@ -14,7 +14,28 @@ import { line } from '@/lib/colors';
 import { bgSoft } from '@/lib/colors';
 import { text2 } from '@/lib/colors';
 const LF = I;
-const NewEquipmentModal = ({ open, onClose, onSubmit, existingIds }) => {
+type NewEquipmentPayload = {
+  id: string;
+  name: string;
+  type: string;
+  model: string;
+  description: string;
+  capacity: number;
+  params: Record<string, string>;
+  status: string;
+  currentWipId: null;
+};
+const NewEquipmentModal = ({
+  open,
+  onClose,
+  onSubmit,
+  existingIds,
+}: {
+  open: boolean;
+  onClose: () => void;
+  onSubmit: (payload: NewEquipmentPayload) => void;
+  existingIds?: string[];
+}) => {
   const [name, setName] = React.useState('');
   const [type, setType] = React.useState(EXPERIMENTS[0].code);
   const [description, setDescription] = React.useState('');
@@ -31,9 +52,9 @@ const NewEquipmentModal = ({ open, onClose, onSubmit, existingIds }) => {
   const capNum = parseInt(capacity, 10);
   const idClash = existingIds && existingIds.includes(name.trim());
   const valid = name.trim().length > 0 && !idClash && capNum > 0;
-  const setRow = (i, field, val) =>
+  const setRow = (i: number, field: string, val: string) =>
     setParamRows((rs) => rs.map((r, j) => (j === i ? { ...r, [field]: val } : r)));
-  const removeRow = (i) =>
+  const removeRow = (i: number) =>
     setParamRows((rs) => (rs.length === 1 ? rs : rs.filter((_, j) => j !== i)));
   const addRow = () => setParamRows((rs) => [...rs, { key: '', value: '' }]);
   const handle = () => {
@@ -73,7 +94,7 @@ const NewEquipmentModal = ({ open, onClose, onSubmit, existingIds }) => {
           <FieldLabel required>Name</FieldLabel>
           <TextInput
             value={name}
-            onChange={(e) => setName(e.target.value)}
+            onChange={(e: React.ChangeEvent<HTMLInputElement>) => setName(e.target.value)}
             placeholder="e.g. QA-TCT-03"
             style={{ fontFamily: 'var(--font-mono)' }}
           />
@@ -87,7 +108,10 @@ const NewEquipmentModal = ({ open, onClose, onSubmit, existingIds }) => {
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
           <div>
             <FieldLabel required>Experiment</FieldLabel>
-            <SelectInput value={type} onChange={(e) => setType(e.target.value)}>
+            <SelectInput
+              value={type}
+              onChange={(e: React.ChangeEvent<HTMLSelectElement>) => setType(e.target.value)}
+            >
               {EXPERIMENTS.map((x) => (
                 <option key={x.id} value={x.code}>
                   {x.name} ({x.code})
@@ -102,7 +126,7 @@ const NewEquipmentModal = ({ open, onClose, onSubmit, existingIds }) => {
               min="1"
               step="1"
               value={capacity}
-              onChange={(e) => setCapacity(e.target.value)}
+              onChange={(e: React.ChangeEvent<HTMLInputElement>) => setCapacity(e.target.value)}
               placeholder="6"
               style={{ fontFamily: 'var(--font-mono)' }}
             />
@@ -114,7 +138,7 @@ const NewEquipmentModal = ({ open, onClose, onSubmit, existingIds }) => {
           <FieldLabel>Description</FieldLabel>
           <TextArea
             value={description}
-            onChange={(e) => setDescription(e.target.value)}
+            onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) => setDescription(e.target.value)}
             placeholder="Model name + any notes. First line becomes the card's model label."
           />
         </div>
@@ -156,13 +180,17 @@ const NewEquipmentModal = ({ open, onClose, onSubmit, existingIds }) => {
               >
                 <TextInput
                   value={row.key}
-                  onChange={(e) => setRow(i, 'key', e.target.value)}
+                  onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
+                    setRow(i, 'key', e.target.value)
+                  }
                   placeholder="key (e.g. max_temp)"
                   style={{ fontFamily: 'var(--font-mono)', fontSize: 12.5 }}
                 />
                 <TextInput
                   value={row.value}
-                  onChange={(e) => setRow(i, 'value', e.target.value)}
+                  onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
+                    setRow(i, 'value', e.target.value)
+                  }
                   placeholder="value (e.g. 125 °C)"
                   style={{ fontFamily: 'var(--font-mono)', fontSize: 12.5 }}
                 />

@@ -15,8 +15,9 @@ import { muted } from '@/lib/colors';
 import { lineSoft } from '@/lib/colors';
 import Pill from '@/components/Manager/Pill';
 import { accent } from '@/lib/colors';
+import type { Navigate } from '@/lib/types';
 const LF = I;
-const LabDashboard = ({ navigate }) => {
+const LabDashboard = ({ navigate }: { navigate: Navigate }) => {
   const {
     samples: liveSamples,
     wips: liveWips,
@@ -57,7 +58,7 @@ const LabDashboard = ({ navigate }) => {
     liveSamples.length === 0 &&
     liveWips.length === 0 &&
     liveDispatches.length === 0;
-  const v = (n) => (initialLoad ? '—' : n);
+  const v = (n: number) => (initialLoad ? '—' : n);
   const tiles = [
     {
       label: 'Incoming wafers',

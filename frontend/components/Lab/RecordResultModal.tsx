@@ -9,7 +9,26 @@ import { muted } from '@/lib/colors';
 import { ink } from '@/lib/colors';
 import TextArea from '@/components/Manager/TextArea';
 
-const RecordResultModal = ({ open, onClose, dispatch: _dispatch, waferResults = [], onSubmit }) => {
+type WaferResult = {
+  sampleId: number;
+  wafer: string;
+  size: string;
+  verdict: string | null;
+  status: string | null;
+};
+const RecordResultModal = ({
+  open,
+  onClose,
+  dispatch: _dispatch,
+  waferResults = [],
+  onSubmit,
+}: {
+  open: boolean;
+  onClose: () => void;
+  dispatch: unknown;
+  waferResults?: WaferResult[];
+  onSubmit: (payload: { comment: string }) => void;
+}) => {
   const [comment, setComment] = React.useState('');
   React.useEffect(() => {
     if (open) setComment('');
@@ -84,7 +103,7 @@ const RecordResultModal = ({ open, onClose, dispatch: _dispatch, waferResults = 
           <TextArea
             placeholder="Observations from the run (optional)"
             value={comment}
-            onChange={(e) => setComment(e.target.value)}
+            onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) => setComment(e.target.value)}
           />
           <div style={{ fontSize: 12, color: muted, marginTop: 6 }}>
             Per-wafer pass/fail is determined automatically — this is just for operator notes.

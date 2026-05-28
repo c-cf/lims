@@ -16,7 +16,16 @@ import TextInput from '@/components/Manager/TextInput';
 import { accent } from '@/lib/colors';
 import TextArea from '@/components/Manager/TextArea';
 
-const AddDispatchModalInner = ({ onClose, wip, onCreated }) => {
+type WipShape = { id: number; experimentId: number; experimentName?: string; sampleCount: number };
+const AddDispatchModalInner = ({
+  onClose,
+  wip,
+  onCreated,
+}: {
+  onClose: () => void;
+  wip: WipShape;
+  onCreated?: () => void;
+}) => {
   const {
     equipment,
     recipes,
@@ -52,7 +61,7 @@ const AddDispatchModalInner = ({ onClose, wip, onCreated }) => {
       setBusy(false);
     }
   };
-  const eqStatusChip = (e) => {
+  const eqStatusChip = (e: { status: string }) => {
     if (e.status === 'maintenance') {
       return (
         <span
@@ -153,7 +162,9 @@ const AddDispatchModalInner = ({ onClose, wip, onCreated }) => {
           <FieldLabel required>Equipment</FieldLabel>
           <SelectInput
             value={equipmentId === '' ? '' : String(equipmentId)}
-            onChange={(e) => setEquipmentId(e.target.value ? Number(e.target.value) : '')}
+            onChange={(e: React.ChangeEvent<HTMLSelectElement>) =>
+              setEquipmentId(e.target.value ? Number(e.target.value) : '')
+            }
           >
             <option value="">— pick equipment —</option>
             {equipment.map((e) => (
@@ -180,7 +191,9 @@ const AddDispatchModalInner = ({ onClose, wip, onCreated }) => {
           <FieldLabel required>Recipe</FieldLabel>
           <SelectInput
             value={recipeId === '' ? '' : String(recipeId)}
-            onChange={(e) => setRecipeId(e.target.value ? Number(e.target.value) : '')}
+            onChange={(e: React.ChangeEvent<HTMLSelectElement>) =>
+              setRecipeId(e.target.value ? Number(e.target.value) : '')
+            }
           >
             <option value="">— pick a recipe —</option>
             {recipes.map((r) => (
@@ -279,7 +292,7 @@ const AddDispatchModalInner = ({ onClose, wip, onCreated }) => {
             min="1"
             placeholder="Seconds — leave blank if unknown"
             value={duration}
-            onChange={(e) => setDuration(e.target.value)}
+            onChange={(e: React.ChangeEvent<HTMLInputElement>) => setDuration(e.target.value)}
           />
           <div style={{ display: 'flex', gap: 6, marginTop: 8, flexWrap: 'wrap' }}>
             {[
@@ -317,7 +330,7 @@ const AddDispatchModalInner = ({ onClose, wip, onCreated }) => {
           <FieldLabel>Note (optional)</FieldLabel>
           <TextArea
             value={note}
-            onChange={(e) => setNote(e.target.value)}
+            onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) => setNote(e.target.value)}
             placeholder="Anything the operator should know."
           />
         </div>
