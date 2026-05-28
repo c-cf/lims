@@ -2,8 +2,10 @@
 import React from 'react';
 import api from '@/lib/api';
 
+type Request = Awaited<ReturnType<typeof api.requests.list>>[number];
+
 const useMgrDashboardData = () => {
-  const [requests, setRequests] = React.useState([]);
+  const [requests, setRequests] = React.useState<Request[]>([]);
   const [equipmentCount, setEquipmentCount] = React.useState(0);
   const [loading, setLoading] = React.useState(true);
   const [error, setError] = React.useState(null);
@@ -13,7 +15,10 @@ const useMgrDashboardData = () => {
       return;
     }
     setLoading(true);
-    Promise.all([api.requests.list(), api.equipment.list().catch(() => [])])
+    Promise.all([
+      api.requests.list(),
+      api.equipment.list().catch((): Awaited<ReturnType<typeof api.equipment.list>> => []),
+    ])
       .then(([rs, eqs]) => {
         setRequests(rs);
         setEquipmentCount(eqs.length);

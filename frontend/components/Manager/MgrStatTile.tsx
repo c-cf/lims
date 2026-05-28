@@ -1,10 +1,25 @@
 'use client';
 import React from 'react';
+import type { ReactElement } from 'react';
 import { line as mLine } from '@/lib/colors';
 import { text2 as mText2 } from '@/lib/colors';
 import { ink as mInk } from '@/lib/colors';
 
-const MgrStatTile = ({ label, value, icon, tint, accent, onClick = undefined }) => (
+const MgrStatTile = ({
+  label,
+  value,
+  icon,
+  tint,
+  accent,
+  onClick = undefined,
+}: {
+  label: string;
+  value: string | number;
+  icon: ReactElement<{ color?: string; size?: number }>;
+  tint: string;
+  accent: string;
+  onClick?: () => void;
+}) => (
   <button
     onClick={onClick}
     disabled={!onClick}

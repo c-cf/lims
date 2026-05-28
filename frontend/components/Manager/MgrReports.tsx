@@ -5,21 +5,27 @@ import Page from '@/components/Manager/Page';
 import ReportCard from '@/components/Manager/ReportCard';
 const MI = I;
 const MgrReports = () => {
-  const equipmentReport = async ({ start, end }) => {
+  const equipmentReport = async ({ start, end }: { start: string; end: string }) => {
     const out = await api.reports.equipmentUtilization({
       period: 'custom',
       start_date: start,
       end_date: end,
     });
-    const totalWips = (out.data || []).reduce((s, e) => s + (e.wip_count || 0), 0);
-    const totalSamples = (out.data || []).reduce((s, e) => s + (e.sample_count || 0), 0);
+    const totalWips = (out.data || []).reduce(
+      (s: number, e: { wip_count?: number }) => s + (e.wip_count || 0),
+      0,
+    );
+    const totalSamples = (out.data || []).reduce(
+      (s: number, e: { sample_count?: number }) => s + (e.sample_count || 0),
+      0,
+    );
     return [
       { label: 'Units covered', value: (out.data || []).length },
       { label: 'Total WIPs', value: totalWips },
       { label: 'Sample runs', value: totalSamples },
     ];
   };
-  const requestReport = async ({ start, end }) => {
+  const requestReport = async ({ start, end }: { start: string; end: string }) => {
     const out = await api.reports.requestStatistics({ start_date: start, end_date: end });
     const dist = out.status_distribution || {};
     const approvedLike =

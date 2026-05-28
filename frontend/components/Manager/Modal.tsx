@@ -1,10 +1,25 @@
 'use client';
+import type { ReactNode } from 'react';
 import * as I from '@/components/ui/I';
 import { lineSoft as mLineSft } from '@/lib/colors';
 import { ink as mInk } from '@/lib/colors';
 import { muted as mMuted } from '@/lib/colors';
 const MI = I;
-const Modal = ({ open, onClose, title, children, width = 580, footer }) => {
+const Modal = ({
+  open,
+  onClose,
+  title,
+  children,
+  width = 580,
+  footer,
+}: {
+  open: boolean;
+  onClose: () => void;
+  title?: ReactNode;
+  children?: ReactNode;
+  width?: number;
+  footer?: ReactNode;
+}) => {
   if (!open) return null;
   return (
     <div

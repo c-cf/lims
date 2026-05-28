@@ -11,8 +11,9 @@ import { text2 as mText2 } from '@/lib/colors';
 import Card from '@/components/Manager/Card';
 import Pill from '@/components/Manager/Pill';
 import URGENCY_LABEL from '@/components/Manager/constants/urgencyLabel';
+import type { Navigate } from '@/lib/types';
 const MI = I;
-const MgrAllRequests = ({ navigate }) => {
+const MgrAllRequests = ({ navigate }: { navigate: Navigate }) => {
   const { data: requests, loading, error } = useMgrRequests();
   const [tab, setTab] = React.useState('pending');
   const nonDraftRequests = React.useMemo(
@@ -202,49 +203,56 @@ const MgrAllRequests = ({ navigate }) => {
                 </div>
                 {}
                 <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
-                  {(r.experiment_types || []).map((e) => {
-                    const cat = e.lab_category || e.labCategory || '';
-                    const isRA = cat === 'RA';
-                    const code = e.name
-                      ? e.name
-                          .split(/\s+/)
-                          .map((t) => t[0])
-                          .join('')
-                          .slice(0, 4)
-                          .toUpperCase()
-                      : '—';
-                    return (
-                      <span
-                        key={e.id}
-                        style={{
-                          display: 'inline-flex',
-                          alignItems: 'center',
-                          gap: 6,
-                          padding: '4px 9px 4px 4px',
-                          borderRadius: 999,
-                          background: '#f5f5fa',
-                          border: `1px solid ${mLine}`,
-                        }}
-                      >
+                  {(r.experiment_types || []).map(
+                    (e: {
+                      id: number;
+                      name: string;
+                      lab_category?: string;
+                      labCategory?: string;
+                    }) => {
+                      const cat = e.lab_category || e.labCategory || '';
+                      const isRA = cat === 'RA';
+                      const code = e.name
+                        ? e.name
+                            .split(/\s+/)
+                            .map((t) => t[0])
+                            .join('')
+                            .slice(0, 4)
+                            .toUpperCase()
+                        : '—';
+                      return (
                         <span
+                          key={e.id}
                           style={{
-                            fontSize: 10,
-                            fontWeight: 700,
-                            padding: '2px 6px',
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: 6,
+                            padding: '4px 9px 4px 4px',
                             borderRadius: 999,
-                            background: isRA ? '#e8e7f6' : '#d4eaf0',
-                            color: isRA ? '#5550a0' : '#2a7a91',
-                            letterSpacing: '0.05em',
+                            background: '#f5f5fa',
+                            border: `1px solid ${mLine}`,
                           }}
                         >
-                          {code}
+                          <span
+                            style={{
+                              fontSize: 10,
+                              fontWeight: 700,
+                              padding: '2px 6px',
+                              borderRadius: 999,
+                              background: isRA ? '#e8e7f6' : '#d4eaf0',
+                              color: isRA ? '#5550a0' : '#2a7a91',
+                              letterSpacing: '0.05em',
+                            }}
+                          >
+                            {code}
+                          </span>
+                          <span style={{ fontSize: 12.5, color: mText2, fontWeight: 500 }}>
+                            {e.name}
+                          </span>
                         </span>
-                        <span style={{ fontSize: 12.5, color: mText2, fontWeight: 500 }}>
-                          {e.name}
-                        </span>
-                      </span>
-                    );
-                  })}
+                      );
+                    },
+                  )}
                 </div>
                 <Pill kind={r.urgency} mapping={URGENCY_LABEL} />
                 <Pill kind={r.status} />

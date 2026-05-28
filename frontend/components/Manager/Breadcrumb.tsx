@@ -5,7 +5,8 @@ import { muted as mMuted } from '@/lib/colors';
 import { accent as mAccent } from '@/lib/colors';
 import { text2 as mText2 } from '@/lib/colors';
 const MI = I;
-const Breadcrumb = ({ items }) => (
+type BreadcrumbItem = { label: string; onClick?: () => void };
+const Breadcrumb = ({ items }: { items: BreadcrumbItem[] }) => (
   <div
     style={{ display: 'inline-flex', alignItems: 'center', gap: 4, marginBottom: 14, fontSize: 13 }}
   >

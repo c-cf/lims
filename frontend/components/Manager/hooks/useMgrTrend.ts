@@ -2,8 +2,11 @@
 import React from 'react';
 import api from '@/lib/api';
 
+type TrendPoint = { date: string; count: number };
+type TrendData = { metric: string; days: number; points: TrendPoint[] };
+
 const useMgrTrend = (metric = 'requests_per_day', days = 30) => {
-  const [data, setData] = React.useState(null);
+  const [data, setData] = React.useState<TrendData | null>(null);
   const [loading, setLoading] = React.useState(true);
   const [error, setError] = React.useState(null);
   React.useEffect(() => {
@@ -15,7 +18,7 @@ const useMgrTrend = (metric = 'requests_per_day', days = 30) => {
     api.reports
       .trends({ metric, days })
       .then((d) => {
-        setData(d);
+        setData(d as TrendData);
         setError(null);
       })
       .catch((err) => setError(err.message || String(err)))

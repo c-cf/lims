@@ -19,13 +19,22 @@ import { bgSoft as mBgSoft } from '@/lib/colors';
 import { line as mLine } from '@/lib/colors';
 import { accent as mAccent } from '@/lib/colors';
 import ApprovalModal from '@/components/Manager/ApprovalModal';
+import type { Navigate, ShowToast } from '@/lib/types';
 const MI = I;
-const MgrRequestDetail = ({ id, navigate, showToast }) => {
+const MgrRequestDetail = ({
+  id,
+  navigate,
+  showToast,
+}: {
+  id: number | string | undefined;
+  navigate: Navigate;
+  showToast?: ShowToast;
+}) => {
   const { data: r, loading, error, refresh } = useMgrRequestDetail(id);
   const [modal, setModal] = React.useState(null);
   const [busy, setBusy] = React.useState(false);
   const [actionError, setActionError] = React.useState(null);
-  const runAction = async (op, label) => {
+  const runAction = async (op: () => Promise<unknown>, label: string) => {
     setBusy(true);
     setActionError(null);
     try {
@@ -74,7 +83,7 @@ const MgrRequestDetail = ({ id, navigate, showToast }) => {
     if (!window.confirm(`Mark "${r.title}" as complete? This closes the request.`)) return;
     runAction(() => api.requests.close(r.id), `#${r.id} closed`);
   };
-  const onSubmitModal = async (reason) => {
+  const onSubmitModal = async (reason: string) => {
     const action = modal;
     setModal(null);
     if (action === 'RETURN') {
@@ -251,13 +260,14 @@ const MgrRequestDetail = ({ id, navigate, showToast }) => {
         <CardHeader>Submission History</CardHeader>
         <div style={{ padding: '18px 24px', display: 'flex', flexDirection: 'column', gap: 14 }}>
           {r.history.map((h, i) => {
-            const c = {
+            const colorMap: Record<string, { dot: string; bg: string; fg: string }> = {
               SUBMIT: { dot: '#5550a0', bg: '#e8e7f6', fg: '#5550a0' },
               APPROVE: { dot: '#157a4a', bg: '#c8eedd', fg: '#157a4a' },
               REJECT: { dot: '#c0394a', bg: '#fde4e4', fg: '#c0394a' },
               RETURN: { dot: '#a73d56', bg: '#f9d7e0', fg: '#a73d56' },
               CANCEL: { dot: '#777788', bg: '#ebebf0', fg: '#5a5a6e' },
-            }[h.action] || { dot: '#a8a8b8', bg: '#f1f1f5', fg: '#5a5a6e' };
+            };
+            const c = colorMap[h.action] || { dot: '#a8a8b8', bg: '#f1f1f5', fg: '#5a5a6e' };
             return (
               <div
                 key={i}

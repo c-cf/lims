@@ -1,8 +1,15 @@
 'use client';
+import type { ReactNode, CSSProperties } from 'react';
 import { lineSoft as mLineSft } from '@/lib/colors';
 import { text2 as mText2 } from '@/lib/colors';
 
-const CardHeader = ({ children, style = undefined }) => (
+const CardHeader = ({
+  children,
+  style = undefined,
+}: {
+  children?: ReactNode;
+  style?: CSSProperties;
+}) => (
   <div
     style={{
       display: 'flex',

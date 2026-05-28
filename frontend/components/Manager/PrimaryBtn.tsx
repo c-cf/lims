@@ -1,4 +1,5 @@
 'use client';
+import type { ReactNode, CSSProperties } from 'react';
 import { ink as mInk } from '@/lib/colors';
 
 const PrimaryBtn = ({
@@ -9,6 +10,14 @@ const PrimaryBtn = ({
   danger = false,
   success = false,
   style = undefined,
+}: {
+  children?: ReactNode;
+  onClick?: () => void;
+  icon?: ReactNode;
+  disabled?: boolean;
+  danger?: boolean;
+  success?: boolean;
+  style?: CSSProperties;
 }) => {
   const bg = disabled ? '#dcdce3' : danger ? '#b9384a' : success ? '#2e6a47' : mInk;
   return (

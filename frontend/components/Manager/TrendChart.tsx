@@ -13,7 +13,11 @@ const TrendChart = () => {
   const { data: trend, loading, error } = useMgrTrend('requests_per_day', 30);
   const days = React.useMemo(() => {
     const points = trend?.points || [];
-    const arr = points.map((p) => ({ date: p.date, dispatches: p.count }));
+    const arr: { date: string; dispatches: number; utilization: number }[] = points.map((p) => ({
+      date: p.date,
+      dispatches: p.count,
+      utilization: 0,
+    }));
     for (let i = 0; i < arr.length; i++) {
       const prev = i > 0 ? arr[i - 1].dispatches : 0;
       arr[i].utilization = Math.min(100, (arr[i].dispatches * 0.6 + prev * 0.4) * 24);
@@ -68,15 +72,15 @@ const TrendChart = () => {
     PB = 36;
   const chartW = W - PL - PR;
   const chartH = H - PT - PB;
-  const x = (i) => PL + (days.length === 1 ? chartW / 2 : (i / (days.length - 1)) * chartW);
-  const yDispatch = (v) => PT + chartH - (v / maxDispatches) * chartH;
-  const yUtil = (v) => PT + chartH - (v / 100) * chartH;
-  const dispatchPts = days.map((d, i) => [x(i), yDispatch(d.dispatches)]);
-  const utilPts = days.map((d, i) => [x(i), yUtil(d.utilization)]);
+  const x = (i: number) => PL + (days.length === 1 ? chartW / 2 : (i / (days.length - 1)) * chartW);
+  const yDispatch = (v: number) => PT + chartH - (v / maxDispatches) * chartH;
+  const yUtil = (v: number) => PT + chartH - (v / 100) * chartH;
+  const dispatchPts = days.map((d, i) => [x(i), yDispatch(d.dispatches)] as [number, number]);
+  const utilPts = days.map((d, i) => [x(i), yUtil(d.utilization)] as [number, number]);
   const dispatchPath = smoothPath(dispatchPts);
   const utilPath = smoothPath(utilPts);
   const baselineY = PT + chartH;
-  const areaPath = (pts) =>
+  const areaPath = (pts: [number, number][]) =>
     pts.length
       ? smoothPath(pts) + ` L ${pts[pts.length - 1][0]},${baselineY} L ${pts[0][0]},${baselineY} Z`
       : '';
