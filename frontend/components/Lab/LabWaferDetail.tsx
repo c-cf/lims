@@ -1,4 +1,3 @@
-// @ts-nocheck
 "use client";
 import React from 'react';
 import api from '@/lib/api';
@@ -80,8 +79,8 @@ const LabWaferDetail=({id,navigate,showToast})=>{const{data,loading,error,refres
                 </div>
                 <Pill kind={wip.status}/>
               </button>
-              {wipDispatches.length>0&&<div style={{borderTop:`1px solid ${lineSoft}`}}>
-                  {wipDispatches.map(d=><button key={d.id}onClick={()=>navigate({page:'lab_dispatch_detail',id:d.id})}style={{display:'grid',gridTemplateColumns:'90px 1fr 130px',gap:12,alignItems:'center',width:'100%',padding:'12px 22px',borderTop:`1px solid ${lineSoft}`,background:'#fff',border:'none',cursor:'pointer',textAlign:'left',fontFamily:'inherit'}}>
+              {(wip.dispatches||[]).length>0&&<div style={{borderTop:`1px solid ${lineSoft}`}}>
+                  {(wip.dispatches||[]).map(d=><button key={d.id}onClick={()=>navigate({page:'lab_dispatch_detail',id:d.id})}style={{display:'grid',gridTemplateColumns:'90px 1fr 130px',gap:12,alignItems:'center',width:'100%',padding:'12px 22px',borderTop:`1px solid ${lineSoft}`,background:'#fff',border:'none',cursor:'pointer',textAlign:'left',fontFamily:'inherit'}}>
                       <span style={{fontFamily:'var(--font-mono)',fontSize:12.5,color:text2}}>{d.code}</span>
                       <span style={{fontSize:13,color:ink}}>{d.experimentName||'—'}</span>
                       <Pill kind={d.status}/>

@@ -1,4 +1,3 @@
-// @ts-nocheck
 "use client";
 import api from '@/lib/api';
 import * as I from '@/components/ui/I';

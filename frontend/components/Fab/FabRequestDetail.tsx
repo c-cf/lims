@@ -1,4 +1,3 @@
-// @ts-nocheck
 "use client";
 import React from 'react';
 import api from '@/lib/api';
@@ -99,7 +98,7 @@ const FabRequestDetail=({id,navigate,showToast})=>{const{data:r,loading,error,re
             Experiments by Wafer
           </PlainCardHeader>
           <div style={{padding:18,display:'flex',flexDirection:'column',gap:12,background:'#fafafd'}}>
-            {r.samples.map((s,si)=>{const rollup=expsBySample[s.id]||[];const rollupByExpId=new Map(rollup.map(row=>[row.experimentTypeId,row]));const total=exps.length;const doneCount=exps.filter(e=>rollupByExpId.get(e.id)?.status==='done').length;return<div key={si}style={{background:'#fff',borderRadius:12,border:'1px solid rgba(0,0,0,0.07)',overflow:'hidden'}}>
+            {r.samples.map((s,si)=>{const rollup=expsBySample[s.id]||[];const rollupByExpId=new Map<any,any>(rollup.map((row:any)=>[row.experimentTypeId,row]));const total=exps.length;const doneCount=exps.filter(e=>rollupByExpId.get(e.id)?.status==='done').length;return<div key={si}style={{background:'#fff',borderRadius:12,border:'1px solid rgba(0,0,0,0.07)',overflow:'hidden'}}>
                   <div style={{display:'grid',gridTemplateColumns:'200px 1fr 80px',alignItems:'center',gap:18,padding:'14px 18px'}}>
                     <div>
                       <div style={{display:'inline-flex',alignItems:'center',gap:8}}>

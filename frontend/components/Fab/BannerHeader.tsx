@@ -2,7 +2,7 @@
 import React from 'react';
 import { accent } from '@/lib/colors';
 
-const BannerHeader=({icon,title,count,accent,twinkle=true,right,accentLight})=><div style={{position:'relative',overflow:'hidden',padding:'20px 24px 18px',background:'#1e1e24',color:'#fff',display:'flex',alignItems:'center',justifyContent:'space-between',gap:16}}>
+const BannerHeader=({icon,title,count,accent,twinkle=true,right=undefined,accentLight=undefined})=><div style={{position:'relative',overflow:'hidden',padding:'20px 24px 18px',background:'#1e1e24',color:'#fff',display:'flex',alignItems:'center',justifyContent:'space-between',gap:16}}>
       {}
       <div style={{position:'absolute',inset:0,opacity:0.45,backgroundImage:'radial-gradient(rgba(255,255,255,0.05) 1px, transparent 1px)',backgroundSize:'14px 14px',pointerEvents:'none'}}/>
       {}

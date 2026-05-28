@@ -1,4 +1,3 @@
-// @ts-nocheck
 "use client";
 import TweakRow from '@/components/Tweaks/TweakRow';
 
