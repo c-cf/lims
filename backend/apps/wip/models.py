@@ -126,6 +126,15 @@ class Dispatch(models.Model):
         blank=True,
         help_text="預估執行秒數",
     )
+    auto_complete_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        help_text=(
+            "模擬機台預定完成時間 — start 進 running 時設為 now + 隨機 3~5 秒。"
+            "前端輪巡用 (auto_complete_at - now) 顯示倒數，到點自動完成；"
+            "與 completed_at（實際完成時間戳）刻意區分。"
+        ),
+    )
     dispatched_at = models.DateTimeField(null=True, blank=True)
     completed_at = models.DateTimeField(null=True, blank=True)
     created_by = models.ForeignKey(

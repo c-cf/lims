@@ -912,6 +912,65 @@ class TestDispatchStart:
         )
         assert resp.status_code == 403
 
+    def test_start_dispatch_sets_auto_complete_at_in_window(
+        self, client, auth_headers, lab_staff, dispatch
+    ):
+        """Starting a dispatch schedules auto-complete 3~5 s out.
+
+        The server decides the simulated machine run time once and
+        persists it; the SPA countdown reads it back rather than rolling
+        its own.
+        """
+        from datetime import timedelta
+
+        from django.utils import timezone
+
+        from apps.wip.services import (
+            AUTO_COMPLETE_MAX_SECONDS,
+            AUTO_COMPLETE_MIN_SECONDS,
+        )
+
+        before = timezone.now()
+        resp = client.post(
+            f"/api/dispatches/{dispatch.pk}/start/",
+            **auth_headers(lab_staff),
+        )
+        after = timezone.now()
+        assert resp.status_code == 200
+
+        dispatch.refresh_from_db()
+        assert dispatch.auto_complete_at is not None
+        # Lower bound: at least MIN seconds after the request started.
+        assert dispatch.auto_complete_at >= before + timedelta(
+            seconds=AUTO_COMPLETE_MIN_SECONDS
+        )
+        # Upper bound: at most MAX seconds after the request finished.
+        assert dispatch.auto_complete_at <= after + timedelta(
+            seconds=AUTO_COMPLETE_MAX_SECONDS
+        )
+
+    def test_start_dispatch_exposes_auto_complete_at(
+        self, client, auth_headers, lab_staff, dispatch
+    ):
+        """The start response (DispatchDetailOut) carries auto_complete_at."""
+        resp = client.post(
+            f"/api/dispatches/{dispatch.pk}/start/",
+            **auth_headers(lab_staff),
+        )
+        assert resp.status_code == 200
+        assert resp.json()["auto_complete_at"] is not None
+
+    def test_pending_dispatch_has_no_auto_complete_at(
+        self, client, auth_headers, lab_staff, dispatch
+    ):
+        """A dispatch that has not started yet has a null auto_complete_at."""
+        resp = client.get(
+            f"/api/dispatches/{dispatch.pk}/",
+            **auth_headers(lab_staff),
+        )
+        assert resp.status_code == 200
+        assert resp.json()["auto_complete_at"] is None
+
 
 @pytest.mark.django_db
 class TestDispatchUnload:
@@ -1831,3 +1890,102 @@ class TestAutomationEquipmentResult:
         assert rows.count() == 2
         for row in rows:
             assert row.verdict in ("pass", "fail")
+
+
+@pytest.mark.django_db
+class TestFinalizeDueDispatches:
+    """Time-based auto-completion: any RUNNING dispatch past its
+    auto_complete_at is finalised when a status API is read."""
+
+    def _set_deadline(self, dispatch, seconds_offset):
+        from datetime import timedelta
+
+        from django.utils import timezone
+
+        dispatch.auto_complete_at = timezone.now() + timedelta(seconds=seconds_offset)
+        dispatch.save(update_fields=["auto_complete_at"])
+
+    def test_overdue_running_dispatch_is_completed(self, running_dispatch):
+        from apps.wip.services import finalize_due_dispatches
+
+        self._set_deadline(running_dispatch, -1)
+        completed = finalize_due_dispatches()
+        assert running_dispatch.pk in completed
+        running_dispatch.refresh_from_db()
+        assert running_dispatch.status == DispatchStatus.COMPLETED
+        assert running_dispatch.completed_at is not None
+        assert hasattr(running_dispatch, "result")
+
+    def test_future_deadline_is_not_completed(self, running_dispatch):
+        from apps.wip.services import finalize_due_dispatches
+
+        self._set_deadline(running_dispatch, 60)
+        completed = finalize_due_dispatches()
+        assert running_dispatch.pk not in completed
+        running_dispatch.refresh_from_db()
+        assert running_dispatch.status == DispatchStatus.RUNNING
+
+    def test_running_without_deadline_is_not_touched(self, running_dispatch):
+        from apps.wip.services import finalize_due_dispatches
+
+        # auto_complete_at is None by default on the fixture.
+        assert running_dispatch.auto_complete_at is None
+        completed = finalize_due_dispatches()
+        assert running_dispatch.pk not in completed
+        running_dispatch.refresh_from_db()
+        assert running_dispatch.status == DispatchStatus.RUNNING
+
+    def test_idempotent_second_call_is_noop(self, running_dispatch):
+        from apps.wip.services import finalize_due_dispatches
+
+        self._set_deadline(running_dispatch, -1)
+        first = finalize_due_dispatches()
+        second = finalize_due_dispatches()
+        assert running_dispatch.pk in first
+        assert second == []
+
+    def test_get_dispatch_endpoint_reflects_elapsed_deadline(
+        self, client, auth_headers, lab_staff, running_dispatch
+    ):
+        """Reading dispatch detail finalises an overdue run server-side."""
+        self._set_deadline(running_dispatch, -1)
+        resp = client.get(
+            f"/api/dispatches/{running_dispatch.pk}/",
+            **auth_headers(lab_staff),
+        )
+        assert resp.status_code == 200
+        assert resp.json()["status"] == DispatchStatus.COMPLETED
+
+    def test_list_dispatches_endpoint_reflects_elapsed_deadline(
+        self, client, auth_headers, lab_staff, running_dispatch
+    ):
+        self._set_deadline(running_dispatch, -1)
+        resp = client.get("/api/dispatches/", **auth_headers(lab_staff))
+        assert resp.status_code == 200
+        row = next(r for r in resp.json() if r["id"] == running_dispatch.pk)
+        assert row["status"] == DispatchStatus.COMPLETED
+
+    def test_sample_experiments_endpoint_reflects_elapsed_deadline(
+        self, client, auth_headers, lab_staff, running_dispatch
+    ):
+        """The per-sample experiment rollup shows 'done' once the run's
+        deadline has elapsed, even without any explicit completion call."""
+        sample = running_dispatch.wip.samples.first()
+        assert sample is not None
+        self._set_deadline(running_dispatch, -1)
+        resp = client.get(
+            f"/api/samples/{sample.pk}/experiments",
+            **auth_headers(lab_staff),
+        )
+        assert resp.status_code == 200
+        rows = resp.json()
+        match = next(
+            (
+                r
+                for r in rows
+                if r["experiment_type"]["id"] == running_dispatch.experiment_type_id
+            ),
+            None,
+        )
+        assert match is not None
+        assert match["status"] == "done"
