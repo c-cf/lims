@@ -40,6 +40,44 @@ const LabDispatchDetail = ({
     const h = setInterval(() => setTick((t) => t + 1), 1000);
     return () => clearInterval(h);
   }, [d?.status]);
+  // Simulated machine auto-complete: the server stamped auto_complete_at
+  // (now + random 3~5 s) when the dispatch entered running. We arm a single
+  // timer for the exact remaining gap and fire the automation endpoint once
+  // it elapses — reopening the page mid-run recomputes the gap from the
+  // server time, and a past-due deadline fires immediately. The manual
+  // Unload → Record Result buttons stay available as the operator override;
+  // if they (or another tab) win the race, the server 400s this call and we
+  // just resync.
+  const autoFiredRef = React.useRef<Set<number | string>>(new Set());
+  // Key the effect on stable primitives, not the `d` object — the hook
+  // rebuilds `d` on every render (incl. each 1s tick above), so depending on
+  // `d` would needlessly re-arm the timer every second.
+  const dispatchId = d?.id;
+  const dispatchStatus = d?.status;
+  const autoCompleteAtIso = d?.autoCompleteAtIso;
+  React.useEffect(() => {
+    if (dispatchId == null || dispatchStatus !== 'running' || !autoCompleteAtIso) return;
+    if (autoFiredRef.current.has(dispatchId)) return;
+    const remainMs = new Date(autoCompleteAtIso).getTime() - Date.now();
+    let cancelled = false;
+    const timer = setTimeout(
+      async () => {
+        if (cancelled || autoFiredRef.current.has(dispatchId)) return;
+        autoFiredRef.current.add(dispatchId);
+        try {
+          await api.dispatches.autoComplete(dispatchId);
+        } catch {
+          // Beaten by a manual completion / another tab — resync below.
+        }
+        if (!cancelled) refresh();
+      },
+      Math.max(0, remainMs),
+    );
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [dispatchId, dispatchStatus, autoCompleteAtIso, refresh]);
   const [recordOpen, setRecordOpen] = React.useState(false);
   const [exceptionOpen, setExceptionOpen] = React.useState(false);
   const [exceptionNote, setExceptionNote] = React.useState('');
@@ -311,11 +349,19 @@ const LabDispatchDetail = ({
         {d.status === 'running' &&
           d.dispatchedAtIso &&
           (() => {
-            const totalSec = d.estimatedDurationSeconds || 0;
             const startMs = new Date(d.dispatchedAtIso).getTime();
-            const elapsedSec = Math.max(0, (Date.now() - startMs) / 1000);
+            // Prefer the server's auto_complete_at deadline; fall back to the
+            // operator's estimate for legacy running rows with no deadline.
+            const endMs = d.autoCompleteAtIso
+              ? new Date(d.autoCompleteAtIso).getTime()
+              : d.estimatedDurationSeconds
+                ? startMs + d.estimatedDurationSeconds * 1000
+                : 0;
+            const nowMs = Date.now();
+            const totalSec = endMs > startMs ? (endMs - startMs) / 1000 : 0;
+            const elapsedSec = Math.max(0, (nowMs - startMs) / 1000);
+            const remainSec = totalSec > 0 ? Math.max(0, (endMs - nowMs) / 1000) : 0;
             const pct = totalSec > 0 ? Math.min(100, (elapsedSec / totalSec) * 100) : 0;
-            const remainSec = Math.max(0, totalSec - elapsedSec);
             return (
               <div
                 style={{

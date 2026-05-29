@@ -1172,6 +1172,8 @@ export interface components {
          * @description Brief dispatch info nested in WIP responses.
          */
         DispatchBriefOut: {
+            /** Auto Complete At */
+            auto_complete_at: string | null;
             /** Completed At */
             completed_at: string | null;
             /**
@@ -1205,6 +1207,8 @@ export interface components {
          * @description Output schema for dispatch detail responses.
          */
         DispatchDetailOut: {
+            /** Auto Complete At */
+            auto_complete_at: string | null;
             /** Completed At */
             completed_at: string | null;
             /**
@@ -1272,6 +1276,8 @@ export interface components {
          * @description Output schema for dispatch list responses.
          */
         DispatchListOut: {
+            /** Auto Complete At */
+            auto_complete_at: string | null;
             /** Completed At */
             completed_at: string | null;
             /**

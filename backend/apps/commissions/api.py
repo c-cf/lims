@@ -72,6 +72,19 @@ def _is_lab_manager(request: HttpRequest) -> bool:
     return _get_user_role(request) == Role.LAB_MANAGER
 
 
+def _finalize_due_dispatches() -> None:
+    """Materialise any simulated-machine runs past their auto_complete_at.
+
+    Called at the top of status-reporting reads so request / sample /
+    experiment state reflects the machine "finishing" even when no SPA
+    countdown fired the completion. Lazy import: apps.wip imports from
+    apps.commissions, so a top-level import here would be circular.
+    """
+    from apps.wip.services import finalize_due_dispatches
+
+    finalize_due_dispatches()
+
+
 def _request_detail_queryset() -> models.QuerySet[Request]:
     """Base queryset with all prefetches needed for RequestDetailOut."""
     return Request.objects.select_related("requester__profile").prefetch_related(
@@ -170,6 +183,7 @@ def list_requests(
     urgency: RequestUrgency | None = Query(None),  # noqa: B008
 ):
     """List commission requests. Fab users see only their own."""
+    _finalize_due_dispatches()
     qs = (
         Request.objects.select_related("requester__profile")
         .annotate(sample_count=Count("samples"))
@@ -236,6 +250,7 @@ def create_request(request: HttpRequest, payload: RequestIn):
 @router.get("/{request_id}", response={200: RequestDetailOut, 404: ErrorOut})
 def get_request(request: HttpRequest, request_id: int):
     """Get request detail with samples, experiment types, and approval logs."""
+    _finalize_due_dispatches()
     role = _get_user_role(request)
     req = _get_request_for_user(request_id, request.auth, role, prefetch=True)
     if req is None:
@@ -607,6 +622,8 @@ def list_samples(
     # imports from apps.commissions for state-machine helpers.
     from apps.wip.models import WIPSample, WIPStatus
 
+    _finalize_due_dispatches()
+
     active_wip_for_sample = WIPSample.objects.filter(
         sample=OuterRef("pk"),
         wip__status__in=[WIPStatus.CREATED, WIPStatus.IN_PROGRESS],
@@ -629,6 +646,7 @@ def list_samples(
 @sample_router.get("/{sample_id}", response={200: SampleDetailOut, 404: ErrorOut})
 def get_sample(request: HttpRequest, sample_id: int):
     """Get sample detail with request info."""
+    _finalize_due_dispatches()
     sample = _get_sample_for_user(sample_id, request)
     if sample is None:
         return 404, {"detail": "Not found"}
@@ -652,6 +670,11 @@ def sample_experiments(request: HttpRequest, sample_id: int):
     # Lazy imports to avoid a top-of-file circular dep: apps.wip
     # already imports from apps.commissions for state-machine helpers.
     from apps.wip.models import Dispatch, DispatchStatus
+
+    # Finish any elapsed simulated-machine run first, so the rollup below
+    # reads completed dispatches + their rolled verdicts rather than a
+    # stale "in_progress".
+    _finalize_due_dispatches()
 
     sample = _get_sample_for_user(sample_id, request)
     if sample is None:
@@ -828,6 +851,7 @@ def return_sample(request: HttpRequest, sample_id: int):
 )
 def get_sample_experiment_status(request: HttpRequest, sample_id: int):
     """Get experiment progress for a sample. Fab users see only their own samples."""
+    _finalize_due_dispatches()
     sample = _get_sample_for_user(sample_id, request)
     if sample is None:
         return 404, {"detail": "Not found"}

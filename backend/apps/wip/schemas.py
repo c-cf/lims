@@ -38,6 +38,7 @@ class DispatchBriefOut(Schema):
     recipe_name: str
     status: str
     estimated_duration_seconds: int | None
+    auto_complete_at: datetime | None
     dispatched_at: datetime | None
     completed_at: datetime | None
     created_at: datetime
@@ -204,6 +205,7 @@ class WIPDetailOut(Schema):
                     "recipe_name": d.recipe.name,
                     "status": d.status,
                     "estimated_duration_seconds": d.estimated_duration_seconds,
+                    "auto_complete_at": d.auto_complete_at,
                     "dispatched_at": d.dispatched_at,
                     "completed_at": d.completed_at,
                     "created_at": d.created_at,
@@ -269,6 +271,7 @@ class DispatchDetailOut(Schema):
     status: str
     note: str
     estimated_duration_seconds: int | None
+    auto_complete_at: datetime | None
     dispatched_at: datetime | None
     completed_at: datetime | None
     result: ExperimentResultOut | None
@@ -299,6 +302,7 @@ class DispatchDetailOut(Schema):
             "status": dispatch.status,
             "note": dispatch.note,
             "estimated_duration_seconds": dispatch.estimated_duration_seconds,
+            "auto_complete_at": dispatch.auto_complete_at,
             "dispatched_at": dispatch.dispatched_at,
             "completed_at": dispatch.completed_at,
             "result": result,
@@ -318,6 +322,7 @@ class DispatchListOut(Schema):
     recipe_id: int
     status: str
     estimated_duration_seconds: int | None
+    auto_complete_at: datetime | None
     dispatched_at: datetime | None
     completed_at: datetime | None
     created_by: RequesterOut | None
@@ -340,6 +345,7 @@ class DispatchListOut(Schema):
             "recipe_id": dispatch.recipe_id,
             "status": dispatch.status,
             "estimated_duration_seconds": dispatch.estimated_duration_seconds,
+            "auto_complete_at": dispatch.auto_complete_at,
             "dispatched_at": dispatch.dispatched_at,
             "completed_at": dispatch.completed_at,
             "created_by": _build_created_by(dispatch),

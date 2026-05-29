@@ -91,6 +91,7 @@ type DispatchInput = {
   completed_at: string | null;
   created_at: string;
   estimated_duration_seconds: number | null;
+  auto_complete_at?: string | null;
   wip_id?: number;
   note?: string;
   result?: Schemas['ExperimentResultOut'] | null;
@@ -330,6 +331,7 @@ function normalizeDispatch(d: DispatchInput) {
     completedAtIso: d.completed_at ?? null,
     created: formatTimestamp(d.created_at),
     estimatedDurationSeconds: d.estimated_duration_seconds ?? null,
+    autoCompleteAtIso: d.auto_complete_at ?? null,
     note: d.note ?? '',
     result: d.result
       ? {
@@ -869,21 +871,21 @@ const api = {
     },
     async start(id: number | string) {
       return normalizeDispatch(
-        await call(`/dispatches/${id}/start`, {
+        await call(`/dispatches/${id}/start/`, {
           method: 'POST',
         }),
       );
     },
     async unload(id: number | string) {
       return normalizeDispatch(
-        await call(`/dispatches/${id}/unload`, {
+        await call(`/dispatches/${id}/unload/`, {
           method: 'POST',
         }),
       );
     },
     async recordResult(id: number | string, { comment = '' }: { comment?: string } = {}) {
       return normalizeDispatch(
-        await call(`/dispatches/${id}/record-result`, {
+        await call(`/dispatches/${id}/record-result/`, {
           method: 'POST',
           body: {
             comment,
@@ -891,16 +893,33 @@ const api = {
         }),
       );
     },
+    // Simulated machine result: drives a DISPATCHED/RUNNING dispatch
+    // straight to COMPLETED (unload → record_result server-side). Fired
+    // by the SPA countdown when auto_complete_at elapses; the manual
+    // unload→recordResult path stays available as the operator override.
+    // Trailing slash required: the backend route is /automation/equipment-result/
+    // and APPEND_SLASH can't redirect a POST without dropping its body.
+    async autoComplete(id: number | string, { comment = '' }: { comment?: string } = {}) {
+      return normalizeDispatch(
+        await call(`/automation/equipment-result/`, {
+          method: 'POST',
+          body: {
+            dispatch_id: Number(id),
+            comment,
+          },
+        }),
+      );
+    },
     async complete(id: number | string) {
       return normalizeDispatch(
-        await call(`/dispatches/${id}/complete`, {
+        await call(`/dispatches/${id}/complete/`, {
           method: 'POST',
         }),
       );
     },
     async reportException(id: number | string, note: string = '') {
       return normalizeDispatch(
-        await call(`/dispatches/${id}/report-exception`, {
+        await call(`/dispatches/${id}/report-exception/`, {
           method: 'POST',
           body: {
             note,
@@ -910,14 +929,14 @@ const api = {
     },
     async redispatch(id: number | string) {
       return normalizeDispatch(
-        await call(`/dispatches/${id}/redispatch`, {
+        await call(`/dispatches/${id}/redispatch/`, {
           method: 'POST',
         }),
       );
     },
     async abort(id: number | string) {
       return normalizeDispatch(
-        await call(`/dispatches/${id}/abort`, {
+        await call(`/dispatches/${id}/abort/`, {
           method: 'POST',
         }),
       );

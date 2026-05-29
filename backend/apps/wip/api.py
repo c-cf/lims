@@ -43,8 +43,11 @@ from apps.wip.services import (
     cascade_sample_completion,
     cascade_samples_to_processing_exception,
     check_all_dispatches_done,
+    complete_dispatch_run,
     equipment_remaining_capacity,
+    finalize_due_dispatches,
     maybe_auto_complete_wip,
+    roll_auto_complete_at,
     transition_samples_to_processing,
     update_experiment_statuses_on_unload,
     validate_samples_for_wip,
@@ -102,6 +105,10 @@ def list_wips(
     """List WIPs. Lab staff and managers only."""
     if not has_lab_role(request):
         return 403, {"detail": "Permission denied"}
+
+    # Materialise any simulated-machine runs whose auto_complete_at has
+    # elapsed before reading, so WIP + nested dispatch statuses are current.
+    finalize_due_dispatches()
 
     qs = (
         WIP.objects.select_related("experiment_type")
@@ -163,6 +170,9 @@ def get_wip(request: HttpRequest, wip_id: int):
     """Get WIP detail with dispatches. Lab staff and managers only."""
     if not has_lab_role(request):
         return 403, {"detail": "Permission denied"}
+
+    # Reflect any elapsed auto-complete deadline before reading.
+    finalize_due_dispatches()
 
     try:
         wip = _wip_detail_queryset().get(pk=wip_id)
@@ -421,6 +431,9 @@ def list_dispatches(
     if not has_lab_role(request):
         return 403, {"detail": "Permission denied"}
 
+    # Reflect any elapsed auto-complete deadline before reading.
+    finalize_due_dispatches()
+
     qs = Dispatch.objects.select_related("created_by__profile").order_by("-created_at")
     if status:
         qs = qs.filter(status=status)
@@ -439,6 +452,9 @@ def get_dispatch(request: HttpRequest, dispatch_id: int):
     """Get dispatch detail. Lab staff and managers only."""
     if not has_lab_role(request):
         return 403, {"detail": "Permission denied"}
+
+    # Reflect any elapsed auto-complete deadline before reading.
+    finalize_due_dispatches()
 
     try:
         dispatch = _dispatch_detail_queryset().get(pk=dispatch_id)
@@ -478,6 +494,10 @@ def start_dispatch(request: HttpRequest, dispatch_id: int):
             return 400, {"detail": str(e)}
 
         dispatch.status = target
+        # Entering RUNNING starts the simulated machine clock: persist the
+        # scheduled auto-complete moment so the SPA countdown and any
+        # future headless sweep agree on a single server-decided time.
+        dispatch.auto_complete_at = roll_auto_complete_at()
         dispatch.save()
 
     dispatch = _dispatch_detail_queryset().get(pk=dispatch_id)
@@ -724,36 +744,15 @@ def submit_equipment_result(request: HttpRequest, payload: AutomationResultIn):
         except Dispatch.DoesNotExist:
             return 404, {"detail": "Dispatch not found"}
 
-        # Run state machine chain: (dispatched|running) → unloaded →
-        # completed. The verdict roll fires at the unload step (mirroring
-        # the manual flow), so it runs exactly once even though both
-        # transitions happen in this single call.
-        for action in ("unload", "record_result"):
-            try:
-                target = validate_dispatch_transition(dispatch.status, action)
-            except InvalidTransitionError as e:
-                return 400, {"detail": str(e)}
-            dispatch.status = target
-            if action == "unload":
-                # Persist the UNLOADED status before the cascade reads
-                # dispatch.status; the helper itself only cares about
-                # WIP × experiment_type, but a consistent on-disk row
-                # makes the transaction easier to reason about.
-                dispatch.save(update_fields=["status", "updated_at"])
-                update_experiment_statuses_on_unload(dispatch)
-
-        dispatch.completed_at = timezone.now()
-        dispatch.save()
-
-        ExperimentResult.objects.create(
-            dispatch=dispatch,
-            comment=payload.comment,
-            recorded_by=request.auth,
-        )
-
-        # Same auto-complete trigger as the manual record_result path.
-        wip = WIP.objects.select_for_update().get(pk=dispatch.wip_id)
-        maybe_auto_complete_wip(wip)
+        # Shared completion path: (dispatched|running) → unloaded → completed,
+        # verdict roll at unload, WIP cascade. Same helper the finalize sweep
+        # uses, so manual / automated / time-based all land identical state.
+        try:
+            complete_dispatch_run(
+                dispatch, comment=payload.comment, recorded_by=request.auth
+            )
+        except InvalidTransitionError as e:
+            return 400, {"detail": str(e)}
 
     dispatch = _dispatch_detail_queryset().get(pk=payload.dispatch_id)
     return 200, DispatchDetailOut.from_dispatch(dispatch)

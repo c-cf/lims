@@ -123,6 +123,18 @@
       "DispatchBriefOut": {
         "description": "Brief dispatch info nested in WIP responses.",
         "properties": {
+          "auto_complete_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Auto Complete At"
+          },
           "completed_at": {
             "anyOf": [
               {
@@ -206,6 +218,7 @@
           "recipe_name",
           "status",
           "estimated_duration_seconds",
+          "auto_complete_at",
           "dispatched_at",
           "completed_at",
           "created_at"
@@ -216,6 +229,18 @@
       "DispatchDetailOut": {
         "description": "Output schema for dispatch detail responses.",
         "properties": {
+          "auto_complete_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Auto Complete At"
+          },
           "completed_at": {
             "anyOf": [
               {
@@ -334,6 +359,7 @@
           "status",
           "note",
           "estimated_duration_seconds",
+          "auto_complete_at",
           "dispatched_at",
           "completed_at",
           "result",
@@ -383,6 +409,18 @@
       "DispatchListOut": {
         "description": "Output schema for dispatch list responses.",
         "properties": {
+          "auto_complete_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Auto Complete At"
+          },
           "completed_at": {
             "anyOf": [
               {
@@ -471,6 +509,7 @@
           "recipe_id",
           "status",
           "estimated_duration_seconds",
+          "auto_complete_at",
           "dispatched_at",
           "completed_at",
           "created_by",

@@ -10,7 +10,10 @@ on the WIP / Dispatch being mutated.
 """
 
 import random
+from datetime import datetime, timedelta
 
+from django.contrib.auth.models import User
+from django.db import transaction
 from django.utils import timezone
 
 from apps.commissions.models import Request, RequestStatus, Sample, SampleStatus
@@ -25,10 +28,15 @@ from apps.wip.models import (
     WIP,
     Dispatch,
     DispatchStatus,
+    ExperimentResult,
     SampleExperimentProgress,
     SampleExperimentStatus,
     SampleExperimentVerdict,
     WIPStatus,
+)
+from apps.wip.state_machine import (
+    InvalidTransitionError,
+    validate_dispatch_transition,
 )
 
 # Dispatch statuses with no further progression possible on this row.
@@ -52,10 +60,29 @@ TERMINAL_DISPATCH_STATUSES = frozenset(
 VERDICT_CHOICES = (SampleExperimentVerdict.PASS, SampleExperimentVerdict.FAIL)
 VERDICT_WEIGHTS = (0.8, 0.2)
 
+# Simulated machine run time: a dispatch entering RUNNING auto-completes
+# after a random delay in this window. Tunable in one place; tests pin the
+# range (or seed random). Floats so demo scenarios can run sub-second.
+AUTO_COMPLETE_MIN_SECONDS = 3.0
+AUTO_COMPLETE_MAX_SECONDS = 5.0
+
 
 def random_verdict() -> str:
     """Roll a per-wafer verdict — 80% pass / 20% fail."""
     return random.choices(VERDICT_CHOICES, weights=VERDICT_WEIGHTS, k=1)[0]
+
+
+def roll_auto_complete_at(now: datetime | None = None) -> datetime:
+    """Return the scheduled auto-complete moment for a dispatch entering
+    RUNNING: ``now`` + a random 3~5 s delay.
+
+    Decided once on the server and persisted to Dispatch.auto_complete_at
+    so every client (and any future headless sweep) agrees on the same
+    completion time — the frontend never invents it.
+    """
+    base = now if now is not None else timezone.now()
+    delay = random.uniform(AUTO_COMPLETE_MIN_SECONDS, AUTO_COMPLETE_MAX_SECONDS)
+    return base + timedelta(seconds=delay)
 
 
 def check_all_dispatches_done(wip: WIP) -> bool:
@@ -271,3 +298,95 @@ def update_experiment_statuses_on_unload(dispatch: Dispatch) -> None:
         row.save(update_fields=["status", "verdict", "dispatch", "updated_at"])
 
     cascade_sample_completion(sample_ids)
+
+
+def complete_dispatch_run(
+    dispatch: Dispatch,
+    *,
+    comment: str = "",
+    recorded_by: User | None = None,
+    now: datetime | None = None,
+) -> None:
+    """Drive a DISPATCHED/RUNNING dispatch straight to COMPLETED.
+
+    Runs the unload → record_result chain (rolling per-wafer verdicts at the
+    unload step), writes the ExperimentResult, stamps completed_at, and fires
+    the WIP-level auto-complete cascade. This is the single shared completion
+    path behind every channel — the automation endpoint, and the time-based
+    finalize sweep below — so they all produce identical state.
+
+    Caller must hold a select_for_update lock on ``dispatch`` inside an active
+    transaction. Raises InvalidTransitionError if ``dispatch`` is not in a
+    DISPATCHED/RUNNING state.
+    """
+    now = now or timezone.now()
+    for action in ("unload", "record_result"):
+        target = validate_dispatch_transition(dispatch.status, action)
+        dispatch.status = target
+        if action == "unload":
+            # Persist UNLOADED before the verdict roll reads dispatch.status,
+            # mirroring the manual flow so the roll fires exactly once.
+            dispatch.save(update_fields=["status", "updated_at"])
+            update_experiment_statuses_on_unload(dispatch)
+    dispatch.completed_at = now
+    dispatch.save()
+    ExperimentResult.objects.create(
+        dispatch=dispatch, comment=comment, recorded_by=recorded_by
+    )
+    wip = WIP.objects.select_for_update().get(pk=dispatch.wip_id)
+    maybe_auto_complete_wip(wip)
+
+
+def finalize_due_dispatches(now: datetime | None = None) -> list[int]:
+    """Auto-complete every RUNNING dispatch whose auto_complete_at has elapsed.
+
+    The simulated machine "finishes" at ``auto_complete_at``; this materialises
+    that on the server so the dispatch (and the sample / WIP / request state
+    that cascades from it) reads correctly from ANY status API, even when no
+    SPA countdown was open to fire the completion. Call it at the top of
+    status-reporting read endpoints.
+
+    Idempotent and cheap when nothing is due (one indexed query, no writes).
+    Each due dispatch is completed in its own locked transaction, then
+    re-checked under the row lock — so it is safe against the frontend timer,
+    a concurrent reader, or another finalize call racing to finish the same
+    run: the loser sees status != running (or a future deadline) and skips.
+    Returns the ids this call completed.
+    """
+    now = now or timezone.now()
+    due_ids = list(
+        Dispatch.objects.filter(
+            status=DispatchStatus.RUNNING,
+            auto_complete_at__isnull=False,
+            auto_complete_at__lte=now,
+        ).values_list("pk", flat=True)
+    )
+    completed: list[int] = []
+    for dispatch_id in due_ids:
+        with transaction.atomic():
+            try:
+                dispatch = (
+                    Dispatch.objects.select_for_update()
+                    .select_related("wip", "experiment_type")
+                    .get(pk=dispatch_id)
+                )
+            except Dispatch.DoesNotExist:
+                continue
+            # Re-check under the row lock — another channel may have finished
+            # this run between the unlocked filter above and acquiring the lock.
+            if (
+                dispatch.status != DispatchStatus.RUNNING
+                or dispatch.auto_complete_at is None
+                or dispatch.auto_complete_at > now
+            ):
+                continue
+            try:
+                complete_dispatch_run(
+                    dispatch,
+                    comment="Auto-completed by simulated machine timer.",
+                    now=now,
+                )
+            except InvalidTransitionError:
+                continue
+            completed.append(dispatch_id)
+    return completed
